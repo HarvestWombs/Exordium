@@ -7,8 +7,15 @@
  * `Projects/Exordium/Architecture/Layers.md`.
  */
 
-/** A file stack's layers, lowest first. */
-export type FileLayerRole = "core" | "mod" | "writable";
+/**
+ * A file stack's layers, lowest first:
+ *
+ * - `game` — the install's own archives (`d2data.mpq`, `d2exp.mpq` …), shared by every version.
+ * - `core` — one version's DLLs and `patch_d2.mpq` (1.07 … 1.13c).
+ * - `mod` — what a mod changes; a mod and its patch may be two such layers.
+ * - `writable` — what the game writes while it runs.
+ */
+export type FileLayerRole = "game" | "core" | "mod" | "writable";
 
 /** A registry stack's layers, lowest first. */
 export type RegistryLayerRole = "base" | "mod" | "profile" | "writable";

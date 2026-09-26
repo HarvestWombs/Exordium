@@ -98,6 +98,21 @@ Deno.test("layers must be in role order, with at most one writable layer, on top
   assertThrows(() => resolve(files(core, { ...core })), LayerError, "both");
   // Two mod layers together are fine: a mod and its patch.
   resolve(files(core, mod, { ...mod, id: "patch" }, writable));
+  // The install's own archives sit under every core.
+  const game: FileLayer = { id: "game", role: "game", entries: [{ path: "d2data.mpq", hash: HASH.core, size: 1 }] };
+  resolve(files(game, core, mod, writable));
+  assertThrows(() => resolve(files(core, game)), LayerError, "belongs under");
+});
+
+Deno.test("a core's own patch_d2.mpq replaces the install's, and a mod's replaces the core's", () => {
+  const game: FileLayer = {
+    id: "game",
+    role: "game",
+    entries: [{ path: "patch_d2.mpq", hash: HASH.save, size: 1 }, { path: "d2data.mpq", hash: HASH.save, size: 2 }],
+  };
+  const withPatch: FileLayer = { ...core, entries: [{ path: "Patch_D2.mpq", hash: HASH.coreDll, size: 3 }] };
+  const plan = resolve(files(game, withPatch));
+  assertEquals(plan.files.map((f) => [f.path, f.layer]), [["d2data.mpq", "game"], ["Patch_D2.mpq", "core-1.10f"]]);
 });
 
 Deno.test("a layer listing the same path twice, in any spelling, is refused", () => {

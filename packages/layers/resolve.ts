@@ -28,7 +28,7 @@ import {
 } from "./types.ts";
 import { ancestors, checkValue, keyMatch, normalizeKey, normalizePath, pathKey } from "./names.ts";
 
-const FILE_ORDER: Record<FileLayerRole, number> = { core: 0, mod: 1, writable: 2 };
+const FILE_ORDER: Record<FileLayerRole, number> = { game: 0, core: 1, mod: 2, writable: 3 };
 const REGISTRY_ORDER: Record<RegistryLayerRole, number> = { base: 0, mod: 1, profile: 2, writable: 3 };
 
 export function resolve(stack: Stack): Plan {
@@ -38,7 +38,7 @@ export function resolve(stack: Stack): Plan {
 }
 
 /**
- * Unique ids, roles in stack order (core below mod below writable; base below mod below profile
+ * Unique ids, roles in stack order (game below core below mod below writable; base below mod below profile
  * below writable), and a writable layer only at the top. Several `mod` or `core` layers may sit
  * together — a mod and its patch, say — but a role never appears below one that should sit under it.
  */
