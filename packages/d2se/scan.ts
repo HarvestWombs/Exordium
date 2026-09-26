@@ -60,6 +60,11 @@ export interface FolderScan {
   bytes: number;
   /** How many files were actually read to hash them; the rest reused a known hash. */
   hashed: number;
+  /**
+   * The mod's top-level `data` folder as spelled on disk, when `linkData` left it unwalked; else null.
+   * Its files are in no list above.
+   */
+  data: string | null;
 }
 
 export interface ScanOptions {
@@ -75,13 +80,32 @@ export interface ScanOptions {
    * rather than recording it, so reading every character file on every check would be wasted.
    */
   hashWritable?: boolean;
+  /**
+   * Hashes by full path, lowercased with `/` separators, shared by every folder one import reads.
+   * Checked after `known` with the same size-and-timestamp rule, and every file this scan hashes is
+   * recorded in it, so a caller that keeps it between runs reads only the files that changed.
+   */
+  cache?: Map<string, KnownFile>;
+  /**
+   * Leave a mod's top-level `data` folder unwalked and report only its name (`FolderScan.data`).
+   * The game reads loose files from `data\` beside Game.exe, and only with -direct, so a box links
+   * the folder whole rather than file by file; its files never need listing or hashing.
+   */
+  linkData?: boolean;
 }
 
 async function hashOrReuse(full: string, source: string, size: number, mtime: number | null, options: ScanOptions) {
   if (!options.hash) return { hash: null, read: false };
   const known = options.known?.get(source.toLowerCase());
   if (known && mtime !== null && known.mtime === mtime && known.size === size) return { hash: known.hash, read: false };
-  return { hash: await hashFile(full), read: true };
+  const key = full.replaceAll("\\", "/").toLowerCase();
+  const cached = options.cache?.get(key);
+  if (cached && mtime !== null && cached.mtime === mtime && cached.size === size) {
+    return { hash: cached.hash, read: false };
+  }
+  const hash = await hashFile(full);
+  if (mtime !== null) options.cache?.set(key, { size, mtime, hash });
+  return { hash, read: true };
 }
 
 export async function scanFolder(root: string, kind: FolderKind, options: ScanOptions): Promise<FolderScan> {
@@ -95,10 +119,18 @@ export async function scanFolder(root: string, kind: FolderKind, options: ScanOp
     folders: [],
     bytes: 0,
     hashed: 0,
+    data: null,
   };
   const folders = new Map<string, FolderSummary>();
+  const skip = kind === "mod" && options.linkData
+    ? (path: string) => {
+      if (path.toLowerCase() !== "data") return false;
+      scan.data = path;
+      return true;
+    }
+    : undefined;
 
-  for await (const found of walk(root)) {
+  for await (const found of walk(root, "", skip)) {
     if (found.link) {
       scan.excluded.push({ path: found.path, size: 0, reason: "a link or junction; not followed" });
       continue;
@@ -159,6 +191,26 @@ export async function scanNamed(root: string, names: readonly string[], options:
   return files.sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
 }
 
+/**
+ * Every file under one subfolder of `root`, found by name case-insensitively, with paths that keep
+ * the subfolder (`PlugY/PlugY.dll`). Links are skipped, as everywhere. Empty when it is absent.
+ */
+export async function scanTree(root: string, folder: string, options: ScanOptions): Promise<ScannedFile[]> {
+  let name: string | null = null;
+  for await (const entry of Deno.readDir(root)) {
+    if (entry.isDirectory && entry.name.toLowerCase() === folder.toLowerCase()) name = entry.name;
+  }
+  if (name === null) return [];
+  const files: ScannedFile[] = [];
+  for await (const found of walk(`${root}/${name}`)) {
+    if (found.link) continue;
+    const path = `${name}/${found.path}`;
+    const { hash } = await hashOrReuse(`${root}/${path}`, path, found.size, found.mtime, options);
+    files.push({ path, source: path, size: found.size, mtime: found.mtime, hash });
+  }
+  return files;
+}
+
 /** A layer from scanned files. Every file must have been hashed: a layer is identified by content. */
 export function toLayer(id: string, role: FileLayerRole, files: readonly ScannedFile[]): FileLayer {
   const entries: FileEntry[] = files.map((file) => {
@@ -187,19 +239,33 @@ interface Found {
  * Every file under `root`, depth first, in a stable order. Links and junctions are reported and
  * never followed: a junction inside a mod folder can point anywhere, including back up the tree.
  */
-async function* walk(root: string, prefix = ""): AsyncGenerator<Found> {
+async function* walk(root: string, prefix = "", skip?: (path: string) => boolean): AsyncGenerator<Found> {
   const entries: Deno.DirEntry[] = [];
   for await (const entry of Deno.readDir(prefix ? `${root}/${prefix}` : root)) entries.push(entry);
   entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  // A folder's files are stat'ed together rather than one by one: a mod's data tree runs to
+  // thousands of files, and one at a time that alone took most of a second.
+  const infos = new Map<string, Deno.FileInfo>();
+  const files = entries.filter((entry) => entry.isFile && !entry.isSymlink);
+  for (let i = 0; i < files.length; i += STAT_BATCH) {
+    await Promise.all(
+      files.slice(i, i + STAT_BATCH).map(async (entry) => {
+        infos.set(entry.name, await Deno.stat(`${root}/${prefix ? `${prefix}/` : ""}${entry.name}`));
+      }),
+    );
+  }
   for (const entry of entries) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isSymlink) {
       yield { path, size: 0, mtime: null, link: true };
     } else if (entry.isDirectory) {
-      yield* walk(root, path);
+      if (!skip?.(path)) yield* walk(root, path, skip);
     } else if (entry.isFile) {
-      const info = await Deno.stat(`${root}/${path}`);
+      const info = infos.get(entry.name)!;
       yield { path, size: info.size, mtime: info.mtime?.getTime() ?? null, link: false };
     }
   }
 }
+
+/** How many stats run at once. */
+const STAT_BATCH = 64;

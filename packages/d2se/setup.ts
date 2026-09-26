@@ -148,6 +148,8 @@ export function readModSetup(ini: Ini): ModSetup {
       homepage: iniText(ini, P, "ModHP"),
       board: iniText(ini, P, "ModBoard"),
       modable: iniFlag(ini, P, "Modable", false),
+      // Only forced when explicitly written. The stock D2SE template comments these keys out; treating
+      // comments as enabled makes table compiles look for loose txt files many MPQ-only mods do not ship.
       forceDirect: iniFlag(ini, P, "ModForceDirect", false),
       forceTxt: iniFlag(ini, P, "ModForceTxt", false),
       allowHardcore: iniFlag(ini, P, "ModAllowHC", true),
@@ -186,8 +188,8 @@ export interface LaunchSettings {
 
 /**
  * The rules D2SE's comments describe: `-direct`/`-txt` are the player's choice only when the mod
- * is `Modable`, and forced by `ModForceDirect`/`ModForceTxt` otherwise; hardcore and PlugY need
- * both the modder's permission and the player's checkbox.
+ * is `Modable`; otherwise only explicit `ModForceDirect=1` / `ModForceTxt=1` turns them on.
+ * Hardcore and PlugY need both the modder's permission and the player's checkbox.
  */
 export function launchSettings(setup: ModSetup): LaunchSettings {
   const { player, mod } = setup;

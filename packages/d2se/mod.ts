@@ -19,6 +19,7 @@ export {
   scanNamed,
   type ScannedFile,
   type ScanOptions,
+  scanTree,
   toLayer,
 } from "./scan.ts";
 export {
@@ -28,10 +29,13 @@ export {
   findD2SE,
   GAME_ARCHIVES,
   type ImportOptions,
+  INSTALL_FILES,
   type ModImport,
   modProblems,
+  PLUGY_FOLDER,
   type Problem,
   type ProblemLevel,
   readD2SE,
   readSetupFile,
+  RENDERER_WRAPPERS,
 } from "./install.ts";

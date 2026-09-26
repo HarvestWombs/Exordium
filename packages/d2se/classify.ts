@@ -61,9 +61,9 @@ export function classify(kind: FolderKind, path: string): Classification {
     if (["crashdump", "debug logs", ".excelsior-backups"].includes(top)) {
       return { kind: "excluded", reason: `"${segments[0]}" is written by tools, not shipped` };
     }
-    if (kind === "core" && ["backup", "documentation"].includes(top)) {
-      return { kind: "excluded", reason: `"${segments[0]}" is not part of the core` };
-    }
+    // A core is its own files, at its root, and nothing else: its subfolders (documentation, backups,
+    // a `data` folder left by testing) are not part of it. Its languages are handled above.
+    if (kind === "core") return { kind: "excluded", reason: `"${segments[0]}" is not part of the core` };
   }
 
   return { kind: "layer" };

@@ -67,6 +67,12 @@ ModAllowHC=0
 `));
   const settings = launchSettings(locked);
   assertEquals([settings.direct, settings.txt, settings.plugY, settings.hardcore], [false, true, false, false]);
+
+  // Not Modable and nothing said: player choices are ignored and force flags are off unless written.
+  const bare = launchSettings(readModSetup(parseIni("[USERSETTINGS]\nDirect=0\n[Protected]\nD2Core=1.10f\n")));
+  assertEquals([bare.direct, bare.txt], [false, false]);
+  const off = launchSettings(readModSetup(parseIni("[Protected]\nModable=0\nModForceDirect=0\nModForceTxt=0\n")));
+  assertEquals([off.direct, off.txt], [false, false]);
 });
 
 Deno.test("an empty setup gets the defaults the file's own comments state", () => {

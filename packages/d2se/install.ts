@@ -9,7 +9,32 @@
 
 import { decodeIni, parseIni } from "./ini.ts";
 import { type LauncherSettings, type ModSetup, readLauncherSettings, readModSetup } from "./setup.ts";
-import { type FolderScan, scanFolder, scanNamed, type ScannedFile, type ScanOptions } from "./scan.ts";
+import { type FolderScan, scanFolder, scanNamed, type ScannedFile, type ScanOptions, scanTree } from "./scan.ts";
+
+/**
+ * Renderer wrappers an install carries in its root: Sven's Glide wrapper and dgVoodoo here. D2SE.exe
+ * sits in the root, so Windows finds these by name for every mod; a mod's own wrapper (D2GL in The
+ * Black Soul) still wins, which the layers reproduce with mod over game. Only these names are taken:
+ * the root also holds a 1.13c set of game DLLs no box should see.
+ */
+export const RENDERER_WRAPPERS = [
+  "glide3x.dll",
+  "ddraw.dll",
+  "d3d8.dll",
+  "d3d9.dll",
+  "d3dimm.dll",
+  "dgvoodoo.conf",
+] as const;
+
+/**
+ * Other install files the game opens by name from its own folder. `D2.LNG` is a resource-only DLL of
+ * language strings: D2Client loads it with `LoadLibraryExA("D2.LNG", NULL, LOAD_LIBRARY_AS_DATAFILE)`
+ * when a game starts (1.10f D2Client+0x1260), and without it stops with "Unable to start LNG manager".
+ */
+export const INSTALL_FILES = ["d2.lng", "ijl11.dll", "binkw32.dll", "smackw32.dll"] as const;
+
+/** The install's PlugY folder, which D2SE falls back to for PlugY.dll; see `readD2SE`. */
+export const PLUGY_FOLDER = "PlugY";
 
 /** The archives a Diablo II install ships, shared by every version: the `game` layer. */
 export const GAME_ARCHIVES = [
@@ -94,8 +119,12 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
     wanted ? all.filter((name) => wanted.some((w) => w.toLowerCase() === name.toLowerCase())) : all;
 
   const launcherText = await readText(`${root}/D2SE.ini`);
-  const game = await scanNamed(root, GAME_ARCHIVES, options);
-  const present = new Set(game.map((f) => f.path.toLowerCase()));
+  const archives = await scanNamed(root, GAME_ARCHIVES, options);
+  const present = new Set(archives.map((f) => f.path.toLowerCase()));
+  // D2SE's "PlugY folder for a proper installed PlugY.dll": the PlugY a core without its own copy
+  // loads, and the folder PlugY reads its images from. It belongs with the install, so to the game layer.
+  const wrappers = await scanNamed(root, [...RENDERER_WRAPPERS, ...INSTALL_FILES], options);
+  const game = [...archives, ...wrappers, ...await scanTree(root, PLUGY_FOLDER, options)];
 
   const cores: CoreImport[] = [];
   for (const version of pick(layout.cores, options.cores)) {

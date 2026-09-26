@@ -19,6 +19,10 @@ Deno.test("classification: saves are the player's, D2SE's own files and logs sta
   assertEquals(classify("core", "D2Common.idb").kind, "excluded");
   assertEquals(classify("core", "save/Old.d2s").kind, "excluded");
   assertEquals(classify("core", "D2Game.dll"), { kind: "layer" });
+  // A core is its own root files and its languages, nothing else.
+  assertEquals(classify("core", "data/local/use").kind, "excluded");
+  assertEquals(classify("core", "Backup/D2Common.dll").kind, "excluded");
+  assertEquals(classify("core", "Language_KOR/KOR.mpq").kind, "language");
 });
 
 /** A small D2SE install on disk: one core, one mod, the root's archives. */
@@ -33,6 +37,14 @@ async function install(): Promise<string> {
   await write("d2data.mpq", "game data");
   await write("D2EXP.MPQ", "expansion data");
   await write("Game.exe", "1.14 game, not a layer");
+  await write("glide3x.dll", "the install's Glide wrapper");
+  await write("D2.LNG", "the install's language resources");
+  await write("ijl11.dll", "the install's jpeg library");
+  await write("binkw32.dll", "the install's bink library");
+  await write("SmackW32.dll", "the install's smack library");
+  await write("D2Client.dll", "a stray 1.13c DLL in the root, not a layer");
+  await write("PlugY/PlugY.dll", "the install's PlugY");
+  await write("PlugY/EmptyPage.dc6", "a PlugY image");
   await write("D2SE/CORES/1.10f/D2Game.dll", "stock 1.10f game");
   await write("D2SE/CORES/1.10f/Patch_D2.mpq", "stock 1.10f patch");
   await write("D2SE/CORES/1.10f/1.10f.7z", "archived core");
@@ -72,7 +84,18 @@ Deno.test("reading an install finds its cores, mods, archives and problems", asy
     assertEquals(found.layout.mods, ["Broken", "Core Fallback", "Own Language", "Test Mod"]);
     assertEquals(found.launcher?.activeFolder, "Test Mod");
     // Only the shared archives: Game.exe at the root is 1.14's and is no layer.
-    assertEquals(found.game.map((f) => f.path), ["d2data.mpq", "D2EXP.MPQ"]);
+    // The archives, the root's renderer wrappers and its PlugY folder; never the root's game DLLs.
+    assertEquals(found.game.map((f) => f.path), [
+      "d2data.mpq",
+      "D2EXP.MPQ",
+      "binkw32.dll",
+      "D2.LNG",
+      "glide3x.dll",
+      "ijl11.dll",
+      "SmackW32.dll",
+      "PlugY/EmptyPage.dc6",
+      "PlugY/PlugY.dll",
+    ]);
     assert(found.missingGameArchives.includes("d2char.mpq"));
 
     const core = found.cores.find((c) => c.version === "1.10f")!;
@@ -116,12 +139,19 @@ Deno.test("a hashed import stacks into a box: game, core, mod, saves", async () 
       registry: [],
     });
     assertEquals(plan.files.map((f) => [f.path, f.layer]), [
+      ["binkw32.dll", "game"],
+      ["D2.LNG", "game"],
       ["d2data.mpq", "game"],
       ["D2EXP.MPQ", "game"],
       ["D2Game.dll", "test-mod"],
       ["D2Mod.dll", "test-mod"],
+      ["glide3x.dll", "game"],
+      ["ijl11.dll", "game"],
       ["Patch_D2.mpq", "core-1.10f"],
+      ["PlugY/EmptyPage.dc6", "game"],
+      ["PlugY/PlugY.dll", "game"],
       ["save/Hero.d2s", "saves"],
+      ["SmackW32.dll", "game"],
       ["Test.mpq", "test-mod"],
     ]);
     // The hash is the file's real SHA-256.
@@ -141,4 +171,27 @@ Deno.test("a folder that is not a D2SE install reads as null", async () => {
   } finally {
     await Deno.remove(root, { recursive: true });
   }
+});
+
+Deno.test("hash cache: a second import reads nothing unchanged, and a changed file is read again", async () => {
+  const root = await install();
+  const cache = new Map();
+  const options = { hash: true, hashWritable: false, cores: ["1.10f"], mods: ["Core Fallback"], cache };
+  const first = await readD2SE(root, options);
+  assert(first);
+  // The core and the root both have files named alike; keyed by full path they stay apart.
+  assert(cache.has(`${root}/D2SE/CORES/1.10f/D2Game.dll`.replaceAll("\\", "/").toLowerCase()));
+  const size = cache.size;
+  assert(size > 0);
+
+  // A cached entry that no longer matches the file's size is not trusted.
+  const patch = `${root}/D2SE/CORES/1.10f/Patch_D2.mpq`;
+  await Deno.writeTextFile(patch, "a longer, changed 1.10f patch");
+  const second = await readD2SE(root, options);
+  assert(second);
+  const core = second.cores[0]!.scan;
+  assertEquals(core.hashed, 1);
+  assertEquals(core.layer.find((f) => f.path.toLowerCase() === "patch_d2.mpq")?.hash, await hashFile(patch));
+  assertEquals(cache.size, size);
+  await Deno.remove(root, { recursive: true });
 });
