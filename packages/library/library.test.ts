@@ -95,6 +95,25 @@ Deno.test("entries stack into a box: game, core, mod", async () => {
   }
 });
 
+Deno.test("a selected language overlays core and mod language folders", async () => {
+  const f = await fixture();
+  try {
+    await f.write("D2SE/CORES/1.10f/Language_ENG/ENG.mpq", "core english");
+    await f.write("MODS/Black Soul/Language_ENG/ENG.mpq", "mod english");
+    await f.write("MODS/Black Soul/Language_ENG/PlugY.dll", "language plugy");
+    const entries = await registered(f);
+
+    const plain = resolve({ files: entries.map(entryLayer), registry: [] });
+    assertEquals(plain.files.some((file) => file.path === "ENG.mpq"), false);
+
+    const english = resolve({ files: entries.map((entry) => entryLayer(entry, { language: "ENG" })), registry: [] });
+    assertEquals(english.files.filter((file) => file.path === "ENG.mpq").map((file) => file.role), ["mod"]);
+    assertEquals(english.files.filter((file) => file.path === "PlugY.dll").map((file) => file.role), ["mod"]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 Deno.test("the pre-launch check sees a modder's edits and re-reads only what changed", async () => {
   const f = await fixture();
   try {
