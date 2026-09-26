@@ -1,0 +1,6 @@
+; Import library for Storm.dll, so the loader imports it statically as Game.exe does.
+; Storm's DllMain builds its MPQ crypt table from the wrong seed when it is loaded dynamically
+; (lpReserved == NULL on attach, 1.10f Storm+0x2B260), and then no archive can be read.
+LIBRARY Storm.dll
+EXPORTS
+    SFileOpenArchive@16 @266 NONAME
