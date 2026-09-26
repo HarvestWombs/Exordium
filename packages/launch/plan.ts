@@ -1,0 +1,124 @@
+import { launchSettings, type ModSetup } from "@exordium/d2se";
+import type { Plan } from "@exordium/layers";
+import { gameExeVersion } from "./game-exe.ts";
+import type { ArchiveLoad, LaunchProblem, LoaderPlan, LoaderSettings, PluginLoad } from "./types.ts";
+
+const CLASSIC_ARCHIVES = ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"];
+const EXPANSION_ARCHIVES = ["d2exp.mpq", "d2Xmusic.mpq", "d2Xtalk.mpq", "d2Xvideo.mpq"];
+const GAME_DLLS = ["D2Launch.dll", "D2Client.dll", "D2Multi.dll"];
+
+export interface BuildLoaderPlanOptions {
+  /**
+   * Whether expansion archives are required. D2SE uses the expansion flag returned by game setup;
+   * Exordium defaults to the common Lord of Destruction path.
+   */
+  expansion?: boolean;
+}
+
+export function buildLoaderPlan(
+  plan: Plan,
+  setup: ModSetup,
+  options: BuildLoaderPlanOptions = {},
+): LoaderPlan {
+  const files = new Set(plan.files.map((file) => file.path.toLowerCase()));
+  const problems: LaunchProblem[] = [];
+  const has = (path: string) => files.has(path.replace(/\\/g, "/").toLowerCase());
+  const need = (path: string, why: string) => {
+    if (!has(path)) problems.push({ level: "error", message: `${why} needs ${path}, which is not in the box.` });
+  };
+
+  const archives: ArchiveLoad[] = [];
+  for (const path of CLASSIC_ARCHIVES) archives.push({ kind: "classic", path, priority: 1000, required: true });
+  if (options.expansion ?? true) {
+    for (const path of EXPANSION_ARCHIVES) archives.push({ kind: "expansion", path, priority: 3000, required: true });
+  }
+  if (setup.loads.patchD2) archives.push({ kind: "patch", path: "patch_d2.mpq", priority: 5000, required: true });
+
+  const [mpq1, mpq2, mpq3] = setup.loads.mpqs;
+  if (mpq1) archives.push({ kind: "mod", path: mpq1, priority: 6000, required: true });
+
+  const language = setup.player.language?.toUpperCase() ?? null;
+  if (language && language !== "MOD") {
+    archives.push({ kind: "language", path: `${language}.mpq`, priority: 7000, required: true });
+  }
+
+  if (mpq2) archives.push({ kind: "mod", path: mpq2, priority: 8000, required: true });
+  if (mpq3) archives.push({ kind: "mod", path: mpq3, priority: 9000, required: true });
+
+  for (const archive of archives) need(archive.path, `${archive.kind} archive load`);
+
+  const settings = launchSettings(setup);
+  const plugins: PluginLoad[] = [];
+  if (settings.plugY) {
+    // D2SE's order: a PlugY.dll the mod or core carries (the layers already put the mod's first), else
+    // the install's PlugY folder.
+    const path = !has("PlugY.dll") && has("PlugY/PlugY.dll") ? "PlugY/PlugY.dll" : "PlugY.dll";
+    plugins.push({ kind: "plugy", path, required: true, init: "_Init@4", release: "_Release@0" });
+  }
+  if (setup.loads.d2mod) {
+    plugins.push({ kind: "d2mod", path: "D2Mod.dll", required: true, init: 10000, release: 10001 });
+  }
+  if (setup.loads.nefex) plugins.push({ kind: "nefex", path: "Nefex.dll", required: true, init: null, release: null });
+  if (setup.loads.d2extra) {
+    plugins.push({ kind: "d2extra", path: "D2Extra.dll", required: true, init: null, release: null });
+  }
+  for (const [index, dll] of setup.loads.dlls.entries()) {
+    plugins.push({ kind: "custom", path: dll, required: true, init: null, release: null });
+    if (index > 2) {
+      problems.push({ level: "warning", message: `D2SE only loads ModDll1..3 here; ${dll} is beyond that range.` });
+    }
+  }
+  if (setup.loads.d2seUtility) {
+    plugins.push({ kind: "d2seUtility", path: "D2SE_Utility.dll", required: true, init: 10000, release: 10001 });
+  }
+  if (setup.loads.d2se && setup.loads.d2seDll) {
+    plugins.push({ kind: "d2seMod", path: setup.loads.d2seDll, required: true, init: 2, release: "ModRelease" });
+  }
+
+  for (const dll of GAME_DLLS) need(dll, "game DLL handoff");
+  for (const plugin of plugins) need(plugin.path, `${plugin.kind} plugin load`);
+
+  const exeVersion = gameExeVersion(setup.mod.core);
+  if (!exeVersion) {
+    problems.push({
+      level: "warning",
+      message: `The Game.exe version of core ${setup.mod.core ?? "(none)"} is not known; ` +
+        "plugins that check it, such as D2GL, will refuse to start.",
+    });
+  }
+
+  return {
+    settings,
+    commandLine: gameCommandLine(settings),
+    gameVersion: gameVersion(setup.mod.core),
+    gameExeVersion: exeVersion,
+    archives,
+    plugins,
+    gameDlls: GAME_DLLS,
+    problems,
+  };
+}
+
+/**
+ * The game's command line, from the player's D2SE settings. The renderer is always explicit, so the
+ * registry's `VideoConfig\Render` is never consulted. `WindowMode` means `-w` only for DirectDraw
+ * (the game's own GDI window). With Glide the window belongs to the wrapper, which is configured on
+ * its own terms; D2GL refuses to start when `-w` is passed at all. D3D and OpenGL have no windowed
+ * mode in these versions, as D2SE_SETUP.ini's own comment says.
+ */
+export function gameCommandLine(settings: LoaderSettings): string {
+  const renderer = { ddraw: "", d3d: "-d3d", opengl: "-opengl", glide: "-3dfx" }[settings.renderer];
+  return [
+    renderer,
+    settings.renderer === "ddraw" && settings.windowed ? "-w" : "",
+    settings.noSound ? "-ns" : "",
+    settings.direct ? "-direct" : "",
+    settings.txt ? "-txt" : "",
+  ].filter(Boolean).join(" ");
+}
+
+/** `1.10f` as Game.exe spells its own version for Fog: `v1.10`. */
+export function gameVersion(core: string | null | undefined): string | null {
+  const match = core?.trim().match(/^(\d+)\.(\d+)/);
+  return match ? `v${match[1]}.${match[2]}` : null;
+}
