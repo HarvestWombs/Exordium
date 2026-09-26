@@ -1,5 +1,9 @@
 node_modules/
+apps/desktop/dist/
+native/loader/build/
 .DS_Store
 Thumbs.db
 *.log
 coverage/
+scratch-ghidra/
+apps/desktop/Exordium/

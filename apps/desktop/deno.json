@@ -1,0 +1,22 @@
+{
+  "name": "@exordium/desktop",
+  "version": "0.1.0",
+  "exports": "./server.ts",
+  "tasks": {
+    "dev": "deno run -A dev.ts",
+    "build": "deno run -A npm:vite build",
+    "desktop": "deno task build && deno run -A package-app.ts"
+  },
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "deno.ns"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": ["npm:@types/react@19.0.0", "npm:@types/react-dom@19.0.0"]
+  },
+  "desktop": {
+    "app": {
+      "name": "Exordium",
+      "identifier": "dev.harvestlabs.exordium"
+    }
+  }
+}
