@@ -14,6 +14,7 @@ export {
   type FolderScan,
   type FolderSummary,
   hashFile,
+  type KnownFile,
   scanFolder,
   scanNamed,
   type ScannedFile,
@@ -32,4 +33,5 @@ export {
   type Problem,
   type ProblemLevel,
   readD2SE,
+  readSetupFile,
 } from "./install.ts";

@@ -13,9 +13,23 @@ import { classify, type FolderKind } from "./classify.ts";
 export interface ScannedFile {
   /** Relative, `/`-separated, as the layer will hold it. */
   path: string;
+  /**
+   * Relative to the scanned folder, as found. The same as `path` except for a language file, whose
+   * `path` is relative to its `Language_<code>` folder.
+   */
+  source: string;
   size: number;
+  /** Last modified, in milliseconds since the epoch; `null` where the filesystem does not say. */
+  mtime: number | null;
   /** Lowercase hex SHA-256, or `null` when the scan did not hash. */
   hash: string | null;
+}
+
+/** What a file looked like when it was last hashed, so an unchanged file need not be read again. */
+export interface KnownFile {
+  size: number;
+  mtime: number | null;
+  hash: string;
 }
 
 export interface ExcludedFile {
@@ -44,14 +58,44 @@ export interface FolderScan {
   /** Everything imported, per top-level folder, largest first — to spot a dev folder worth excluding. */
   folders: FolderSummary[];
   bytes: number;
+  /** How many files were actually read to hash them; the rest reused a known hash. */
+  hashed: number;
 }
 
 export interface ScanOptions {
   hash: boolean;
+  /**
+   * Hashes from an earlier scan, keyed by `source` lowercased. A file with the same size and a known,
+   * unchanged timestamp keeps its hash without being read — which is what makes checking a
+   * referenced mod before every launch cheap.
+   */
+  known?: ReadonlyMap<string, KnownFile>;
+  /**
+   * Hash the player's files (a mod's saves) too. Off for the library, which links a mod's save folder
+   * rather than recording it, so reading every character file on every check would be wasted.
+   */
+  hashWritable?: boolean;
+}
+
+async function hashOrReuse(full: string, source: string, size: number, mtime: number | null, options: ScanOptions) {
+  if (!options.hash) return { hash: null, read: false };
+  const known = options.known?.get(source.toLowerCase());
+  if (known && mtime !== null && known.mtime === mtime && known.size === size) return { hash: known.hash, read: false };
+  return { hash: await hashFile(full), read: true };
 }
 
 export async function scanFolder(root: string, kind: FolderKind, options: ScanOptions): Promise<FolderScan> {
-  const scan: FolderScan = { root, kind, layer: [], writable: [], languages: {}, excluded: [], folders: [], bytes: 0 };
+  const scan: FolderScan = {
+    root,
+    kind,
+    layer: [],
+    writable: [],
+    languages: {},
+    excluded: [],
+    folders: [],
+    bytes: 0,
+    hashed: 0,
+  };
   const folders = new Map<string, FolderSummary>();
 
   for await (const found of walk(root)) {
@@ -72,10 +116,17 @@ export async function scanFolder(root: string, kind: FolderKind, options: ScanOp
       scan.excluded.push({ path, size: found.size, reason: where.reason });
       continue;
     }
+    const skip = where.kind === "writable" && options.hashWritable === false;
+    const { hash, read } = skip
+      ? { hash: null, read: false }
+      : await hashOrReuse(`${root}/${found.path}`, path, found.size, found.mtime, options);
+    if (read) scan.hashed++;
     const file: ScannedFile = {
       path: where.kind === "language" ? where.path : path,
+      source: path,
       size: found.size,
-      hash: options.hash ? await hashFile(`${root}/${found.path}`) : null,
+      mtime: found.mtime,
+      hash,
     };
     if (where.kind === "layer") scan.layer.push(file);
     else if (where.kind === "writable") scan.writable.push(file);
@@ -100,8 +151,10 @@ export async function scanNamed(root: string, names: readonly string[], options:
   for await (const entry of Deno.readDir(root)) {
     if (!entry.isFile || !wanted.has(entry.name.toLowerCase())) continue;
     const full = `${root}/${entry.name}`;
-    const { size } = await Deno.stat(full);
-    files.push({ path: entry.name, size, hash: options.hash ? await hashFile(full) : null });
+    const info = await Deno.stat(full);
+    const mtime = info.mtime?.getTime() ?? null;
+    const { hash } = await hashOrReuse(full, entry.name, info.size, mtime, options);
+    files.push({ path: entry.name, source: entry.name, size: info.size, mtime, hash });
   }
   return files.sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
 }
@@ -126,6 +179,7 @@ interface Found {
   /** Relative to the walk's root, `/`-separated, spelled as on disk. */
   path: string;
   size: number;
+  mtime: number | null;
   link: boolean;
 }
 
@@ -140,12 +194,12 @@ async function* walk(root: string, prefix = ""): AsyncGenerator<Found> {
   for (const entry of entries) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isSymlink) {
-      yield { path, size: 0, link: true };
+      yield { path, size: 0, mtime: null, link: true };
     } else if (entry.isDirectory) {
       yield* walk(root, path);
     } else if (entry.isFile) {
-      const { size } = await Deno.stat(`${root}/${path}`);
-      yield { path, size, link: false };
+      const info = await Deno.stat(`${root}/${path}`);
+      yield { path, size: info.size, mtime: info.mtime?.getTime() ?? null, link: false };
     }
   }
 }

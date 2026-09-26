@@ -185,6 +185,12 @@ export function modProblems(
   return problems;
 }
 
+/** A mod folder's `D2SE_SETUP.ini`, read; `null` when it has none. */
+export async function readSetupFile(modFolder: string): Promise<ModSetup | null> {
+  const text = await readText(`${modFolder}/D2SE_SETUP.ini`);
+  return text === null ? null : readModSetup(parseIni(text));
+}
+
 async function folders(path: string): Promise<string[]> {
   const names: string[] = [];
   for await (const entry of Deno.readDir(path)) if (entry.isDirectory) names.push(entry.name);
