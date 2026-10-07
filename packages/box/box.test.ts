@@ -100,6 +100,22 @@ Deno.test("an unchanged plan reuses the box; a changed one rebuilds it", async (
   }
 });
 
+Deno.test("integrity check reports corrupt box files", async () => {
+  const f = await fixture();
+  try {
+    const s = await spec(f);
+    const box = await f.boxes.realise(s);
+    assertEquals((await f.boxes.verify(s)).ok, true);
+
+    await Deno.writeTextFile(`${box.folder}/Patch_D2.mpq`, "wrong patch");
+    const report = await f.boxes.verify(s);
+    assertEquals(report.ok, false);
+    assert(report.issues.some((issue) => issue.path === "Patch_D2.mpq" && issue.kind === "hash"));
+  } finally {
+    await f.cleanup();
+  }
+});
+
 Deno.test("a referenced mod is written through like D2SE writes it, and that is only reported", async () => {
   const f = await fixture();
   try {

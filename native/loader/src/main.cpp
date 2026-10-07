@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <cctype>
 #include <cstdio>
 #include <share.h>
 #include <cstdint>
@@ -13,21 +14,9 @@
 #include <string>
 #include <vector>
 
+#include "common.hpp"
+
 namespace {
-
-struct PluginLoad {
-    std::string kind;
-    std::string path;
-    std::string init;
-    std::string release;
-};
-
-struct ArchiveLoad {
-    std::string kind;
-    std::string path;
-    int priority = 0;
-    bool required = false;
-};
 
 struct Plan {
     std::string hive;
@@ -37,6 +26,12 @@ struct Plan {
     bool handoff = false;
     bool graphics = false;
     bool graphicsInit = false;
+    // Diagnostic: FOG_AsyncDataInitialize's argument. Game.exe passes TRUE; false tests whether a
+    // crash depends on Fog's background loading.
+    bool asyncData = true;
+    // Open the MPQ stack through D2Win (#10037, #10171, ARCHIVE_LoadMPQFile) as Game.exe and plugins
+    // do, rather than straight through Storm. 1.10 cores only; others keep the Storm path.
+    bool archivesViaD2Win = true;
     bool graphicsSurface = false;
     bool graphicsWrapper = false;
     bool graphicsWindow = false;
@@ -45,6 +40,8 @@ struct Plan {
     bool graphicsManual = false;
     // What Game.exe hands FOG_InitErrorMgr: "v<major>.<minor>" of the core, e.g. "v1.10".
     std::string gameVersion = "v1.10";
+    // The core as mods name it ("1.13d"), which picks the export ordinals (core_ordinals).
+    std::string core;
     // Diagnostic: MPQs to load the way plugins do (D2Win's ARCHIVE_LoadMPQFile, 1.10f only), then
     // files to open through Fog, logging each result.
     std::vector<std::string> probeMpqs;
@@ -296,196 +293,9 @@ struct D2GraphicsInterfaceProbe {
 
 using GetGraphicsInterfacePointer = D2GraphicsInterfaceProbe* (__fastcall*)();
 
-struct Log {
-    FILE* file = nullptr;
-
-    explicit Log(const char* path) {
-        file = _fsopen(path, "ab", _SH_DENYNO); // shared: a relaunched loader appends to the same log
-    }
-
-    ~Log() {
-        if (file) fclose(file);
-    }
-
-    void line(const char* text) {
-        SYSTEMTIME now{};
-        GetLocalTime(&now);
-        if (file) {
-            std::fprintf(
-                file,
-                "[%04u-%02u-%02u %02u:%02u:%02u] %s\r\n",
-                now.wYear,
-                now.wMonth,
-                now.wDay,
-                now.wHour,
-                now.wMinute,
-                now.wSecond,
-                text
-            );
-            std::fflush(file);
-        }
-    }
-
-    void line(const std::string& text) {
-        line(text.c_str());
-    }
-};
-
-std::string read_file(const char* path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return {};
-    std::ostringstream out;
-    out << input.rdbuf();
-    return out.str();
-}
-
-std::string trim(std::string value) {
-    while (!value.empty() && (value.front() == ' ' || value.front() == '\t' || value.front() == '\r' || value.front() == '\n')) {
-        value.erase(value.begin());
-    }
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r' || value.back() == '\n')) {
-        value.pop_back();
-    }
-    return value;
-}
-
-std::string unquote(std::string value) {
-    value = trim(value);
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-        value = value.substr(1, value.size() - 2);
-    }
-    return value;
-}
-
-std::vector<std::string> split_csv(std::string value) {
-    std::vector<std::string> result;
-    std::string current;
-    bool quoted = false;
-    for (char c : value) {
-        if (c == '"') {
-            quoted = !quoted;
-            current.push_back(c);
-        } else if (c == ',' && !quoted) {
-            result.push_back(unquote(current));
-            current.clear();
-        } else {
-            current.push_back(c);
-        }
-    }
-    if (!current.empty()) result.push_back(unquote(current));
-    return result;
-}
-
-std::string json_string(const std::string& text, const char* key) {
-    const std::string needle = std::string("\"") + key + "\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return {};
-    const size_t colon = text.find(':', found + needle.size());
-    if (colon == std::string::npos) return {};
-    const size_t first = text.find('"', colon + 1);
-    if (first == std::string::npos) return {};
-    std::string out;
-    for (size_t i = first + 1; i < text.size(); ++i) {
-        const char c = text[i];
-        if (c == '\\' && i + 1 < text.size()) {
-            out.push_back(text[++i]);
-            continue;
-        }
-        if (c == '"') return out;
-        out.push_back(c);
-    }
-    return {};
-}
-
-std::vector<std::string> json_string_array(const std::string& text, const char* key) {
-    const std::string needle = std::string("\"") + key + "\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return {};
-    const size_t open = text.find('[', found + needle.size());
-    const size_t close = text.find(']', open == std::string::npos ? found : open);
-    if (open == std::string::npos || close == std::string::npos) return {};
-    return split_csv(text.substr(open + 1, close - open - 1));
-}
-
-bool json_bool(const std::string& text, const char* key, bool fallback = false) {
-    const std::string needle = std::string("\"") + key + "\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return fallback;
-    const size_t colon = text.find(':', found + needle.size());
-    if (colon == std::string::npos) return fallback;
-    const size_t value = text.find_first_not_of(" \t\r\n", colon + 1);
-    if (value == std::string::npos) return fallback;
-    if (text.compare(value, 4, "true") == 0) return true;
-    if (text.compare(value, 5, "false") == 0) return false;
-    return fallback;
-}
-
-int json_int(const std::string& text, const char* key, int fallback = 0) {
-    const std::string needle = std::string("\"") + key + "\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return fallback;
-    const size_t colon = text.find(':', found + needle.size());
-    if (colon == std::string::npos) return fallback;
-    const size_t value = text.find_first_not_of(" \t\r\n", colon + 1);
-    if (value == std::string::npos) return fallback;
-    return std::strtol(text.c_str() + value, nullptr, 10);
-}
-
-std::vector<ArchiveLoad> json_archives(const std::string& text) {
-    std::vector<ArchiveLoad> archives;
-    const std::string needle = "\"archives\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return archives;
-    const size_t open = text.find('[', found + needle.size());
-    const size_t close = text.find(']', open == std::string::npos ? found : open);
-    if (open == std::string::npos || close == std::string::npos) return archives;
-    size_t at = open;
-    while (true) {
-        const size_t objectOpen = text.find('{', at);
-        if (objectOpen == std::string::npos || objectOpen > close) break;
-        const size_t objectClose = text.find('}', objectOpen);
-        if (objectClose == std::string::npos || objectClose > close) break;
-        const std::string object = text.substr(objectOpen, objectClose - objectOpen + 1);
-        archives.push_back({
-            json_string(object, "kind"),
-            json_string(object, "path"),
-            json_int(object, "priority", 0),
-            json_bool(object, "required", false),
-        });
-        at = objectClose + 1;
-    }
-    return archives;
-}
-
-std::vector<PluginLoad> json_plugins(const std::string& text) {
-    std::vector<PluginLoad> plugins;
-    const std::string needle = "\"plugins\"";
-    const size_t found = text.find(needle);
-    if (found == std::string::npos) return plugins;
-    const size_t open = text.find('[', found + needle.size());
-    const size_t close = text.find(']', open == std::string::npos ? found : open);
-    if (open == std::string::npos || close == std::string::npos) return plugins;
-    size_t at = open;
-    while (true) {
-        const size_t objectOpen = text.find('{', at);
-        if (objectOpen == std::string::npos || objectOpen > close) break;
-        const size_t objectClose = text.find('}', objectOpen);
-        if (objectClose == std::string::npos || objectClose > close) break;
-        const std::string object = text.substr(objectOpen, objectClose - objectOpen + 1);
-        plugins.push_back({
-            json_string(object, "kind"),
-            json_string(object, "path"),
-            json_string(object, "init"),
-            json_string(object, "release"),
-        });
-        at = objectClose + 1;
-    }
-    return plugins;
-}
-
 Plan read_plan(Log& log) {
     Plan plan;
-    const std::string text = read_file("exordium-loader.json");
+    const std::string text = read_file(env_path("EXORDIUM_LOADER_CONFIG", "exordium-loader.json").c_str());
     if (text.empty()) {
         log.line("No exordium-loader.json found; using diagnostic defaults.");
         plan.gameDlls = {"D2Launch.dll", "D2Client.dll", "D2Multi.dll"};
@@ -497,6 +307,8 @@ Plan read_plan(Log& log) {
     plan.handoff = json_bool(text, "handoff", false);
     plan.graphics = json_bool(text, "graphics", false);
     plan.graphicsInit = json_bool(text, "graphicsInit", false);
+    plan.asyncData = json_bool(text, "asyncData", true);
+    plan.archivesViaD2Win = json_bool(text, "archivesViaD2Win", true);
     plan.graphicsSurface = json_bool(text, "graphicsSurface", false);
     plan.graphicsWrapper = json_bool(text, "graphicsWrapper", false);
     plan.graphicsWindow = json_bool(text, "graphicsWindow", false);
@@ -506,6 +318,7 @@ Plan read_plan(Log& log) {
     plan.watchdogSeconds = json_int(text, "watchdogSeconds", 0);
     const std::string version = json_string(text, "gameVersion");
     if (!version.empty()) plan.gameVersion = version;
+    plan.core = json_string(text, "core");
     plan.archives = json_archives(text);
     plan.gameDlls = json_string_array(text, "gameDlls");
     plan.plugins = json_plugins(text);
@@ -580,22 +393,6 @@ void log_config(Log& log, const D2ConfigStrc& config, const Plan& plan) {
     if (!plan.commandLine.empty()) log.line("Command line flags: " + plan.commandLine);
 }
 
-std::string win_error(DWORD error) {
-    char* message = nullptr;
-    FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr,
-        error,
-        0,
-        reinterpret_cast<char*>(&message),
-        0,
-        nullptr
-    );
-    std::string result = message ? message : "unknown error";
-    if (message) LocalFree(message);
-    return trim(result);
-}
-
 HMODULE load_library(Log& log, const std::string& path) {
     log.line("Loading " + path);
     std::string native = path; // plans spell box paths with '/'; LoadLibrary documents '\' only
@@ -652,6 +449,34 @@ const CoreOrdinals kCore107To110 = {
     10000, 10001,
 };
 
+// Derived from each original Game.exe's import thunks. These builds predate D2SE's ordinal table;
+// 1.00-1.03 share imports, 1.04b-1.05b add a few Fog helpers but keep the same startup calls, and
+// 1.06/1.06b move the MPQ/startup helpers again. They still use D2Win #10000/#10001/#10002 and the
+// same D2Gfx setting exports visible in Game.exe's own startup.
+const CoreOrdinals kCore100To103 = {
+    "early Game.exe imports (1.00-1.03)",
+    0, 10017, 0, 10074, 10065, 10148, 10060, 0,
+    10000, 10001, 10002,
+    10000, 10001, 10013, 10017, 10020, 10022,
+    10000, 10001,
+};
+
+const CoreOrdinals kCore104To105 = {
+    "early Game.exe imports (1.04b-1.05b)",
+    0, 10017, 0, 10074, 10065, 10148, 10060, 0,
+    10000, 10001, 10002,
+    10000, 10001, 10013, 10017, 10020, 10022,
+    10000, 10001,
+};
+
+const CoreOrdinals kCore106 = {
+    "early Game.exe imports (1.06-1.06b)",
+    0, 10017, 0, 10060, 10065, 10148, 10213, 10074,
+    10000, 10001, 10002,
+    10000, 10001, 10013, 10017, 10020, 10022,
+    10000, 10001,
+};
+
 const CoreOrdinals kCore111 = {
     "D2SE slot 5 (1.11b)",
     10021, 10019, 10022, 10101, 10089, 10090, 10082, 10218,
@@ -676,14 +501,42 @@ const CoreOrdinals kCore113 = {
     10002, 10031,
 };
 
-const CoreOrdinals& core_ordinals(const std::string& gameVersion) {
+// Not in D2SE's table, which stops at 1.13c. Derived 2026-10-05 from Blizzard's 1.11 and 1.13d DLLs
+// by matching each function's code to 1.11b's and 1.13c's (the method reproduced every known 1.12a
+// and 1.13c ordinal first), and checked against what each version's own Game.exe imports. Fog's
+// ordinals did not change. Vault: Projects/Exordium/Architecture/Launcher.md, "Ordinals per core".
+const CoreOrdinals kCore111Original = {
+    "1.11 (derived)",
+    10021, 10019, 10022, 10101, 10089, 10090, 10082, 10218,
+    10052, 10126, 10115,
+    10000, 10050, 10062, 10015, 10053, 10025,
+    10043, 10041,
+};
+
+const CoreOrdinals kCore113d = {
+    "1.13d (derived)",
+    10021, 10019, 10022, 10101, 10089, 10090, 10082, 10218,
+    10071, 10129, 10132,
+    10000, 10050, 10068, 10008, 10071, 10065,
+    10023, 10024,
+};
+
+// By the exact core when the config names it (1.11 and 1.11b share "v1.11" but not ordinals), else
+// by gameVersion as before. 1.07 to 1.10f, 1.09 included, share one table (their Game.exe imports
+// are identical).
+const CoreOrdinals& core_ordinals(const std::string& core, const std::string& gameVersion) {
+    if (core == "1.00" || core == "1.01" || core == "1.02" || core == "1.03") return kCore100To103;
+    if (core == "1.04b" || core == "1.04c" || core == "1.05" || core == "1.05b") return kCore104To105;
+    if (core == "1.06" || core == "1.06b") return kCore106;
+    if (core == "1.11") return kCore111Original;
+    if (core == "1.13d") return kCore113d;
     if (gameVersion == "v1.11") return kCore111;
     if (gameVersion == "v1.12") return kCore112;
     if (gameVersion == "v1.13") return kCore113;
     return kCore107To110;
 }
 
-bool setup_fog(Log& log, const D2ConfigStrc& config, const std::string& gameVersion, const CoreOrdinals& ordinals, FogBootstrap& fog) {
+bool setup_fog(Log& log, const D2ConfigStrc& config, const std::string& gameVersion, const CoreOrdinals& ordinals, bool asyncData, FogBootstrap& fog) {
     fog.module = GetModuleHandleA("Fog.dll");
     if (!fog.module) fog.module = load_library(log, "Fog.dll");
     if (!fog.module) {
@@ -700,8 +553,7 @@ bool setup_fog(Log& log, const D2ConfigStrc& config, const std::string& gameVers
     const auto startupNoop = reinterpret_cast<FogNoArgsVoidPointer>(proc_by_ordinal(fog.module, ordinals.fogStartupNoop));
     const auto startupInit = reinterpret_cast<FogNoArgsIntPointer>(proc_by_ordinal(fog.module, ordinals.fogStartupInit));
 
-    if (!setLogPrefix || !initErrorMgr || !getSystemInfo || !mpqSetConfig || !asyncDataInitialize || !fog.asyncDataDestroy ||
-        !startupNoop || !startupInit) {
+    if (!initErrorMgr || !mpqSetConfig || !asyncDataInitialize || !fog.asyncDataDestroy) {
         log.line("Cannot bootstrap Fog: one or more early Fog exports were not found.");
         return false;
     }
@@ -709,31 +561,40 @@ bool setup_fog(Log& log, const D2ConfigStrc& config, const std::string& gameVers
     // Exactly Game.exe's GameInit (1.10f 0x401970, D2MOO source/Game/src/Main.cpp): the log prefix,
     // then the error manager, with no exception callback. This is where Fog starts validating its
     // critical sections; see critical_sections_have_debug_info.
-    setLogPrefix("D2");
+    if (setLogPrefix) setLogPrefix("D2");
+    else log.line("Fog has no mapped FOG_SetLogPrefix export for this core; continuing with Game.exe's early ABI.");
     initErrorMgr("Diablo II", nullptr, gameVersion.c_str(), TRUE);
     fog.processInitialized = true;
 
-    void* systemInfo = getSystemInfo();
-    if (!systemInfo) {
-        log.line("Cannot bootstrap Fog: FOG_GetSystemInfo is still null after FOG_InitErrorMgr.");
-        return false;
+    void* systemInfo = nullptr;
+    if (getSystemInfo) {
+        systemInfo = getSystemInfo();
+        if (!systemInfo) {
+            log.line("Cannot bootstrap Fog: FOG_GetSystemInfo is still null after FOG_InitErrorMgr.");
+            return false;
+        }
+    } else {
+        log.line("Fog has no mapped FOG_GetSystemInfo export for this core; continuing with Game.exe's early ABI.");
     }
-    const DWORD totalPhysicalMemoryMb = *reinterpret_cast<DWORD*>(static_cast<char*>(systemInfo) + 0x0C) / (1024 * 1024);
+    const DWORD totalPhysicalMemoryMb = systemInfo
+        ? *reinterpret_cast<DWORD*>(static_cast<char*>(systemInfo) + 0x0C) / (1024 * 1024)
+        : 0;
 
     const BOOL mpqConfigOk = mpqSetConfig(config.bDirect, FALSE);
-    asyncDataInitialize(TRUE);
+    asyncDataInitialize(asyncData ? TRUE : FALSE);
     fog.asyncInitialized = true;
-    startupNoop();
-    const int initResult = startupInit();
+    if (startupNoop) startupNoop();
+    const int initResult = startupInit ? startupInit() : 0;
 
     char buffer[160]{};
     std::snprintf(
         buffer,
         sizeof(buffer),
-        "Fog bootstrap ready: memory=%luMB MPQSetConfig=%u direct=%u async=1 init10218=%d",
+        "Fog bootstrap ready: memory=%luMB MPQSetConfig=%u direct=%u async=%u init10218=%d",
         static_cast<unsigned long>(totalPhysicalMemoryMb),
         static_cast<unsigned>(mpqConfigOk != FALSE),
         static_cast<unsigned>(config.bDirect),
+        static_cast<unsigned>(asyncData),
         initResult
     );
     log.line(buffer);
@@ -785,32 +646,6 @@ BOOL WINAPI offscreen_delete_dc(HDC dc) {
     return result;
 }
 
-// Points one import of `module` (by DLL and function name) at `replacement`. Only that module's own
-// calls change.
-bool patch_import(HMODULE module, const char* dll, const char* function, void* replacement) {
-    auto* base = reinterpret_cast<unsigned char*>(module);
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-    const IMAGE_DATA_DIRECTORY& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    if (!directory.VirtualAddress) return false;
-    for (auto* entry = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + directory.VirtualAddress); entry->Name; ++entry) {
-        if (_stricmp(reinterpret_cast<const char*>(base + entry->Name), dll) != 0 || !entry->OriginalFirstThunk) continue;
-        auto* names = reinterpret_cast<const IMAGE_THUNK_DATA32*>(base + entry->OriginalFirstThunk);
-        auto* slots = reinterpret_cast<IMAGE_THUNK_DATA32*>(base + entry->FirstThunk);
-        for (; names->u1.AddressOfData; ++names, ++slots) {
-            if (IMAGE_SNAP_BY_ORDINAL32(names->u1.Ordinal)) continue;
-            const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
-            if (std::strcmp(reinterpret_cast<const char*>(byName->Name), function) != 0) continue;
-            DWORD old = 0;
-            if (!VirtualProtect(&slots->u1.Function, sizeof(DWORD), PAGE_READWRITE, &old)) return false;
-            slots->u1.Function = static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(replacement));
-            VirtualProtect(&slots->u1.Function, sizeof(DWORD), old, &old);
-            return true;
-        }
-    }
-    return false;
-}
-
 void patch_glide_font(Log& log) {
     HMODULE glide = GetModuleHandleA("D2Glide.dll");
     if (!glide) glide = load_library(log, "D2Glide.dll");
@@ -818,6 +653,11 @@ void patch_glide_font(Log& log) {
     const bool create = patch_import(glide, "GDI32.dll", "CreateDCA", reinterpret_cast<void*>(offscreen_create_dc));
     const bool remove = patch_import(glide, "GDI32.dll", "DeleteDC", reinterpret_cast<void*>(offscreen_delete_dc));
     log.line(std::string("D2Glide font build redirected off-screen: CreateDCA ") + (create ? "yes" : "no") + ", DeleteDC " + (remove ? "yes" : "no"));
+}
+
+void allow_multiple_copies(Log& log, HMODULE d2gfx) {
+    const bool ok = patch_import(d2gfx, "USER32.dll", "FindWindowA", reinterpret_cast<void*>(find_window_allowing_copies));
+    log.line(ok ? "D2Gfx's one-copy check lets other copies run." : "D2Gfx's one-copy check was not found; a second copy may refuse to start.");
 }
 
 int render_mode(const D2ConfigStrc& config) {
@@ -1138,10 +978,15 @@ using FogFOpenFilePointer = BOOL (__fastcall*)(const char*, HANDLE*);
 using FogFCloseFilePointer = void (__fastcall*)(HANDLE);
 using D2WinLoadMpqPointer = void* (__fastcall*)(const char*, const char*, const char*, int, HANDLE, void*, int);
 
-void probe_files(Log& log, const Plan& plan, HMODULE fog, const std::vector<HANDLE>& archives) {
-    if (plan.probeMpqs.empty() && plan.probeFiles.empty()) return;
+// Runs after the gfx bootstrap has loaded D2Win: the archive stack opens before D2Win exists.
+void probe_mpqs(Log& log, const Plan& plan) {
     HMODULE d2win = GetModuleHandleA("D2Win.dll");
-    if (d2win && plan.gameVersion == "v1.10") {
+    if (plan.probeMpqs.empty()) return;
+    if (!d2win || plan.gameVersion != "v1.10") {
+        log.line("Probe: MPQ probes need D2Win loaded and a v1.10 core; skipped.");
+        return;
+    }
+    {
         const auto load = reinterpret_cast<D2WinLoadMpqPointer>(reinterpret_cast<uintptr_t>(d2win) + 0x12399);
         for (const std::string& mpq : plan.probeMpqs) {
             char cwd[MAX_PATH]{};
@@ -1153,6 +998,10 @@ void probe_files(Log& log, const Plan& plan, HMODULE fog, const std::vector<HAND
             log.line(buffer);
         }
     }
+}
+
+void probe_files(Log& log, const Plan& plan, HMODULE fog, const std::vector<HANDLE>& archives) {
+    if (plan.probeFiles.empty()) return;
     const auto open = reinterpret_cast<FogFOpenFilePointer>(proc_by_ordinal(fog, 10102));
     const auto close = reinterpret_cast<FogFCloseFilePointer>(proc_by_ordinal(fog, 10103));
     for (std::string file : plan.probeFiles) {
@@ -1200,6 +1049,7 @@ bool setup_gfx(
         log.line("Cannot bootstrap gfx: D2Win.dll or D2Gfx.dll did not load.");
         return false;
     }
+    allow_multiple_copies(log, gfx.d2gfx);
 
     const auto createWindow = reinterpret_cast<D2WinCreateWindowPointer>(proc_by_ordinal(gfx.d2win, ordinals.d2winCreateWindow));
     const auto initializeSpriteCache = reinterpret_cast<D2WinInitializeSpriteCachePointer>(proc_by_ordinal(gfx.d2win, ordinals.d2winInitializeSpriteCache));
@@ -1292,6 +1142,117 @@ void close_archives(Log& log, SFileCloseArchivePointer closeArchive, std::vector
     }
     if (!archives.empty()) log.line("MPQ archives closed.");
     archives.clear();
+}
+
+// ---- The MPQ stack through D2Win, as Game.exe opens it ----------------------------------------------
+//
+// Game.exe's GameStart (1.10f, D2MOO source/Game/src/Main.cpp) opens the archives with D2Win's
+// ARCHIVE_LoadArchives (#10037) and ARCHIVE_LoadExpansionArchives (#10171), which keep D2Win's own
+// handles; plugins open theirs with ARCHIVE_LoadMPQFile (D2Win+0x12399). Opening the same files
+// straight through Storm skipped all of that, and D2Tweaks, which opens its MPQ through D2Win, then
+// broke Storm's open-file list on entering a game (Synthesis). Everything D2Win does not open itself
+// (a mod's MPQs, the language MPQ) goes through ARCHIVE_LoadMPQFile, the plugins' path.
+// d2video.mpq is left alone: D2Win opens it itself (#10172) when a video plays.
+
+using D2WinLoadArchivesPointer = BOOL (__fastcall*)();
+using D2WinLoadExpansionArchivesPointer = BOOL (__fastcall*)(void*, void*, HANDLE, D2ConfigStrc*);
+using D2WinVoidPointer = void (__fastcall*)();
+using D2WinUnloadMpqPointer = void (__fastcall*)(void*);
+
+struct D2WinArchives {
+    HMODULE d2win = nullptr;
+    // D2ArchiveHandleStrc*, from ARCHIVE_LoadMPQFile; its first field is the Storm handle.
+    std::vector<void*> extras;
+};
+
+std::string lower_name(const std::string& path) {
+    std::string name = path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1);
+    for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return name;
+}
+
+// What #10037, #10171 and #10172 open by name.
+bool d2win_opens_itself(const std::string& path) {
+    static const char* names[] = {
+        "d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2delta.mpq", "d2kfixup.mpq", "patch_d2.mpq", "d2exp.mpq",
+        "d2char.mpq", "d2music.mpq", "d2xmusic.mpq", "d2xtalk.mpq", "d2xvideo.mpq", "d2video.mpq",
+    };
+    const std::string name = lower_name(path);
+    for (const char* known : names) {
+        if (name == known) return true;
+    }
+    return false;
+}
+
+void close_archives_d2win(Log& log, D2WinArchives& state) {
+    if (!state.d2win) return;
+    const auto unload = reinterpret_cast<D2WinUnloadMpqPointer>(reinterpret_cast<uintptr_t>(state.d2win) + 0x12548);
+    for (auto it = state.extras.rbegin(); it != state.extras.rend(); ++it) unload(*it);
+    const auto unloadExpansion = reinterpret_cast<D2WinVoidPointer>(proc_by_ordinal(state.d2win, 10173));
+    const auto freeArchives = reinterpret_cast<D2WinVoidPointer>(proc_by_ordinal(state.d2win, 10036));
+    if (unloadExpansion) unloadExpansion();
+    if (freeArchives) freeArchives();
+    state = {};
+    log.line("MPQ archives closed through D2Win.");
+}
+
+bool open_archives_d2win(Log& log, const Plan& plan, D2ConfigStrc& config, std::vector<HANDLE>& archives, D2WinArchives& state) {
+    HMODULE d2win = GetModuleHandleA("D2Win.dll");
+    if (!d2win) d2win = load_library(log, "D2Win.dll");
+    if (!d2win) {
+        log.line("Cannot open MPQs: D2Win.dll did not load.");
+        return false;
+    }
+    const auto loadArchives = reinterpret_cast<D2WinLoadArchivesPointer>(proc_by_ordinal(d2win, 10037));
+    const auto loadExpansion = reinterpret_cast<D2WinLoadExpansionArchivesPointer>(proc_by_ordinal(d2win, 10171));
+    const auto loadMpq = reinterpret_cast<D2WinLoadMpqPointer>(reinterpret_cast<uintptr_t>(d2win) + 0x12399);
+    if (!loadArchives || !loadExpansion) {
+        log.line("Cannot open MPQs: D2Win #10037 / #10171 were not found.");
+        return false;
+    }
+    state.d2win = d2win;
+
+    log.line("Opening MPQ archive stack through D2Win, as Game.exe does:");
+    if (!loadArchives()) {
+        log.line("  D2Win ARCHIVE_LoadArchives (#10037) failed: d2data, d2sfx, d2speech or d2exp is missing.");
+        close_archives_d2win(log, state);
+        return false;
+    }
+    log.line("  ok D2Win #10037: d2data, d2sfx, d2speech, d2exp, patch_d2 (when present)");
+    // No disc prompts: a box has every archive it will ever have. The config carries Game.exe's
+    // expansion callback.
+    if (!loadExpansion(nullptr, nullptr, nullptr, &config)) {
+        log.line("  D2Win ARCHIVE_LoadExpansionArchives (#10171) failed: d2char, d2music or an expansion MPQ is missing.");
+        close_archives_d2win(log, state);
+        return false;
+    }
+    log.line("  ok D2Win #10171: d2char, d2music, d2Xmusic, d2Xtalk, d2Xvideo");
+
+    for (const ArchiveLoad& archive : plan.archives) {
+        if (d2win_opens_itself(archive.path)) continue;
+        std::string label = lower_name(archive.path);
+        label = label.substr(0, label.find('.'));
+        for (char& c : label) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        void* handle = loadMpq("D2Win.dll", archive.path.c_str(), label.c_str(), 0, nullptr, nullptr, archive.priority);
+        char buffer[320]{};
+        if (handle) {
+            state.extras.push_back(handle);
+            archives.push_back(*static_cast<HANDLE*>(handle));
+            std::snprintf(buffer, sizeof(buffer), "  ok priority=%d kind=%s path=%s (ARCHIVE_LoadMPQFile)",
+                archive.priority, archive.kind.c_str(), archive.path.c_str());
+            log.line(buffer);
+            continue;
+        }
+        std::snprintf(buffer, sizeof(buffer), "  missing priority=%d kind=%s path=%s: %s", archive.priority,
+            archive.kind.c_str(), archive.path.c_str(), win_error(GetLastError()).c_str());
+        log.line(buffer);
+        if (archive.required) {
+            close_archives_d2win(log, state);
+            return false;
+        }
+    }
+    log.line("MPQ stack ready through D2Win.");
+    return true;
 }
 
 bool open_archives(Log& log, const Plan& plan, std::vector<HANDLE>& archives, SFileCloseArchivePointer& closeArchive) {
@@ -1483,224 +1444,6 @@ void run_modules(Log& log, D2ConfigStrc& config, SoundBootstrap& sound, GfxBoots
         log.line(std::string(dll) + " returned module " + std::to_string(static_cast<unsigned>(next)));
         state = next;
     }
-}
-
-// ---- The box's registry ------------------------------------------------------------------------
-//
-// The hive is a private app hive (RegLoadAppKey): no other process sees it. Its top level holds
-// "HKCU" and "HKLM" subkeys, and HKEY_CURRENT_USER is pointed at "HKCU" for this process, so the
-// game's own RegOpenKeyEx calls land in it. Values arrive as exordium-registry.txt, one per line:
-// key TAB name TAB type TAB data, with \\ \t \r \n \0 escaped (@exordium/registry, hive-text.ts).
-
-std::wstring widen(const std::string& text) {
-    if (text.empty()) return {};
-    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    std::wstring out(static_cast<size_t>(size), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
-    return out;
-}
-
-std::string narrow(const std::wstring& text) {
-    if (text.empty()) return {};
-    const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-    std::string out(static_cast<size_t>(size), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
-    return out;
-}
-
-std::string hive_unescape(const std::string& field, bool& ok) {
-    std::string out;
-    for (size_t i = 0; i < field.size(); ++i) {
-        if (field[i] != '\\') {
-            out.push_back(field[i]);
-            continue;
-        }
-        const char next = i + 1 < field.size() ? field[++i] : '\0';
-        switch (next) {
-        case '\\': out.push_back('\\'); break;
-        case 't': out.push_back('\t'); break;
-        case 'r': out.push_back('\r'); break;
-        case 'n': out.push_back('\n'); break;
-        case '0': out.push_back('\0'); break;
-        default: ok = false; return out;
-        }
-    }
-    return out;
-}
-
-std::string hive_escape(const std::string& field) {
-    std::string out;
-    for (const char c : field) {
-        switch (c) {
-        case '\\': out += "\\\\"; break;
-        case '\t': out += "\\t"; break;
-        case '\r': out += "\\r"; break;
-        case '\n': out += "\\n"; break;
-        case '\0': out += "\\0"; break;
-        default: out.push_back(c);
-        }
-    }
-    return out;
-}
-
-// "HKCU\Software\X" -> root "HKCU", path "Software\X". Only HKCU and HKLM are allowed.
-bool split_root(const std::string& key, std::string& root, std::string& path) {
-    const size_t slash = key.find('\\');
-    root = key.substr(0, slash);
-    path = slash == std::string::npos ? std::string() : key.substr(slash + 1);
-    return root == "HKCU" || root == "HKLM";
-}
-
-bool write_hive_value(HKEY hive, const std::string& key, const std::string& name, const std::string& type, const std::string& data) {
-    std::string root, path;
-    if (!split_root(key, root, path)) return false;
-    HKEY target{};
-    const std::wstring full = widen(path.empty() ? root : root + "\\" + path);
-    if (RegCreateKeyExW(hive, full.c_str(), 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &target, nullptr) != ERROR_SUCCESS) return false;
-    const std::wstring wideName = widen(name);
-    LONG result = ERROR_INVALID_DATA;
-    if (type == "sz" || type == "expand_sz" || type == "multi_sz") {
-        std::wstring text = widen(data);
-        text.push_back(L'\0');
-        if (type == "multi_sz" && !data.empty()) text.push_back(L'\0');
-        const DWORD kind = type == "sz" ? REG_SZ : type == "expand_sz" ? REG_EXPAND_SZ : REG_MULTI_SZ;
-        result = RegSetValueExW(target, wideName.c_str(), 0, kind, reinterpret_cast<const BYTE*>(text.data()), static_cast<DWORD>(text.size() * sizeof(wchar_t)));
-    } else if (type == "dword") {
-        const DWORD value = static_cast<DWORD>(std::strtoul(data.c_str(), nullptr, 10));
-        result = RegSetValueExW(target, wideName.c_str(), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-    } else if (type == "qword") {
-        const unsigned long long value = _strtoui64(data.c_str(), nullptr, 10);
-        result = RegSetValueExW(target, wideName.c_str(), 0, REG_QWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-    } else if (type == "binary") {
-        std::vector<BYTE> bytes;
-        for (size_t i = 0; i + 1 < data.size(); i += 2) bytes.push_back(static_cast<BYTE>(std::strtoul(data.substr(i, 2).c_str(), nullptr, 16)));
-        result = RegSetValueExW(target, wideName.c_str(), 0, REG_BINARY, bytes.data(), static_cast<DWORD>(bytes.size()));
-    }
-    RegCloseKey(target);
-    return result == ERROR_SUCCESS;
-}
-
-// Loads the hive, fills it from the text file, and points HKCU at it. False means the game must not
-// start: without the override it would read and write the machine's own registry.
-bool setup_registry(Log& log, const Plan& plan) {
-    if (plan.hive.empty()) {
-        log.line("No registry hive configured: the game uses the machine's registry.");
-        return true;
-    }
-    HKEY hive{};
-    const LONG load = RegLoadAppKeyW(widen(plan.hive).c_str(), &hive, KEY_ALL_ACCESS, 0, 0);
-    if (load != ERROR_SUCCESS) {
-        log.line("RegLoadAppKey(" + plan.hive + ") failed: " + win_error(static_cast<DWORD>(load)));
-        return false;
-    }
-    unsigned written = 0;
-    unsigned refused = 0;
-    if (!plan.registryFile.empty()) {
-        std::istringstream lines(read_file(plan.registryFile.c_str()));
-        std::string line;
-        while (std::getline(lines, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.empty()) continue;
-            std::vector<std::string> fields;
-            size_t from = 0;
-            for (size_t tab = line.find('\t'); tab != std::string::npos; tab = line.find('\t', from)) {
-                fields.push_back(line.substr(from, tab - from));
-                from = tab + 1;
-            }
-            fields.push_back(line.substr(from));
-            bool ok = fields.size() == 4;
-            for (std::string& field : fields) field = hive_unescape(field, ok);
-            if (ok && write_hive_value(hive, fields[0], fields[1], fields[2], fields[3])) {
-                ++written;
-            } else {
-                ++refused;
-                log.line("  registry value refused: " + line);
-            }
-        }
-    }
-    HKEY user{};
-    if (RegCreateKeyExW(hive, L"HKCU", 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &user, nullptr) != ERROR_SUCCESS) {
-        log.line("Cannot open the hive's HKCU key.");
-        RegCloseKey(hive);
-        return false;
-    }
-    const LONG override = RegOverridePredefKey(HKEY_CURRENT_USER, user);
-    if (override != ERROR_SUCCESS) {
-        log.line("RegOverridePredefKey(HKCU) failed: " + win_error(static_cast<DWORD>(override)));
-        RegCloseKey(user);
-        RegCloseKey(hive);
-        return false;
-    }
-    // Both keys stay open for the life of the process; the override refers to `user`.
-    log.line("Private HKCU installed from " + plan.hive + ": " + std::to_string(written) + " values written, " + std::to_string(refused) +
-             " refused.");
-    return refused == 0;
-}
-
-void dump_key(HKEY key, const std::string& path, std::string& out) {
-    for (DWORD index = 0;; ++index) {
-        wchar_t name[16384];
-        DWORD nameLength = 16384;
-        DWORD type = 0;
-        DWORD size = 0;
-        if (RegEnumValueW(key, index, name, &nameLength, nullptr, &type, nullptr, &size) != ERROR_SUCCESS) break;
-        std::vector<BYTE> data(size + sizeof(wchar_t) * 2, 0);
-        nameLength = 16384;
-        if (RegEnumValueW(key, index, name, &nameLength, nullptr, &type, data.data(), &size) != ERROR_SUCCESS) continue;
-        std::string kind;
-        std::string text;
-        const auto* wide = reinterpret_cast<const wchar_t*>(data.data());
-        if (type == REG_SZ || type == REG_EXPAND_SZ) {
-            kind = type == REG_SZ ? "sz" : "expand_sz";
-            text = narrow(std::wstring(wide));
-        } else if (type == REG_MULTI_SZ) {
-            kind = "multi_sz";
-            std::wstring all(wide, size / sizeof(wchar_t));
-            while (!all.empty() && all.back() == L'\0') all.pop_back();
-            text = narrow(all);
-        } else if (type == REG_DWORD && size == 4) {
-            kind = "dword";
-            text = std::to_string(*reinterpret_cast<const DWORD*>(data.data()));
-        } else if (type == REG_QWORD && size == 8) {
-            kind = "qword";
-            text = std::to_string(*reinterpret_cast<const unsigned long long*>(data.data()));
-        } else {
-            kind = "binary"; // other types keep their bytes, not their type
-            static const char digits[] = "0123456789abcdef";
-            for (DWORD i = 0; i < size; ++i) {
-                text.push_back(digits[data[i] >> 4]);
-                text.push_back(digits[data[i] & 15]);
-            }
-        }
-        out += hive_escape(path) + "\t" + hive_escape(narrow(std::wstring(name, nameLength))) + "\t" + kind + "\t" + hive_escape(text) + "\n";
-    }
-    for (DWORD index = 0;; ++index) {
-        wchar_t name[256];
-        DWORD nameLength = 256;
-        if (RegEnumKeyExW(key, index, name, &nameLength, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-        HKEY child{};
-        if (RegOpenKeyExW(key, name, 0, KEY_READ, &child) != ERROR_SUCCESS) continue;
-        dump_key(child, path + "\\" + narrow(std::wstring(name, nameLength)), out);
-        RegCloseKey(child);
-    }
-}
-
-// `Game.exe --dump-hive <hive> <out>`: writes every value in the hive, in the same text form, so
-// Exordium can read a run's registry back however the game ended. Run after the game has exited.
-int dump_hive(const std::string& hivePath, const std::string& outPath) {
-    HKEY hive{};
-    if (RegLoadAppKeyW(widen(hivePath).c_str(), &hive, KEY_READ, 0, 0) != ERROR_SUCCESS) return 20;
-    std::string out;
-    for (const char* root : {"HKCU", "HKLM"}) {
-        HKEY key{};
-        if (RegOpenKeyExW(hive, widen(root).c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) continue;
-        dump_key(key, root, out);
-        RegCloseKey(key);
-    }
-    RegCloseKey(hive);
-    std::ofstream file(outPath, std::ios::binary | std::ios::trunc);
-    file << out;
-    return file ? 0 : 21;
 }
 
 // Diagnostic: the first exceptions the process raises, before any handler of the game's (Fog installs
@@ -1948,52 +1691,6 @@ int relaunch(Log& log, const std::string& arguments, bool compatLayer) {
     return static_cast<int>(code);
 }
 
-// ---- Commands Exordium runs, not the game ------------------------------------------------------
-
-// Writes `text` to this process's standard output (the pipe Exordium reads), GUI subsystem or not.
-void write_stdout(const std::string& text) {
-    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD written = 0;
-    if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
-}
-
-// `Game.exe --detach <game arguments>`: starts the game as its own process, not a child of
-// Exordium, prints its PID and returns at once. Its parent has exited by the time anyone looks, so
-// Task Manager lists the game on its own, under its own name, not inside Exordium's app group; it
-// also escapes Exordium's job, so closing Exordium does not close the game. Exordium follows it
-// with --wait. The Windows 7 layer is applied here, so the started process never relaunches.
-int detach(const std::string& arguments) {
-    char path[MAX_PATH]{};
-    if (!GetModuleFileNameA(nullptr, path, MAX_PATH)) return 30;
-    SetEnvironmentVariableA("__COMPAT_LAYER", kCompatLayer);
-    SetEnvironmentVariableA("EXORDIUM_RELAUNCHED", "1");
-    std::string commandLine = std::string("\"") + path + "\"" + (arguments.empty() ? "" : " " + arguments);
-    STARTUPINFOA startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-    // Breaking away fails when Exordium's job forbids it; the game still starts, only inside the job.
-    BOOL started = CreateProcessA(path, commandLine.data(), nullptr, nullptr, FALSE, CREATE_BREAKAWAY_FROM_JOB, nullptr, nullptr, &startup, &process);
-    if (!started) started = CreateProcessA(path, commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process);
-    if (!started) return 31;
-    write_stdout(std::to_string(process.dwProcessId) + "\n");
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    return 0;
-}
-
-// `Game.exe --wait <pid>`: returns when that process exits, with its exit code.
-int wait_for(const char* pidText) {
-    const DWORD pid = static_cast<DWORD>(std::strtoul(pidText, nullptr, 10));
-    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process) return 0; // already gone
-    WaitForSingleObject(process, INFINITE);
-    DWORD code = 0;
-    GetExitCodeProcess(process, &code);
-    CloseHandle(process);
-    write_stdout(std::to_string(code) + "\n");
-    return 0;
-}
-
 // One node of a VS_VERSIONINFO tree: WORD length, WORD value length, WORD type, UTF-16 key,
 // padding to 4, value, padding to 4, children.
 struct VersionNode {
@@ -2122,7 +1819,7 @@ int run_loader() {
     if (__argc >= 2 && std::strcmp(__argv[1], "--detach") == 0) {
         std::string arguments;
         for (int i = 2; i < __argc; ++i) arguments += (i > 2 ? " " : "") + std::string(__argv[i]);
-        return detach(arguments);
+        return detach(arguments, kCompatLayer);
     }
     if (__argc == 3 && std::strcmp(__argv[1], "--wait") == 0) return wait_for(__argv[2]);
     if ((__argc == 5 || __argc == 6) && std::strcmp(__argv[1], "--stamp") == 0) {
@@ -2138,7 +1835,8 @@ int run_loader() {
     // process's view of the screen, and D2Glide — which builds its font by drawing on the display DC
     // and reading it back with GetPixel, pixel by pixel — takes about 90 s per Glide window.
     SetProcessDPIAware();
-    Log log("exordium-loader.log");
+    const std::string logPath = env_path("EXORDIUM_LOADER_LOG", "exordium-loader.log");
+    Log log(logPath.c_str());
     g_exceptionLog = &log;
     g_mainThread = GetCurrentThreadId();
     g_mainStackTop = reinterpret_cast<std::uintptr_t>(reinterpret_cast<const NT_TIB*>(NtCurrentTeb())->StackBase);
@@ -2169,7 +1867,7 @@ int run_loader() {
             CloseHandle(thread);
         }
     }
-    if (!setup_registry(log, plan)) {
+    if (!setup_registry(log, plan.hive, plan.registryFile)) {
         log.line("Cannot continue: the box's registry is not in place, and the game would use the machine's.");
         return 10;
     }
@@ -2180,14 +1878,17 @@ int run_loader() {
 
     D2ConfigStrc config = build_config(plan);
     log_config(log, config, plan);
-    const CoreOrdinals& ordinals = core_ordinals(plan.gameVersion);
+    const CoreOrdinals& ordinals = core_ordinals(plan.core, plan.gameVersion);
     log.line(std::string("Core ABI table: ") + ordinals.label + " for " + plan.gameVersion + ".");
-    if (!setup_fog(log, config, plan.gameVersion, ordinals, fog)) {
+    if (!setup_fog(log, config, plan.gameVersion, ordinals, plan.asyncData, fog)) {
         log.line("Cannot continue: Fog bootstrap failed.");
         return 7;
     }
 
-    if (!open_archives(log, plan, archives, closeArchive)) {
+    D2WinArchives d2winArchives;
+    const bool viaD2Win = plan.archivesViaD2Win && plan.gameVersion == "v1.10";
+    if (viaD2Win ? !open_archives_d2win(log, plan, config, archives, d2winArchives)
+                 : !open_archives(log, plan, archives, closeArchive)) {
         log.line("Cannot continue: required MPQ archive stack did not open.");
         teardown_fog(log, fog);
         return 6;
@@ -2199,9 +1900,11 @@ int run_loader() {
         log.line("Cannot continue: gfx bootstrap failed.");
         teardown_gfx(log, gfx);
         close_archives(log, closeArchive, archives);
+        close_archives_d2win(log, d2winArchives);
         teardown_fog(log, fog);
         return 8;
     }
+    probe_mpqs(log, plan);
 
     SoundBootstrap sound;
     if (plan.graphics) setup_sound(log, config, ordinals, sound);
@@ -2227,6 +1930,7 @@ int run_loader() {
         teardown_sound(log, sound);
         teardown_gfx(log, gfx);
         close_archives(log, closeArchive, archives);
+        close_archives_d2win(log, d2winArchives);
         teardown_fog(log, fog);
         log.line("exordium-game exiting with " + std::to_string(code) + ".");
         return code;

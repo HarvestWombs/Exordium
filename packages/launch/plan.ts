@@ -1,4 +1,4 @@
-import { launchSettings, type ModSetup } from "@exordium/d2se";
+import { isSingleExeCore, launchSettings, type ModSetup } from "@exordium/d2se";
 import type { Plan } from "@exordium/layers";
 import { gameExeVersion } from "./game-exe.ts";
 import type { ArchiveLoad, LaunchProblem, LoaderPlan, LoaderSettings, PluginLoad } from "./types.ts";
@@ -6,6 +6,18 @@ import type { ArchiveLoad, LaunchProblem, LoaderPlan, LoaderSettings, PluginLoad
 const CLASSIC_ARCHIVES = ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"];
 const EXPANSION_ARCHIVES = ["d2exp.mpq", "d2Xmusic.mpq", "d2Xtalk.mpq", "d2Xvideo.mpq"];
 const GAME_DLLS = ["D2Launch.dll", "D2Client.dll", "D2Multi.dll"];
+
+/**
+ * Plugin systems built only for the pre-1.14 DLLs. 1.14 folded those DLLs into Game.exe, so a plugin
+ * that patches D2Client.dll and the rest has nothing to patch there.
+ */
+const PRE_114_PLUGINS: Partial<Record<PluginLoad["kind"], string>> = {
+  d2mod: "D2Mod",
+  nefex: "Nefex",
+  d2extra: "D2Extra",
+  d2seUtility: "D2SE Utility",
+  d2seMod: "A D2SE mod DLL",
+};
 
 export interface BuildLoaderPlanOptions {
   /**
@@ -27,23 +39,30 @@ export function buildLoaderPlan(
     if (!has(path)) problems.push({ level: "error", message: `${why} needs ${path}, which is not in the box.` });
   };
 
+  // 1.14 and later: Blizzard's own Game.exe is the game; see exe-version.ts in @exordium/d2se.
+  const singleExe = isSingleExeCore(setup.mod.core);
+  const nativeGameExe = false;
   const archives: ArchiveLoad[] = [];
   for (const path of CLASSIC_ARCHIVES) archives.push({ kind: "classic", path, priority: 1000, required: true });
   if (options.expansion ?? true) {
     for (const path of EXPANSION_ARCHIVES) archives.push({ kind: "expansion", path, priority: 3000, required: true });
   }
-  if (setup.loads.patchD2) archives.push({ kind: "patch", path: "patch_d2.mpq", priority: 5000, required: true });
-
-  const [mpq1, mpq2, mpq3] = setup.loads.mpqs;
-  if (mpq1) archives.push({ kind: "mod", path: mpq1, priority: 6000, required: true });
-
-  const language = setup.player.language?.toUpperCase() ?? null;
-  if (language && language !== "MOD") {
-    archives.push({ kind: "language", path: `${language}.mpq`, priority: 7000, required: true });
+  if (setup.loads.patchD2) {
+    const core = setup.mod.core?.trim().toLowerCase();
+    archives.push({ kind: "patch", path: "patch_d2.mpq", priority: 5000, required: core !== "1.00" });
   }
 
-  if (mpq2) archives.push({ kind: "mod", path: mpq2, priority: 8000, required: true });
-  if (mpq3) archives.push({ kind: "mod", path: mpq3, priority: 9000, required: true });
+  // The mod's MPQs, each above the last, as many as it lists (D2SE stops at three).
+  const mpqs = setup.loads.mpqs;
+  mpqs.forEach((path, i) => archives.push({ kind: "mod", path, priority: 6000 + i * 1000, required: true }));
+
+  // The language MPQ always last, above every mod MPQ: it is the player's language choice, and a mod's
+  // own pack carries its text tables for that language, whichever MPQ holds the default ones. (D2SE
+  // put it between ModMPQ1 and ModMPQ2.)
+  const language = setup.player.language?.toUpperCase() ?? null;
+  if (language && language !== "MOD") {
+    archives.push({ kind: "language", path: `${language}.mpq`, priority: 6000 + mpqs.length * 1000, required: true });
+  }
 
   for (const archive of archives) need(archive.path, `${archive.kind} archive load`);
 
@@ -75,11 +94,47 @@ export function buildLoaderPlan(
     plugins.push({ kind: "d2seMod", path: setup.loads.d2seDll, required: true, init: 2, release: "ModRelease" });
   }
 
-  for (const dll of GAME_DLLS) need(dll, "game DLL handoff");
+  if (singleExe) {
+    need("Game.exe", `core ${setup.mod.core}`);
+    for (const plugin of plugins) {
+      const name = PRE_114_PLUGINS[plugin.kind];
+      if (name) {
+        problems.push({
+          level: "error",
+          message: `${name} is built for the pre-1.14 game DLLs; core ${setup.mod.core} has none for it to load into.`,
+        });
+      }
+    }
+    if (archives.some((archive) => archive.kind === "mod" || archive.kind === "language")) {
+      problems.push({
+        level: "error",
+        message:
+          `Custom mod and language MPQs are not supported yet on core ${setup.mod.core}; it runs through Blizzard's single Game.exe.`,
+      });
+    }
+  } else if (nativeGameExe) {
+    need("Game.exe", `core ${setup.mod.core}`);
+    for (const plugin of plugins) {
+      problems.push({
+        level: "error",
+        message:
+          `${plugin.kind} plugins are not supported yet on core ${setup.mod.core}; it runs through its original Game.exe.`,
+      });
+    }
+    if (archives.some((archive) => archive.kind === "mod" || archive.kind === "language")) {
+      problems.push({
+        level: "error",
+        message:
+          `Custom mod and language MPQs are not supported yet on core ${setup.mod.core}; it runs through its original Game.exe.`,
+      });
+    }
+  } else {
+    for (const dll of GAME_DLLS) need(dll, "game DLL handoff");
+  }
   for (const plugin of plugins) need(plugin.path, `${plugin.kind} plugin load`);
 
   const exeVersion = gameExeVersion(setup.mod.core);
-  if (!exeVersion) {
+  if (!exeVersion && !singleExe) {
     problems.push({
       level: "warning",
       message: `The Game.exe version of core ${setup.mod.core ?? "(none)"} is not known; ` +
@@ -91,10 +146,13 @@ export function buildLoaderPlan(
     settings,
     commandLine: gameCommandLine(settings),
     gameVersion: gameVersion(setup.mod.core),
+    core: setup.mod.core?.trim().toLowerCase() || null,
     gameExeVersion: exeVersion,
+    singleExe,
+    nativeGameExe,
     archives,
     plugins,
-    gameDlls: GAME_DLLS,
+    gameDlls: singleExe || nativeGameExe ? [] : GAME_DLLS,
     problems,
   };
 }
@@ -114,6 +172,9 @@ export function gameCommandLine(settings: LoaderSettings): string {
     settings.noSound ? "-ns" : "",
     settings.direct ? "-direct" : "",
     settings.txt ? "-txt" : "",
+    settings.skipToBNet ? "-skiptobnet" : "",
+    settings.startAct ? `-act${settings.startAct}` : "",
+    settings.seed ? `-seed ${settings.seed}` : "",
   ].filter(Boolean).join(" ");
 }
 

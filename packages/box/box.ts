@@ -26,6 +26,7 @@ import {
   type BoxSpec,
   type BoxState,
   type FolderLink,
+  type IntegrityReport,
   type LinkMode,
   type Realised,
   type RealiseOptions,
@@ -174,6 +175,138 @@ export class Boxes {
       } satisfies BoxState,
     );
     return { folder: game, reused: false, counts, notes: [...notes] };
+  }
+
+  /** Checks that an existing box still matches the plan and bytes it was built from. */
+  async verify(spec: BoxSpec): Promise<IntegrityReport> {
+    const state = await this.state(spec.id);
+    if (!state) throw new BoxError(`No box "${spec.id}"`);
+    const game = `${this.folder(spec.id)}/game`;
+    const sources = spec.plan.files.map((file) => {
+      const source = spec.source(file);
+      return { file, source, protected: spec.protect?.(file, source) ?? false };
+    });
+    const learned = state.learnedCopy ?? [];
+    const folderLinks = [...(spec.folders ?? [])];
+    const expectedDigest = await planDigest(
+      spec.plan,
+      spec.saves,
+      learned,
+      sources.filter((s) => s.protected).map((s) => s.file.path.toLowerCase()),
+      folderLinks,
+    );
+    const issues: IntegrityReport["issues"] = [];
+    let checkedHashes = 0;
+
+    if (state.digest !== expectedDigest) {
+      issues.push({
+        path: "box.json",
+        level: "error",
+        kind: "digest",
+        message: "The box was built from a different plan and should be rebuilt.",
+      });
+    }
+
+    const expected = new Map(sources.map(({ file }) => [file.path.toLowerCase(), file]));
+    for (const { file, source } of sources) {
+      const path = `${game}/${file.path}`;
+      let info: Deno.FileInfo;
+      try {
+        info = await Deno.lstat(path);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          issues.push({ path: file.path, level: "error", kind: "missing", message: "Missing from the box." });
+          continue;
+        }
+        throw error;
+      }
+      if (info.isSymlink) {
+        if (!samePath(await Deno.realPath(path).catch(() => null), await Deno.realPath(source).catch(() => null))) {
+          issues.push({
+            path: file.path,
+            level: "error",
+            kind: "link",
+            message: "Link no longer points to its source.",
+          });
+        }
+        continue;
+      }
+      if (info.size !== file.size) {
+        issues.push({
+          path: file.path,
+          level: "error",
+          kind: "size",
+          message: `Expected ${file.size} bytes, found ${info.size}.`,
+        });
+        continue;
+      }
+      checkedHashes++;
+      const actual = await hashFile(path);
+      if (actual !== file.hash) {
+        issues.push({ path: file.path, level: "error", kind: "hash", message: "Content hash does not match." });
+      }
+    }
+
+    for (const link of folderLinks) {
+      const path = `${game}/${link.path}`;
+      try {
+        const info = await Deno.lstat(path);
+        if (!info.isSymlink) {
+          issues.push({
+            path: link.path,
+            level: "error",
+            kind: "folder-link",
+            message: "Folder junction was replaced.",
+          });
+        } else if (
+          !samePath(await Deno.realPath(path).catch(() => null), await Deno.realPath(link.target).catch(() => null))
+        ) {
+          issues.push({
+            path: link.path,
+            level: "error",
+            kind: "folder-link",
+            message: "Folder junction points elsewhere.",
+          });
+        }
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          issues.push({ path: link.path, level: "error", kind: "folder-link", message: "Folder junction is missing." });
+        } else throw error;
+      }
+    }
+
+    if (spec.saves) {
+      try {
+        if (!(await Deno.lstat(`${game}/${SAVE}`)).isSymlink) {
+          issues.push({ path: SAVE, level: "error", kind: "folder-link", message: "Save junction was replaced." });
+        }
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          issues.push({ path: SAVE, level: "error", kind: "folder-link", message: "Save junction is missing." });
+        } else throw error;
+      }
+    }
+
+    const known = new Set([...(state.files ?? []), ...(state.folders ?? [])].map((f) => f.path.toLowerCase()));
+    for await (const path of walkOwn(game)) {
+      const key = path.toLowerCase();
+      if (key === SAVE || expected.has(key) || known.has(key)) continue;
+      issues.push({
+        path,
+        level: "warning",
+        kind: "unexpected",
+        message: "Created inside the box; not part of the plan.",
+      });
+    }
+
+    return {
+      ok: !issues.some((issue) => issue.level === "error"),
+      checkedFiles: spec.plan.files.length,
+      checkedHashes,
+      expectedDigest,
+      actualDigest: state.digest,
+      issues,
+    };
   }
 
   /**
@@ -393,6 +526,10 @@ function under(path: string, folder: string): boolean {
 function driveOf(path: string): string {
   const match = /^([a-zA-Z]:)|^(\/\/[^/]+\/[^/]+)/.exec(path.replace(/\\/g, "/"));
   return (match?.[1] ?? match?.[2] ?? "").toUpperCase();
+}
+
+function samePath(a: string | null, b: string | null): boolean {
+  return !!a && !!b && a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {

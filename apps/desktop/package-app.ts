@@ -17,12 +17,17 @@ const PACKAGE_ARGS = [
   "dist",
   "--include",
   "../../native/loader/build/exordium-game.exe",
+  "--include",
+  "../../native/window/build/exordium-window.dll",
+  "--include",
+  "assets/exordium.ico",
   "server.ts",
 ];
 
 const isWindows = Deno.build.os === "windows";
 const exe = isWindows ? ".exe" : "";
 const here = import.meta.dirname ?? Deno.cwd();
+const nativeSidecars = ["exordium-window.dll"] as const;
 
 function candidatePaths(): string[] {
   const paths: string[] = [];
@@ -70,6 +75,32 @@ try {
 if (code !== 0) {
   console.error("\nPackaging failed. If it mentions access denied, Exordium is still running — close it first.");
   Deno.exit(code);
+}
+
+try {
+  await Deno.mkdir(`${here}/Exordium/native`, { recursive: true });
+  for (const stale of ["exordium-launch.exe", "exordium-hook.dll", "exordium-presence.exe"]) {
+    await Deno.remove(`${here}/Exordium/native/${stale}`).catch(() => {});
+  }
+  for (const name of nativeSidecars) {
+    await Deno.copyFile(`../../native/window/build/${name}`, `${here}/Exordium/native/${name}`);
+  }
+  console.log(`Copied ${nativeSidecars.length} native sidecars into Exordium/native.`);
+} catch (error) {
+  console.error(`Could not copy native sidecars: ${error instanceof Error ? error.message : String(error)}`);
+  Deno.exit(1);
+}
+
+// The launcher is laufey's prebuilt exe, so the icon is written into it afterwards (embed-icon.ts).
+// Never fatal: the window still sets its own icon at runtime; only Explorer and shortcuts miss it.
+if (isWindows) {
+  try {
+    const { embedIcon } = await import("./embed-icon.ts");
+    const count = embedIcon(`${here}/Exordium/Exordium.exe`, `${here}/assets/exordium.ico`);
+    console.log(`Embedded ${count} icon sizes into Exordium.exe.`);
+  } catch (error) {
+    console.warn(`Could not embed the icon: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 try {

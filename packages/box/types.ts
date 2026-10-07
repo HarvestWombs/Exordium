@@ -83,6 +83,30 @@ export interface Realised {
   notes: string[];
 }
 
+export interface IntegrityIssue {
+  path: string;
+  level: "error" | "warning";
+  kind:
+    | "missing"
+    | "size"
+    | "hash"
+    | "link"
+    | "source"
+    | "unexpected"
+    | "digest"
+    | "folder-link";
+  message: string;
+}
+
+export interface IntegrityReport {
+  ok: boolean;
+  checkedFiles: number;
+  checkedHashes: number;
+  expectedDigest: string | null;
+  actualDigest: string | null;
+  issues: IntegrityIssue[];
+}
+
 export interface AfterRun {
   /**
    * Linked files whose source changed during the run: the game, a plugin, or someone editing the

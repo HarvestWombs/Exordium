@@ -1,0 +1,763 @@
+/**
+ * The mod browser's sources.
+ *
+ * - **archive.org** has a public search API (`advancedsearch.php`), per-item metadata listing every
+ *   file, a thumbnail service and direct downloads, so it is listed, detailed and downloaded here.
+ * - **ModDB** answers every non-browser request, its RSS feed included, with a Cloudflare challenge,
+ *   and its robots.txt disallows automated paging and download links. It is not fetched: the browser
+ *   links to it, and the player downloads from it themselves.
+ *
+ * A download goes to Exordium's own folder (`downloads\<source>\<id>\`), is unpacked on the install's
+ * drive and moved into its MODS folder (install.ts), and the archive is then deleted.
+ */
+
+import { installArchive, type InstallResult } from "./install.ts";
+
+export const ARCHIVE_QUERY = 'subject:"Diablo 2 mod"';
+export const MODDB_URL = "https://www.moddb.com/games/diablo-2-lod/mods";
+const ARCHIVE_TTL_MS = 12 * 60 * 60 * 1000;
+const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+// ---- Keywords ---------------------------------------------------------------------------------------
+
+export interface KeywordGroup {
+  id: string;
+  label: string;
+  keywords: { id: string; label: string; pattern: RegExp }[];
+}
+
+/**
+ * Common Diablo II modding terms, matched against an entry's title, description and tags. archive.org
+ * items rarely tag more than "Diablo 2 mod", so the text is what there is. Plain dictionary matching:
+ * an entry shows a keyword only when its own words say so.
+ */
+export const KEYWORD_GROUPS: KeywordGroup[] = [
+  {
+    id: "version",
+    label: "GAME VERSION",
+    keywords: [
+      { id: "1.07", label: "1.07", pattern: /\b(v|patch\s*)?1\.07\b/i },
+      { id: "1.08", label: "1.08", pattern: /\b(v|patch\s*)?1\.08\b/i },
+      { id: "1.09", label: "1.09", pattern: /\b(v|patch\s*)?1\.09[a-d]?\b/i },
+      { id: "1.10", label: "1.10", pattern: /\b(v|patch\s*)?1\.10[a-f]?\b/i },
+      { id: "1.11", label: "1.11", pattern: /\b(v|patch\s*)?1\.11[ab]?\b/i },
+      { id: "1.12", label: "1.12", pattern: /\b(v|patch\s*)?1\.12a?\b/i },
+      { id: "1.13", label: "1.13", pattern: /\b(v|patch\s*)?1\.13[a-d]?\b/i },
+      { id: "1.14", label: "1.14", pattern: /\b(v|patch\s*)?1\.14[a-d]?\b/i },
+      { id: "lod", label: "Lord of Destruction", pattern: /\b(lod|lord of destruction|expansion)\b/i },
+      { id: "classic", label: "Classic", pattern: /\bclassic\b/i },
+    ],
+  },
+  {
+    id: "kind",
+    label: "KIND",
+    keywords: [
+      {
+        id: "overhaul",
+        label: "Overhaul",
+        pattern: /\b(overhaul|total conversion|complete (mod|rework)|rebalanc\w*)\b/i,
+      },
+      { id: "items", label: "Items", pattern: /\b(items?|uniques?|runewords?|set items?|affix\w*|loot)\b/i },
+      { id: "skills", label: "Skills & classes", pattern: /\b(skills?|skill trees?|new class\w*|classes)\b/i },
+      { id: "monsters", label: "Monsters", pattern: /\b(monsters?|bosses|boss|enemies)\b/i },
+      { id: "maps", label: "Maps & areas", pattern: /\b(maps?|areas?|levels?|dungeons?|zones?|acts?\s*[1-6vi]*)\b/i },
+      {
+        id: "graphics",
+        label: "Graphics",
+        pattern: /\b(graphics?|textures?|sprites?|hd|high resolution|resolution|d2gl|glide|widescreen)\b/i,
+      },
+      { id: "sound", label: "Sound & music", pattern: /\b(sounds?|music|audio|voice)\b/i },
+      { id: "utility", label: "Tools & utilities", pattern: /\b(tool|utility|editor|loader|launcher|plugin)\b/i },
+      { id: "fix", label: "Fixes", pattern: /\b(fix(es|ed)?|bug\s*fix\w*|patch(es)?)\b/i },
+    ],
+  },
+  {
+    id: "feature",
+    label: "FEATURES",
+    keywords: [
+      { id: "plugy", label: "PlugY", pattern: /\bplugy\b/i },
+      { id: "d2se", label: "D2SE", pattern: /\bd2se\b/i },
+      { id: "d2mod", label: "D2Mod", pattern: /\bd2mod\b/i },
+      {
+        id: "multiplayer",
+        label: "Multiplayer",
+        pattern: /\b(multi\s*-?player|battle\.?net|pvpgn|realm|tcp\/?ip|lan|co-?op)\b/i,
+      },
+      { id: "single", label: "Single player", pattern: /\bsingle\s*-?player\b/i },
+      { id: "hardcore", label: "Hardcore", pattern: /\bhardcore\b/i },
+      { id: "stash", label: "Shared stash", pattern: /\b(shared stash|stash)\b/i },
+      { id: "median", label: "Median XL", pattern: /\bmedian\b/i },
+    ],
+  },
+];
+
+/** The keyword ids an entry's text mentions, in dictionary order. */
+export function keywordsFor(text: string): string[] {
+  const found: string[] = [];
+  for (const group of KEYWORD_GROUPS) {
+    for (const keyword of group.keywords) {
+      if (keyword.pattern.test(text)) found.push(keyword.id);
+    }
+  }
+  return found;
+}
+
+/**
+ * Plain text from an archive.org description: HTML dropped, entities decoded, whitespace collapsed,
+ * and the Microsoft Translator widget text that several uploads pasted in along with their
+ * description ("TRANSLATE with x English Arabic …") cut off.
+ */
+export function cleanDescription(html: unknown): string {
+  const raw = Array.isArray(html) ? html.join("\n") : typeof html === "string" ? html : "";
+  const text = raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  const tidy = text.replace(/[ \t\u00a0]+/g, " ").replace(/\s*\n\s*/g, "\n");
+  const cut = tidy.search(/TRANSLATE\s+with\s+x\b/i);
+  return (cut >= 0 ? tidy.slice(0, cut) : tidy).trim();
+}
+
+// ---- archive.org --------------------------------------------------------------------------------
+
+export interface BrowseItem {
+  source: "archive";
+  id: string;
+  title: string;
+  description: string;
+  creator: string | null;
+  /** When it was uploaded (archive.org's publicdate), ISO. */
+  addedAt: string | null;
+  downloads: number;
+  size: number;
+  keywords: string[];
+  page: string;
+  cover: string;
+}
+
+interface ArchiveDoc {
+  identifier?: string;
+  title?: string;
+  description?: unknown;
+  subject?: string | string[];
+  creator?: string | string[];
+  publicdate?: string;
+  downloads?: number;
+  item_size?: number;
+}
+
+function firstString(value: unknown): string | null {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
+  return typeof value === "string" ? value : null;
+}
+
+export function archiveItemFromDoc(doc: ArchiveDoc): BrowseItem | null {
+  const id = doc.identifier;
+  if (!id || !ID.test(id)) return null;
+  const title = firstString(doc.title) ?? id;
+  const description = cleanDescription(doc.description);
+  const subjects = Array.isArray(doc.subject) ? doc.subject.join(" ") : doc.subject ?? "";
+  return {
+    source: "archive",
+    id,
+    title,
+    description,
+    creator: firstString(doc.creator),
+    addedAt: doc.publicdate ?? null,
+    downloads: doc.downloads ?? 0,
+    size: doc.item_size ?? 0,
+    keywords: keywordsFor(`${title}\n${description}\n${subjects}`),
+    page: `https://archive.org/details/${id}`,
+    cover: `https://archive.org/services/img/${id}`,
+  };
+}
+
+/** The whole archive.org list, from a cache under `cacheDir` that is refreshed after 12 hours. */
+export async function archiveList(
+  cacheDir: string,
+  refresh = false,
+): Promise<{ items: BrowseItem[]; fetchedAt: string }> {
+  const file = `${cacheDir}/archive.json`;
+  if (!refresh) {
+    try {
+      const cached = JSON.parse(await Deno.readTextFile(file)) as { items: BrowseItem[]; fetchedAt: string };
+      if (Date.now() - Date.parse(cached.fetchedAt) < ARCHIVE_TTL_MS) return cached;
+    } catch {
+      // Missing or unreadable: fetch.
+    }
+  }
+  const fields = ["identifier", "title", "description", "subject", "creator", "publicdate", "downloads", "item_size"];
+  const query = new URLSearchParams({ q: ARCHIVE_QUERY, rows: "1000", page: "1", output: "json" });
+  for (const field of fields) query.append("fl[]", field);
+  const response = await fetch(`https://archive.org/advancedsearch.php?${query}`);
+  if (!response.ok) throw new Error(`archive.org search answered ${response.status}`);
+  const body = await response.json() as { response?: { docs?: ArchiveDoc[] } };
+  const items = (body.response?.docs ?? []).map(archiveItemFromDoc).filter((item): item is BrowseItem => item !== null);
+  const result = { items, fetchedAt: new Date().toISOString() };
+  await Deno.mkdir(cacheDir, { recursive: true });
+  await Deno.writeTextFile(file, JSON.stringify(result));
+  return result;
+}
+
+export interface ItemFile {
+  name: string;
+  size: number;
+}
+
+/** A file inside an item's archive, as archive.org lists it. */
+export interface ArchiveMember {
+  path: string;
+  size: number;
+}
+
+export interface ItemDetails {
+  id: string;
+  /** The best description found: the mod's readme, its D2SE description, or the uploader's. */
+  description: string;
+  /** Where the description came from, e.g. "Readme.txt inside the archive". */
+  descriptionSource: string | null;
+  /** What can be downloaded: the uploader's own archives and installers. */
+  archives: ItemFile[];
+  screenshots: { full: string; thumb: string }[];
+  /** Homepage, forum… named by the mod's own D2SE_SETUP.ini inside the archive. */
+  links: { label: string; url: string }[];
+  /** Keywords the archive's contents add: D2SE-ready, PlugY, D2Mod, the core version. */
+  keywords: string[];
+  /** The main archive's unpacked size, from its listing; 0 when unknown. */
+  unpackedSize: number;
+}
+
+const ARCHIVE_FILE = /\.(zip|rar|7z|exe|mpq)$/i;
+const LISTABLE = /\.(zip|rar|7z)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|gif|bmp|webp)$/i;
+/** Bumped when what is stored per item changes, so old cached details are read again. */
+const DETAILS_VERSION = 2;
+const details = new Map<string, ItemDetails>();
+
+function downloadUrl(id: string, name: string): string {
+  return `https://archive.org/download/${id}/${name.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** Screenshots go through the app's own cache (browseImage), so a gallery click is instant. */
+function imageUrl(id: string, name: string): string {
+  return `/api/browse/image?id=${encodeURIComponent(id)}&file=${encodeURIComponent(name)}`;
+}
+
+/**
+ * archive.org's listing of the files inside an archive: its "view contents" page, one row per file
+ * with its size. Works for zip, 7z and rar; serving a single file from inside works for zip only
+ * (a file inside a 7z comes back empty).
+ */
+export function parseArchiveListing(html: string): ArchiveMember[] {
+  const members: ArchiveMember[] = [];
+  const row =
+    /<a href="\/\/archive\.org\/download\/[^"]+?\.(?:zip|rar|7z)\/([^"]+)">[^<]*<\/a><td>[^<]*<td>[^<]*<td id="size">(\d+)/gi;
+  for (const match of html.matchAll(row)) {
+    try {
+      members.push({ path: decodeURIComponent(match[1]!), size: Number(match[2]) });
+    } catch {
+      // A name that does not decode is skipped.
+    }
+  }
+  return members;
+}
+
+/** What an archive's file names say about the mod inside it. */
+export function contentKeywords(members: readonly ArchiveMember[]): string[] {
+  const names = members.map((member) => member.path.toLowerCase());
+  const has = (pattern: RegExp) => names.some((name) => pattern.test(name));
+  const found: string[] = [];
+  if (has(/(^|\/)d2se_setup\.ini$/)) found.push("d2se");
+  if (has(/(^|\/)plugy\.dll$/)) found.push("plugy");
+  if (has(/(^|\/)d2mod\.dll$/)) found.push("d2mod");
+  if (has(/(^|\/)(d2gl\.mpq|d2gl\.ini|glide3x\.dll)$/)) found.push("graphics");
+  return found;
+}
+
+function decodeText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
+  }
+}
+
+/** A small text file from inside a zip on archive.org; null when it cannot be read. */
+async function memberText(id: string, archive: string, member: string, limit = 24 * 1024): Promise<string | null> {
+  try {
+    const response = await fetch(`${downloadUrl(id, archive)}/${member.split("/").map(encodeURIComponent).join("/")}`);
+    if (!response.ok || !response.body) return null;
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (total < limit) {
+      const { value, done } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      total += value.length;
+    }
+    await reader.cancel().catch(() => {});
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.length;
+    }
+    const text = decodeText(bytes.subarray(0, limit)).replace(/\r\n?/g, "\n").trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+/** key=value from an ini's text, keys lowercased; later wins. */
+function iniValues(text: string): Map<string, string> {
+  const values = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const match = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (match) values.set(match[1]!.toLowerCase(), match[2]!);
+  }
+  return values;
+}
+
+const README = /(^|\/)(read\s*-?_?me|mod\s*info|modinfo|info|description|about)[^/]*\.(txt|nfo|md)$/i;
+
+/**
+ * Reads what the mod inside an item's main archive says about itself: from the listing, what it
+ * contains; for a zip, its D2SE_SETUP.ini (description, homepage, forum, core) and its readme.
+ */
+async function enrich(id: string, archive: ItemFile): Promise<Partial<ItemDetails>> {
+  if (!LISTABLE.test(archive.name)) return {};
+  let members: ArchiveMember[] = [];
+  try {
+    const response = await fetch(`${downloadUrl(id, archive.name)}/`);
+    if (response.ok) members = parseArchiveListing(await response.text());
+  } catch {
+    return {};
+  }
+  const result: Partial<ItemDetails> = {
+    keywords: contentKeywords(members),
+    unpackedSize: members.reduce((sum, member) => sum + member.size, 0),
+    links: [],
+  };
+  if (!/\.zip$/i.test(archive.name)) return result;
+
+  const setupMember = members
+    .filter((member) => /(^|\/)d2se_setup\.ini$/i.test(member.path))
+    .sort((a, b) => a.path.length - b.path.length)[0];
+  const modDir = setupMember ? setupMember.path.slice(0, setupMember.path.lastIndexOf("/") + 1) : "";
+  let setupDescription: string | null = null;
+  let readmePath: string | null = null;
+  if (setupMember) {
+    const text = await memberText(id, archive.name, setupMember.path);
+    if (text) {
+      const ini = iniValues(text);
+      for (const [key, label] of [["modhp", "Homepage"], ["modboard", "Forum"]] as const) {
+        const url = ini.get(key);
+        if (url && /^https?:\/\//i.test(url)) result.links!.push({ label, url });
+      }
+      const description = ini.get("moddescription");
+      if (description && !/^https?:\/\//i.test(description)) setupDescription = description;
+      const readme = ini.get("modreadme");
+      if (readme && !/^https?:\/\//i.test(readme)) readmePath = `${modDir}${readme.replace(/\\/g, "/")}`;
+      const core = ini.get("d2core");
+      if (core) result.keywords!.push(...keywordsFor(core));
+    }
+  }
+  const readmeMember = members.find((member) => readmePath && member.path.toLowerCase() === readmePath.toLowerCase()) ??
+    members
+      .filter((member) => README.test(member.path) && member.size < 512 * 1024)
+      .sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0];
+  if (readmeMember) {
+    const text = await memberText(id, archive.name, readmeMember.path);
+    if (text) {
+      result.description = text;
+      result.descriptionSource = `${readmeMember.path.split("/").pop()} inside the archive`;
+      result.keywords!.push(...keywordsFor(text));
+      return result;
+    }
+  }
+  if (setupDescription) {
+    result.description = setupDescription;
+    result.descriptionSource = "D2SE_SETUP.ini inside the archive";
+  }
+  return result;
+}
+
+/**
+ * An item's files, screenshots and description: archive.org's metadata, then what its main archive
+ * holds (enrich). Kept in memory and on disk under `cacheDir`, so each item is read once.
+ */
+export async function archiveItem(id: string, cacheDir: string): Promise<ItemDetails> {
+  if (!ID.test(id)) throw new Error("Bad item id");
+  const known = details.get(id);
+  if (known) return known;
+  const cacheFile = `${cacheDir}/items/${id}.json`;
+  try {
+    const cached = JSON.parse(await Deno.readTextFile(cacheFile)) as ItemDetails & { version?: number };
+    if (cached.version === DETAILS_VERSION) {
+      details.set(id, cached);
+      return cached;
+    }
+  } catch {
+    // Not cached yet.
+  }
+
+  const response = await fetch(`https://archive.org/metadata/${id}`);
+  if (!response.ok) throw new Error(`archive.org metadata answered ${response.status}`);
+  const body = await response.json() as {
+    metadata?: { description?: unknown };
+    files?: { name: string; size?: string; source?: string }[];
+  };
+  const files = body.files ?? [];
+  const names = new Set(files.map((file) => file.name));
+  const originals = files.filter((file) => file.source === "original");
+  const archives = originals
+    .filter((file) => ARCHIVE_FILE.test(file.name))
+    .map((file) => ({ name: file.name, size: Number(file.size ?? 0) }));
+  const uploaderDescription = cleanDescription(body.metadata?.description);
+  const main = [...archives].filter((a) => LISTABLE.test(a.name)).sort((a, b) => b.size - a.size)[0];
+  const extra = main ? await enrich(id, main) : {};
+  const result: ItemDetails = {
+    id,
+    // "Diablo 2 mod" alone is the upload form's subject, not a description.
+    description: extra.description ??
+      (uploaderDescription && !/^diablo\s*(2|ii)\s*mod\.?$/i.test(uploaderDescription) ? uploaderDescription : ""),
+    descriptionSource: extra.descriptionSource ?? (uploaderDescription ? "archive.org" : null),
+    archives,
+    screenshots: originals
+      .filter((file) => IMAGE_FILE.test(file.name) && !file.name.startsWith("__ia_thumb"))
+      .map((file) => {
+        const thumb = `${file.name.replace(/\.[^.]+$/, "")}_thumb.jpg`;
+        return { full: imageUrl(id, file.name), thumb: imageUrl(id, names.has(thumb) ? thumb : file.name) };
+      }),
+    links: extra.links ?? [],
+    keywords: [...new Set(extra.keywords ?? [])],
+    unpackedSize: extra.unpackedSize ?? 0,
+  };
+  details.set(id, result);
+  await Deno.mkdir(`${cacheDir}/items`, { recursive: true });
+  await Deno.writeTextFile(cacheFile, JSON.stringify({ ...result, version: DETAILS_VERSION }));
+  return result;
+}
+
+/**
+ * A screenshot, from the disk cache or fetched once into it. Only an image file of a listed item can
+ * be asked for. The browser may keep it for good: an archive.org file under a name never changes.
+ */
+export async function browseImage(cacheDir: string, id: string, file: string): Promise<Response> {
+  if (!ID.test(id) || !IMAGE_FILE.test(file) || file.includes("..") || file.includes("\\")) {
+    return new Response("Not found", { status: 404 });
+  }
+  const local = `${cacheDir}/images/${id}/${file.replace(/\//g, "__")}`;
+  const type = /\.png$/i.test(file)
+    ? "image/png"
+    : /\.gif$/i.test(file)
+    ? "image/gif"
+    : /\.webp$/i.test(file)
+    ? "image/webp"
+    : /\.bmp$/i.test(file)
+    ? "image/bmp"
+    : "image/jpeg";
+  const headers = { "content-type": type, "cache-control": "public, max-age=31536000, immutable" };
+  try {
+    return new Response((await Deno.readFile(local)).slice(), { headers });
+  } catch {
+    // Not cached yet.
+  }
+  const response = await fetch(downloadUrl(id, file));
+  if (!response.ok) return new Response("Not found", { status: 404 });
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await Deno.mkdir(local.slice(0, local.lastIndexOf("/")), { recursive: true });
+  await Deno.writeFile(local, bytes);
+  return new Response(bytes.slice(), { headers });
+}
+
+// ---- Jobs: download, unpack, install ---------------------------------------------------------------
+
+export type JobState = "downloading" | "extracting" | "installing" | "installed" | "downloaded" | "failed";
+
+export interface Job {
+  source: "archive";
+  id: string;
+  title: string;
+  file: string;
+  /** The archive on disk; gone once it has been unpacked. */
+  path: string;
+  state: JobState;
+  received: number;
+  total: number;
+  extracted: number;
+  /** Unpacked size, when the listing gave it: extraction progress is `extracted / unpackedSize`. */
+  unpackedSize: number;
+  installing: string | null;
+  result: InstallResult | null;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
+const jobs = new Map<string, Job>();
+
+// Throughput, for the downloads page's graph: bytes from the network and bytes written to disk.
+const counters = { net: 0, disk: 0 };
+const history: { t: number; net: number; disk: number }[] = [];
+const HISTORY_SECONDS = 300;
+let sampler: number | null = null;
+let last = { net: 0, disk: 0 };
+
+function sample() {
+  history.push({ t: Date.now(), net: counters.net - last.net, disk: counters.disk - last.disk });
+  last = { ...counters };
+  while (history.length > HISTORY_SECONDS) history.shift();
+  const active = [...jobs.values()].some((job) => ["downloading", "extracting", "installing"].includes(job.state));
+  // Keeps sampling for a minute after the last job, so the graph settles to zero before it stops.
+  if (!active && history.slice(-60).every((point) => point.net === 0 && point.disk === 0) && sampler !== null) {
+    clearInterval(sampler);
+    sampler = null;
+  }
+}
+
+function startSampling() {
+  if (sampler === null) {
+    last = { ...counters };
+    sampler = setInterval(sample, 1000);
+  }
+}
+
+export function throughput() {
+  return {
+    history,
+    peakNet: Math.max(0, ...history.map((point) => point.net)),
+    peakDisk: Math.max(0, ...history.map((point) => point.disk)),
+    totalNet: counters.net,
+    totalDisk: counters.disk,
+  };
+}
+
+/**
+ * This session's jobs, plus any archive already in the downloads folder (downloaded in an earlier
+ * session, or kept because installing it failed), so it can still be installed.
+ */
+export async function jobList(folder: string): Promise<Job[]> {
+  const list = [...jobs.values()];
+  const known = new Set(list.map((job) => `${job.id}/${job.file.split("/").pop()}`.toLowerCase()));
+  try {
+    for await (const item of Deno.readDir(`${folder}/archive`)) {
+      if (!item.isDirectory || !ID.test(item.name)) continue;
+      for await (const entry of Deno.readDir(`${folder}/archive/${item.name}`)) {
+        if (!entry.isFile || entry.name.endsWith(".part")) continue;
+        if (known.has(`${item.name}/${entry.name}`.toLowerCase())) continue;
+        const path = `${folder}/archive/${item.name}/${entry.name}`;
+        const info = await Deno.stat(path);
+        list.push({
+          source: "archive",
+          id: item.name,
+          title: item.name,
+          file: entry.name,
+          path: path.replace(/\//g, "\\"),
+          state: "downloaded",
+          received: info.size,
+          total: info.size,
+          extracted: 0,
+          unpackedSize: 0,
+          installing: null,
+          result: null,
+          startedAt: (info.mtime ?? new Date()).toISOString(),
+        });
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  return list;
+}
+
+/** The archive of `file` for item `id` in the downloads folder, or null. An id and one file name only. */
+export async function downloadedFile(folder: string, id: string, file: string): Promise<string | null> {
+  const name = file.split("/").pop() ?? "";
+  if (!ID.test(id) || !name || name.includes("\\") || name === "." || name === "..") return null;
+  const path = `${folder}/archive/${id}/${name}`;
+  const info = await Deno.stat(path).catch(() => null);
+  return info?.isFile ? path : null;
+}
+
+export interface InstallTarget {
+  /** The install's MODS folder. */
+  modsDir: string;
+  /** A folder on the same drive as MODS, for unpacking: the final move is then a rename. */
+  stagingDir: string;
+}
+
+export interface DownloadSettings {
+  keepArchives?: boolean;
+  verifyAfterDownload?: boolean;
+}
+
+export function activeJobCount(): number {
+  return [...jobs.values()].filter((job) => ["downloading", "extracting", "installing"].includes(job.state)).length;
+}
+
+async function runInstall(
+  job: Job,
+  archive: string,
+  folder: string,
+  target: InstallTarget,
+  settings: DownloadSettings = {},
+) {
+  job.state = "extracting";
+  let written = 0;
+  try {
+    const result = await installArchive(archive, `${target.stagingDir}/${job.id}`, target.modsDir, job.title, {
+      expectedBytes: job.unpackedSize,
+      keepDir: `${folder}/archive/${job.id}/unpacked`,
+      onExtract: (bytes) => {
+        counters.disk += Math.max(0, bytes - written);
+        written = bytes;
+        job.extracted = bytes;
+      },
+      onInstall: (name) => {
+        job.state = "installing";
+        job.installing = name;
+      },
+    });
+    job.result = result;
+    job.state = "installed";
+    if (!settings.keepArchives) {
+      // Unpacked: the archive is only taking space now.
+      await Deno.remove(archive).catch(() => {});
+      job.path = "";
+    }
+  } catch (error) {
+    job.state = "failed";
+    job.error = (error as Error).message;
+  } finally {
+    job.installing = null;
+    job.endedAt = new Date().toISOString();
+  }
+}
+
+/**
+ * Downloads one of an item's own files, then unpacks and installs it. Only a file the item's metadata
+ * lists can be asked for. The archive is deleted once unpacked; it stays when unpacking fails, so it
+ * can be tried again.
+ */
+export async function startJob(
+  folder: string,
+  cacheDir: string,
+  id: string,
+  file: string,
+  title: string,
+  target: InstallTarget,
+  settings: DownloadSettings = {},
+): Promise<Job> {
+  const item = await archiveItem(id, cacheDir);
+  const listed = item.archives.find((archive) => archive.name === file);
+  if (!listed) throw new Error("That file is not one of this item's downloads.");
+  const key = `archive:${id}/${file}`;
+  const current = jobs.get(key);
+  if (current && ["downloading", "extracting", "installing"].includes(current.state)) return current;
+
+  const dir = `${folder}/archive/${id}`;
+  const name = file.split("/").pop()!;
+  const main = [...item.archives].sort((a, b) => b.size - a.size)[0];
+  const job: Job = {
+    source: "archive",
+    id,
+    title,
+    file,
+    path: `${dir}/${name}`.replace(/\//g, "\\"),
+    state: "downloading",
+    received: 0,
+    total: listed.size,
+    extracted: 0,
+    unpackedSize: main?.name === file ? item.unpackedSize : 0,
+    installing: null,
+    result: null,
+    startedAt: new Date().toISOString(),
+  };
+  jobs.set(key, job);
+  startSampling();
+
+  void (async () => {
+    const partial = `${dir}/${name}.part`;
+    const existing = await downloadedFile(folder, id, file);
+    if (existing) return await runInstall(job, existing, folder, target, settings);
+    try {
+      await Deno.mkdir(dir, { recursive: true });
+      const response = await fetch(downloadUrl(id, file));
+      if (!response.ok || !response.body) throw new Error(`archive.org answered ${response.status}`);
+      job.total = Number(response.headers.get("content-length")) || job.total;
+      const out = await Deno.open(partial, { write: true, create: true, truncate: true });
+      // Counted on the way through; pipeTo closes the file when the body ends.
+      await response.body
+        .pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              job.received += chunk.length;
+              counters.net += chunk.length;
+              counters.disk += chunk.length;
+              controller.enqueue(chunk);
+            },
+          }),
+        )
+        .pipeTo(out.writable);
+      if (settings.verifyAfterDownload && job.total > 0 && job.received !== job.total) {
+        throw new Error(`Downloaded ${job.received} bytes, expected ${job.total}.`);
+      }
+      await Deno.rename(partial, `${dir}/${name}`);
+    } catch (error) {
+      job.state = "failed";
+      job.error = (error as Error).message;
+      job.endedAt = new Date().toISOString();
+      await Deno.remove(partial).catch(() => {});
+      return;
+    }
+    await runInstall(job, `${dir}/${name}`, folder, target, settings);
+  })();
+  return job;
+}
+
+/** Installs an archive already in the downloads folder (from an earlier session, or a failed try). */
+export async function installDownloaded(
+  folder: string,
+  cacheDir: string,
+  id: string,
+  file: string,
+  title: string,
+  target: InstallTarget,
+  settings: DownloadSettings = {},
+): Promise<Job> {
+  const archive = await downloadedFile(folder, id, file);
+  if (!archive) throw new Error("That file has not been downloaded.");
+  const item = await archiveItem(id, cacheDir).catch(() => null);
+  const info = await Deno.stat(archive);
+  const job: Job = {
+    source: "archive",
+    id,
+    title,
+    file,
+    path: archive.replace(/\//g, "\\"),
+    state: "extracting",
+    received: info.size,
+    total: info.size,
+    extracted: 0,
+    unpackedSize: item && [...item.archives].sort((a, b) => b.size - a.size)[0]?.name.split("/").pop() ===
+        file.split("/").pop()
+      ? item.unpackedSize
+      : 0,
+    installing: null,
+    result: null,
+    startedAt: new Date().toISOString(),
+  };
+  jobs.set(`archive:${id}/${file}`, job);
+  startSampling();
+  void runInstall(job, archive, folder, target, settings);
+  return job;
+}

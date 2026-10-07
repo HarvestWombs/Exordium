@@ -43,7 +43,7 @@ export function entriesFromD2SE(imported: D2SEImport, now: Date = new Date()): E
       name: `Core ${core.version}`,
       version: core.version,
       core: core.version,
-      source: { kind: "referenced", folder: `${install}/D2SE/CORES/${core.version}` },
+      source: { kind: "referenced", folder: core.folder ? `${install}/${core.folder}` : install },
       origin: base(core.version),
       files: manifest(core.scan.layer, `core ${core.version}`),
       languages: languages(core.scan.languages, `core ${core.version}`),

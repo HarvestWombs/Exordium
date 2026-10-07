@@ -49,6 +49,9 @@ export function classify(kind: FolderKind, path: string): Classification {
   if (atRoot) {
     if (LOGS.test(name)) return { kind: "excluded", reason: "a log the game or a plugin writes" };
     if (/^d2se_setup\.ini$/i.test(name)) return { kind: "excluded", reason: "D2SE's settings; read into the profile" };
+    if (/^exordium\.mod\.json$/i.test(name)) {
+      return { kind: "excluded", reason: "Exordium's settings; read into the profile" };
+    }
     if (kind === "core") {
       if (/\.(7z|zip)$/i.test(name)) return { kind: "excluded", reason: "D2SE's archived copy of the core" };
       if (/^d2xylauncher\.exe$/i.test(name)) return { kind: "excluded", reason: "D2SE's own tool" };

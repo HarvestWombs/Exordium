@@ -20,8 +20,24 @@ uses `#10142` / `#10052`.
 
 The D2SE core slot order is `1.07`, `1.08`, `1.09b`, `1.09d`, `1.10f`, `1.11b`, `1.12a`, `1.13c`. The last two table
 slots are empty. Exordium currently maps the shared 1.07-1.10f ABI plus the separate 1.11b, 1.12a and 1.13c entries.
-1.14 is not in this table: that runtime folded the classic DLLs into the executable, so it needs a different
-compatibility path.
+1.14 is not in this table: that runtime folded the classic DLLs into the executable, so it takes a different path. The
+early 1.00-1.06b cores also take a different path because D2SE ships each of them with its own original `Game.exe`.
+
+- For 1.07-1.13d, `exordium-game.exe` is installed as the box's `Game.exe`. The desktop server starts it with
+  `--detach`, and the process relaunches itself with the Windows 7 layer when needed.
+- For 1.00-1.06b, the box keeps the core's original `Game.exe`. `exordium-launch.exe` starts it suspended, loads
+  `exordium-hook.dll`, and the hook only installs the box's private registry before the game runs. Custom MPQs and
+  plugins still need real early-core bootstrap tables before they can work here.
+- For 1.14, the box keeps Blizzard's `Game.exe`. `exordium-launch.exe` starts it suspended, loads `exordium-hook.dll`,
+  runs `ExordiumHookStart`, and resumes the game only if that returns 0. The hook gives the game the box's registry,
+  lets several copies run, and re-points two calls in 1.14d's startup (checked byte for byte first) so the mod's and
+  language MPQs open after the game's own archives, through the game's own `ARCHIVE_LoadMPQFile`, and close before them.
+
+`exordium-launch.exe` answers `--detach`, `--wait` and `--dump-hive` and keeps session/play-time records for the boxes
+that use it (vault: `Projects/Exordium/Decisions/Sessions Are Kept by the Launcher.md`). When Rich Presence is enabled,
+it starts `exordium-presence.exe`, a small helper that only speaks Discord's local IPC and exits when the game or
+launcher exits. `src/common.hpp` holds what the native pieces share: the log, the config reader, the registry hive,
+import patching, and the commands Exordium runs.
 
 It must run with Windows 7 behaviour. On Windows 8+, pre-1.14 Fog validates its critical sections, finds
 `DebugInfo == -1`, and dies of a stack overflow inside `FOG_InitErrorMgr`. The desktop server starts the loader with

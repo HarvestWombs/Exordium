@@ -9,6 +9,7 @@ export {
   type Renderer,
 } from "./setup.ts";
 export { type Classification, classify, type FolderKind } from "./classify.ts";
+export { fileVersion, isSingleExeCore, rootCoreName, SINGLE_EXE_CORE_FILES, singleExeCoreName } from "./exe-version.ts";
 export {
   type ExcludedFile,
   type FolderScan,

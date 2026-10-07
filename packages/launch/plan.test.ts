@@ -14,7 +14,7 @@ function setup(text: string) {
   return readModSetup(parseIni(text));
 }
 
-Deno.test("loader plan follows D2SE MPQ priorities, including language between ModMPQ1 and ModMPQ2", () => {
+Deno.test("mod MPQs stack in order, and the language MPQ sits above them all", () => {
   const plan = resolve({
     files: [
       layer("game", "game", [
@@ -30,7 +30,7 @@ Deno.test("loader plan follows D2SE MPQ priorities, including language between M
         "d2Xvideo.mpq",
       ]),
       layer("core", "core", ["D2Launch.dll", "D2Client.dll", "D2Multi.dll", "patch_d2.mpq", "ENG.mpq"]),
-      layer("mod", "mod", ["one.mpq", "two.mpq", "three.mpq"]),
+      layer("mod", "mod", ["one.mpq", "two.mpq", "three.mpq", "four.mpq", "five.mpq"]),
     ],
     registry: [],
   });
@@ -45,6 +45,8 @@ ModUsePatch_D2=1
 ModMPQ1=one.mpq
 ModMPQ2=two.mpq
 ModMPQ3=three.mpq
+ModMPQ4=four.mpq
+ModMPQ5=five.mpq
 `),
   );
 
@@ -61,9 +63,13 @@ ModMPQ3=three.mpq
     ["d2Xvideo.mpq", 3000],
     ["patch_d2.mpq", 5000],
     ["one.mpq", 6000],
-    ["ENG.mpq", 7000],
-    ["two.mpq", 8000],
-    ["three.mpq", 9000],
+    ["two.mpq", 7000],
+    ["three.mpq", 8000],
+    // No limit of three: each further MPQ sits above the last.
+    ["four.mpq", 9000],
+    ["five.mpq", 10000],
+    // The language MPQ above them all.
+    ["ENG.mpq", 11000],
   ]);
   assertEquals(load.problems, []);
 });
@@ -111,7 +117,8 @@ D2SEDllName=ModSystem.dll
     { expansion: false },
   );
 
-  assertEquals(load.settings.direct, false);
+  // Not Modable, no ModForceDirect, but PlugY is on: D2SE turns -direct on for PlugY.
+  assertEquals(load.settings.direct, true);
   assertEquals(load.settings.txt, true);
   assertEquals(load.settings.plugY, true);
   assertEquals(load.plugins.map((plugin) => [plugin.kind, plugin.path, plugin.init, plugin.release]), [
@@ -158,7 +165,7 @@ Deno.test("the core names the version Game.exe gives Fog's error manager", () =>
 
 Deno.test("a core whose Game.exe version is unknown is warned about, not guessed", () => {
   const plan = resolve({ files: [], registry: [] });
-  const load = buildLoaderPlan(plan, setup("[Protected]\nD2Core=1.07\n"));
+  const load = buildLoaderPlan(plan, setup("[Protected]\nD2Core=1.99\n"));
   assertEquals(load.gameExeVersion, null);
   assertEquals(load.problems.filter((problem) => problem.level === "warning").length, 1);
 });
@@ -179,6 +186,23 @@ Deno.test("the command line names the renderer, and -w only means a DirectDraw w
   assertEquals(line("[USERSETTINGS]\nRenderer=3\nWindowMode=1\n[Protected]\nD2Core=1.10f\n"), "-3dfx");
 });
 
+Deno.test("optional game command switches are appended after the core launch flags", () => {
+  const command = gameCommandLine({
+    renderer: "ddraw",
+    windowed: true,
+    noSound: true,
+    direct: true,
+    txt: false,
+    hardcore: true,
+    plugY: false,
+    language: null,
+    skipToBNet: true,
+    seed: "123456",
+    startAct: 5,
+  });
+  assertEquals(command, "-w -ns -direct -skiptobnet -act5 -seed 123456");
+});
+
 Deno.test("PlugY comes from the mod or core first, else from the install's PlugY folder, as D2SE does", () => {
   const text = "[USERSETTINGS]\nEnablePlugY=1\n[Protected]\nD2Core=1.10f\nModAllowPlugY=1\n";
   const plugy = (paths: string[]) =>
@@ -187,4 +211,64 @@ Deno.test("PlugY comes from the mod or core first, else from the install's PlugY
   assertEquals(plugy(["PlugY/PlugY.dll", "PlugY/EmptyPage.dc6"]), "PlugY/PlugY.dll");
   assertEquals(plugy(["PlugY.dll", "PlugY/PlugY.dll"]), "PlugY.dll");
   assertEquals(plugy([]), "PlugY.dll"); // and the missing file is reported as a problem
+});
+
+Deno.test("a 1.14 core runs Blizzard's Game.exe: no DLL handoff, and no plugins built for the old DLLs", () => {
+  const plan = resolve({
+    files: [
+      layer("game", "game", ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"]),
+      layer("core", "core", ["Game.exe", "patch_d2.mpq"]),
+      layer("mod", "mod", ["one.mpq", "D2Mod.dll"]),
+    ],
+    registry: [],
+  });
+  const load = buildLoaderPlan(
+    plan,
+    setup("[USERSETTINGS]\n[Protected]\nD2Core=1.14d\nModMPQ1=one.mpq\nModUseD2Mod=1\n"),
+    { expansion: false },
+  );
+  assertEquals(load.singleExe, true);
+  assertEquals(load.gameDlls, []);
+  assertEquals(load.gameExeVersion, [1, 14, 3, 71]);
+  assertEquals(load.archives.find((archive) => archive.kind === "mod")?.path, "one.mpq");
+  assertEquals(load.problems.map((problem) => problem.message), [
+    "D2Mod is built for the pre-1.14 game DLLs; core 1.14d has none for it to load into.",
+    "Custom mod and language MPQs are not supported yet on core 1.14d; it runs through Blizzard's single Game.exe.",
+  ]);
+});
+
+Deno.test("a 1.00 core runs through the Exordium loader", () => {
+  const plan = resolve({
+    files: [
+      layer("game", "game", ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"]),
+      layer("core", "core", ["Game.exe", "D2Launch.dll", "D2Client.dll", "D2Multi.dll", "patch_d2.mpq"]),
+    ],
+    registry: [],
+  });
+  const load = buildLoaderPlan(plan, setup("[USERSETTINGS]\n[Protected]\nD2Core=1.00\n"), { expansion: false });
+  assertEquals(load.singleExe, false);
+  assertEquals(load.nativeGameExe, false);
+  assertEquals(load.gameDlls, ["D2Launch.dll", "D2Client.dll", "D2Multi.dll"]);
+  assertEquals(load.gameExeVersion, [1, 0, 0, 1]);
+  assertEquals(load.problems, []);
+});
+
+Deno.test("early cores use the loader for custom MPQs and plugins", () => {
+  const plan = resolve({
+    files: [
+      layer("game", "game", ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"]),
+      layer("core", "core", ["Game.exe", "D2Launch.dll", "D2Client.dll", "D2Multi.dll", "patch_d2.mpq", "D2Mod.dll"]),
+      layer("mod", "mod", ["mod.mpq"]),
+    ],
+    registry: [],
+  });
+  const load = buildLoaderPlan(
+    plan,
+    setup("[USERSETTINGS]\nLanguage=ENG\n[Protected]\nD2Core=1.06b\nModMPQ1=mod.mpq\nModUseD2Mod=1\n"),
+    { expansion: false },
+  );
+  assertEquals(load.nativeGameExe, false);
+  assertEquals(load.problems.map((problem) => problem.message), [
+    "language archive load needs ENG.mpq, which is not in the box.",
+  ]);
 });

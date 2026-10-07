@@ -49,11 +49,23 @@ export interface LoaderPlan {
    * `1.10f` is `v1.10`. Null when the setup names no core the loader can read.
    */
   gameVersion: string | null;
+  /**
+   * The core as mods name it (`1.13d`): what tells the loader which export ordinals the core's DLLs
+   * use, since 1.11 and 1.11b, or 1.13c and 1.13d, share a `gameVersion` but not their ordinals.
+   */
+  core: string | null;
   /** The file version the box's `Game.exe` (the loader) is stamped with; null when not known. */
   gameExeVersion: FileVersion | null;
+  /** A 1.14 core: the box keeps Blizzard's own `Game.exe`; the loader cannot become this game. */
+  singleExe: boolean;
+  /**
+   * A core that still needs Blizzard's own `Game.exe` for now. Kept for architecture edges; release
+   * builds should prefer `exordium-game.exe` over remote injection.
+   */
+  nativeGameExe: boolean;
   archives: ArchiveLoad[];
   plugins: PluginLoad[];
-  /** Core game DLLs D2SE refuses to continue without before entering D2Launch. */
+  /** Core game DLLs D2SE refuses to continue without before entering D2Launch; none for 1.14. */
   gameDlls: string[];
   problems: LaunchProblem[];
 }

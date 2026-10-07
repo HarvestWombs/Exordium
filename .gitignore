@@ -1,9 +1,13 @@
 node_modules/
 apps/desktop/dist/
 native/loader/build/
+native/window/build/
 .DS_Store
 Thumbs.db
 *.log
 coverage/
 scratch-ghidra/
 apps/desktop/Exordium/
+
+# Blizzard's per-version game files and their zips: hosted separately, never in the repository.
+Cores/

@@ -1,0 +1,39 @@
+{
+  "$schema": "./exordium.mod.schema.json",
+  "title": "The Black Soul",
+  "version": "0.9.0",
+  "core": "1.10f",
+  "author": "HarvestLabs",
+  "description": "A darker Diablo II: new skills for every class, a reworked item system and the Horadric Cube's Lua recipes.\n\nMultiplayer-ready.",
+  "readme": "Documentation/ReadMe.txt",
+  "art": {
+    "banner": "art/banner.png",
+    "icon": "art/icon.png",
+    "portrait": "art/portrait.png"
+  },
+  "links": [
+    { "label": "Discord", "url": "https://discord.gg/your-invite" },
+    { "label": "Website", "url": "https://example.com/black-soul" }
+  ],
+  "update": {
+    "endpoint": "updates.json",
+    "channel": "stable",
+    "automatic": false,
+    "background": true
+  },
+  "launch": {
+    "renderer": "glide",
+    "windowed": true,
+    "direct": true,
+    "txt": true,
+    "plugY": false,
+    "language": "ENG",
+    "skipToBNet": false,
+    "startAct": 1
+  },
+  "loads": {
+    "mpqs": ["MortalBorne.mpq"],
+    "d2mod": true,
+    "dlls": []
+  }
+}

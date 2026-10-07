@@ -5,10 +5,14 @@
  * A D2SE root is recognised without guessing: `D2SE.exe` beside `D2SE.ini` and a `MODS` folder,
  * with `D2SE\CORES\<version>\` inside. Cores hold one version's DLLs and `patch_d2.mpq`; the large
  * archives every version shares (`d2data.mpq` …) sit in the root, and become the `game` layer.
+ *
+ * A root whose `Game.exe` is 1.14 is a core too: 1.14 folded the DLLs into the exe, so the root's
+ * `Game.exe` and `patch_d2.mpq` are that version's core (`exe-version.ts`).
  */
 
 import { decodeIni, parseIni } from "./ini.ts";
 import { type LauncherSettings, type ModSetup, readLauncherSettings, readModSetup } from "./setup.ts";
+import { rootCoreName, SINGLE_EXE_CORE_FILES } from "./exe-version.ts";
 import { type FolderScan, scanFolder, scanNamed, type ScannedFile, type ScanOptions, scanTree } from "./scan.ts";
 
 /**
@@ -52,8 +56,10 @@ export const GAME_ARCHIVES = [
 
 export interface D2SELayout {
   root: string;
-  /** Folder names under `D2SE\CORES`, e.g. `1.10f`. */
+  /** Folder names under `D2SE\CORES`, e.g. `1.10f`, and the root's own 1.14 core when it has one. */
   cores: string[];
+  /** The 1.14 core the root itself is (`1.14d`), from its `Game.exe`; null for an older root. */
+  rootCore: string | null;
   /** Folder names under `MODS`. */
   mods: string[];
 }
@@ -71,7 +77,9 @@ export async function findD2SE(root: string): Promise<D2SELayout | null> {
   if (!(await has("D2SE.exe", false)) || !(await has("MODS", true)) || !(await has("D2SE/CORES", true))) return null;
   // `CORES` also collects D2SE's own folders ("Debug Logs"); a core is a version-named folder.
   const cores = (await folders(`${root}/D2SE/CORES`)).filter((name) => CORE_NAME.test(name));
-  return { root, cores, mods: await folders(`${root}/MODS`) };
+  const rootCore = await rootCoreName(root);
+  if (rootCore && !cores.some((name) => name.toLowerCase() === rootCore)) cores.push(rootCore);
+  return { root, cores, rootCore, mods: await folders(`${root}/MODS`) };
 }
 
 const CORE_NAME = /^\d+\.\d+[a-z]?$/i;
@@ -85,6 +93,10 @@ export interface Problem {
 
 export interface CoreImport {
   version: string;
+  /** Relative to the install root: `D2SE/CORES/1.10f`, or `""` for the root's own 1.14 core. */
+  folder: string;
+  /** 1.14 and later: the core is Blizzard's `Game.exe`, which the loader cannot become. */
+  singleExe: boolean;
   scan: FolderScan;
 }
 
@@ -128,7 +140,12 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
 
   const cores: CoreImport[] = [];
   for (const version of pick(layout.cores, options.cores)) {
-    cores.push({ version, scan: await scanFolder(`${root}/D2SE/CORES/${version}`, "core", options) });
+    if (version === layout.rootCore) {
+      cores.push({ version, folder: "", singleExe: true, scan: await scanRootCore(root, options) });
+    } else {
+      const folder = `D2SE/CORES/${version}`;
+      cores.push({ version, folder, singleExe: false, scan: await scanFolder(`${root}/${folder}`, "core", options) });
+    }
   }
   const coreScan = (version: string | null | undefined) =>
     version ? cores.find((c) => c.version.toLowerCase() === version.toLowerCase())?.scan ?? null : null;
@@ -212,6 +229,29 @@ export function modProblems(
     }
   }
   return problems;
+}
+
+/**
+ * The root's 1.14 core: only its own files (`SINGLE_EXE_CORE_FILES`), never the root's leftover
+ * pre-1.14 DLLs, which 1.14's `Game.exe` does not load. Its saves are the root's `save` folder, as a
+ * D2SE core's are its own.
+ */
+async function scanRootCore(root: string, options: ImportOptions): Promise<FolderScan> {
+  const layer = await scanNamed(root, SINGLE_EXE_CORE_FILES, options);
+  const writable = await scanTree(root, "save", { ...options, hash: options.hash && (options.hashWritable ?? true) });
+  const bytes = layer.reduce((sum, file) => sum + file.size, 0);
+  return {
+    root,
+    kind: "core",
+    layer,
+    writable,
+    languages: {},
+    excluded: [],
+    folders: [{ name: "", files: layer.length, bytes }],
+    bytes,
+    hashed: 0,
+    data: null,
+  };
 }
 
 /** A mod folder's `D2SE_SETUP.ini`, read; `null` when it has none. */

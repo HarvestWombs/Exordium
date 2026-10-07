@@ -35,6 +35,9 @@ export interface ModSetup {
     direct: boolean;
     txt: boolean;
     language: string | null;
+    skipToBNet?: boolean;
+    seed?: string | null;
+    startAct?: 1 | 2 | 3 | 4 | 5 | null;
   };
 
   /** `[Protected]` — the modder's settings. */
@@ -71,7 +74,7 @@ export interface ModSetup {
     dlls: string[];
     /** Whether `patch_d2.mpq` is loaded at all. */
     patchD2: boolean;
-    /** `ModMPQ1` … `ModMPQ3`, lowest priority first; all above `patch_d2.mpq`. */
+    /** `ModMPQ1`, `ModMPQ2` …, lowest priority first; all above `patch_d2.mpq`. No limit. */
     mpqs: string[];
   };
 
@@ -106,7 +109,13 @@ export function readModSetup(ini: Ini): ModSetup {
     if (dll === null) break;
     dlls.push(dll);
   }
-  const mpqs = [1, 2, 3].map((i) => iniText(ini, P, `ModMPQ${i}`)).filter((m): m is string => m !== null);
+  // D2SE defines ModMPQ1..3; any further ModMPQ<n> keys are read too, in number order. A gap is
+  // skipped, as before: ModMPQ1 and ModMPQ3 without ModMPQ2 are both loaded.
+  const mpqs: string[] = [];
+  for (let i = 1; i < 100; i++) {
+    const mpq = iniText(ini, P, `ModMPQ${i}`);
+    if (mpq !== null) mpqs.push(mpq);
+  }
 
   const realm = {
     gateway: iniText(ini, P, "RealmGateway"),
@@ -132,7 +141,8 @@ export function readModSetup(ini: Ini): ModSetup {
       windowed: iniFlag(ini, U, "WindowMode", false),
       noSound: iniFlag(ini, U, "NoSound", false),
       hardcore: iniFlag(ini, U, "EnableHC", true),
-      plugY: iniFlag(ini, U, "EnablePlugY", false),
+      // D2SE reads it with a default of 1 (D2SE.exe 0x40E225).
+      plugY: iniFlag(ini, U, "EnablePlugY", true),
       direct: iniFlag(ini, U, "Direct", false),
       txt: iniFlag(ini, U, "Txt", false),
       language: iniText(ini, U, "Language"),
@@ -184,12 +194,21 @@ export interface LaunchSettings {
   hardcore: boolean;
   plugY: boolean;
   language: string | null;
+  skipToBNet: boolean;
+  seed: string | null;
+  startAct: 1 | 2 | 3 | 4 | 5 | null;
 }
 
 /**
- * The rules D2SE's comments describe: `-direct`/`-txt` are the player's choice only when the mod
- * is `Modable`; otherwise only explicit `ModForceDirect=1` / `ModForceTxt=1` turns them on.
- * Hardcore and PlugY need both the modder's permission and the player's checkbox.
+ * D2SE's own rules, read from D2SE.exe (0x40E1A3 reads the setup, 0x40D605 builds the flags):
+ * - `-direct` is on when the mod is `Modable` and the player ticked Direct, **or when PlugY is on**,
+ *   or when the mod is not `Modable` and writes `ModForceDirect=1`. PlugY reads its images loose
+ *   from disk, and mods that ship PlugY rely on this: Synthesis's D2Tweaks reads interface XML that
+ *   exists only loose, and without `-direct` it corrupts Storm's open-file list and crashes on
+ *   entering a game.
+ * - `-txt` is on when the mod is `Modable` and the player ticked Txt, or when the mod is not
+ *   `Modable` and writes `ModForceTxt=1`.
+ * - Hardcore and PlugY need both the modder's permission and the player's checkbox.
  */
 export function launchSettings(setup: ModSetup): LaunchSettings {
   const { player, mod } = setup;
@@ -197,11 +216,14 @@ export function launchSettings(setup: ModSetup): LaunchSettings {
     renderer: player.renderer,
     windowed: player.windowed,
     noSound: player.noSound,
-    direct: mod.modable ? player.direct : mod.forceDirect,
+    direct: (mod.modable ? player.direct : mod.forceDirect) || (mod.allowPlugY && player.plugY),
     txt: mod.modable ? player.txt : mod.forceTxt,
     hardcore: mod.allowHardcore && player.hardcore,
     plugY: mod.allowPlugY && player.plugY,
     language: player.language,
+    skipToBNet: player.skipToBNet ?? false,
+    seed: player.seed ?? null,
+    startAct: player.startAct ?? null,
   };
 }
 

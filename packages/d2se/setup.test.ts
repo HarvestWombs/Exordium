@@ -50,6 +50,9 @@ Deno.test("launch settings apply the modder's permissions to the player's choice
     hardcore: true,
     plugY: false,
     language: "ENG",
+    skipToBNet: false,
+    seed: null,
+    startAct: null,
   });
 
   // Not Modable: the player's -direct/-txt choice is ignored, the forced values win.
@@ -73,6 +76,16 @@ ModAllowHC=0
   assertEquals([bare.direct, bare.txt], [false, false]);
   const off = launchSettings(readModSetup(parseIni("[Protected]\nModable=0\nModForceDirect=0\nModForceTxt=0\n")));
   assertEquals([off.direct, off.txt], [false, false]);
+
+  // PlugY turns -direct on, as D2SE does, but not -txt: Synthesis's setup. EnablePlugY defaults on.
+  const synthesis = launchSettings(
+    readModSetup(parseIni("[USERSETTINGS]\nDirect=1\nTxt=1\n[Protected]\nModable=0\nModAllowPlugY=1\n")),
+  );
+  assertEquals([synthesis.direct, synthesis.txt, synthesis.plugY], [true, false, true]);
+  const plugYOff = launchSettings(
+    readModSetup(parseIni("[USERSETTINGS]\nEnablePlugY=0\n[Protected]\nModable=0\nModAllowPlugY=1\n")),
+  );
+  assertEquals([plugYOff.direct, plugYOff.plugY], [false, false]);
 });
 
 Deno.test("an empty setup gets the defaults the file's own comments state", () => {

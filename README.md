@@ -28,11 +28,13 @@ The architecture lives in the HarvestLabs vault (`ExcelsiorDeno/docs/vault`), no
 deno task test          # run the tests
 deno task verify        # fmt check, lint, type check, tests
 deno task build:loader  # build native/loader/build/exordium-game.exe (Visual Studio 2022, from PowerShell)
+deno task build:window  # build native/window/build/exordium-window.dll, the desktop window hook (same)
 ```
 
 ### Running the app
 
-The loader must be built first (`deno task build:loader`).
+The loader must be built first (`deno task build:loader`), and for the desktop window the window hook
+(`deno task build:window`).
 
 As a local web app, which works today:
 
