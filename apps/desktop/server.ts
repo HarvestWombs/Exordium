@@ -77,6 +77,7 @@ import { exordiumManifestFromD2SE } from "./mod-manifest.ts";
 import { runHidden } from "./native.ts";
 import { pickFolderNative, pickOpenFilesNative } from "./native-dialog.ts";
 import { exordiumRoot } from "./paths.ts";
+import { APP_VERSION, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
 import { powerShellLiteral, runPowerShellHidden } from "./windows-hidden-process.ts";
 import { hardenedWebViewEnv, startDetached, watchWebView } from "./webview.ts";
@@ -157,6 +158,7 @@ async function handleRequest(request: Request): Promise<Response> {
   }
   if (url.pathname === "/api/backups") return await backups(request, url);
   if (url.pathname === "/api/discord") return await discordRoute(request);
+  if (url.pathname === "/api/update") return await updateRoute(request);
   if (localOnlyGuarded(url.pathname)) {
     const refusal = await localOnlyRefusal();
     if (refusal) return refusal;
@@ -205,6 +207,7 @@ async function handleRequest(request: Request): Promise<Response> {
 console.log(`Exordium desktop dev server: http://127.0.0.1:${server.addr.port}/`);
 // After the module has finished evaluating: startInstance reads state declared further down.
 setTimeout(() => void startInstance(), 0);
+setTimeout(() => void startupUpdate(), 5_000);
 // Runs are read from the launchers' records, including any that started or ended while Exordium was
 // closed, and every change after that is pushed to the page.
 setTimeout(() => {
@@ -1150,6 +1153,11 @@ interface AppSettings {
     keepArchives: boolean;
     verifyAfterDownload: boolean;
   };
+  updates: {
+    /** Look for a new Exordium on GitHub at startup, and download it in the background. */
+    checkOnStartup: boolean;
+    includePrereleases: boolean;
+  };
   privacy: {
     /** No network: Browse, cores, Discord sign-in and presence all refuse (localOnlyRefusal). */
     localOnly: boolean;
@@ -1213,6 +1221,10 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     maxParallel: 2,
     keepArchives: false,
     verifyAfterDownload: true,
+  },
+  updates: {
+    checkOnStartup: true,
+    includePrereleases: false,
   },
   privacy: {
     localOnly: false,
@@ -1973,6 +1985,8 @@ async function status() {
     playtime: Object.fromEntries(await sessions.playtime()),
     // A desktop shortcut starts Exordium.exe itself, which only exists in the packaged app.
     packaged: isPackaged(),
+    version: APP_VERSION,
+    update: { phase: updater.state.phase, version: updater.state.update?.version ?? null },
     discord: await discordStatus(),
     appSettings: appSettingsResponse(settings),
     args: Deno.args,
@@ -2055,6 +2069,10 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     verifyAfterDownload: "boolean",
   });
   next.downloads.maxParallel = Math.max(1, Math.min(8, Math.round(next.downloads.maxParallel)));
+  mergeObject(next.updates, record.updates, {
+    checkOnStartup: "boolean",
+    includePrereleases: "boolean",
+  });
   mergeObject(next.privacy, record.privacy, {
     localOnly: "boolean",
   });
@@ -3324,6 +3342,98 @@ async function uninstall(root: string, key: string, target: BoxTarget, keepSaves
     if (state.lastPlayed === key) state.lastPlayed = null;
   });
   return Response.json({ ok: true, savesBackup });
+}
+
+// ---- Exordium's own updates (updater.ts) --------------------------------------------------------
+
+/**
+ * The folder updates replace files in: Exordium.exe's own. A dev server has none, so its updates are
+ * staged in its state folder and never applied.
+ */
+const appDir = isPackaged() ? Deno.execPath().replace(/[\\/][^\\/]*$/, "") : `${exordiumRoot}/dev-app`;
+const updater = new Updater({
+  appDir,
+  repo: Deno.env.get("EXORDIUM_UPDATE_REPO") || UPDATE_REPO,
+  token: Deno.env.get("EXORDIUM_UPDATE_TOKEN") || null,
+});
+
+/** At startup: clear what the last update set aside, then check and download when the settings say so. */
+async function startupUpdate(): Promise<void> {
+  if (isPackaged()) {
+    const removed = await sweepUpdate(appDir);
+    if (removed) appLog("info", `update: removed ${removed} files the last update replaced`);
+  }
+  const settings = appSettingsFromState(await readState());
+  if (!settings.updates.checkOnStartup || settings.privacy.localOnly) return;
+  await checkAndDownload(settings.updates.includePrereleases);
+}
+
+async function checkAndDownload(includePrereleases: boolean): Promise<void> {
+  const checked = await updater.check(includePrereleases);
+  notify("status");
+  if (checked.phase === "failed") appLog("warn", `update check: ${checked.error}`);
+  if (checked.phase !== "available") return;
+  appLog("info", `update: ${checked.update!.version} is available; downloading`);
+  const downloaded = await updater.download();
+  if (downloaded.phase === "failed") appLog("warn", `update download: ${downloaded.error}`);
+  else appLog("info", `update: ${downloaded.update!.version} is ready`);
+  notify("status");
+}
+
+/**
+ * GET: the updater's state. POST `{ action }`: "check" (and download what it finds), "download", or
+ * "apply", which swaps the files in and restarts Exordium. Applying waits for every game to close:
+ * Exordium follows each run to back it up when it ends.
+ */
+async function updateRoute(request: Request): Promise<Response> {
+  const view = () => ({ ...updater.state, packaged: isPackaged() });
+  if (request.method !== "POST") return Response.json(view());
+  const body = await request.json().catch(() => null) as { action?: unknown } | null;
+  const action = typeof body?.action === "string" ? body.action : "";
+  if (action === "check" || action === "download") {
+    const refusal = await localOnlyRefusal();
+    if (refusal) return refusal;
+    const settings = appSettingsFromState(await readState());
+    if (action === "check") void checkAndDownload(settings.updates.includePrereleases);
+    else void updater.download().then(() => notify("status"));
+    // Answers once the work has started; the page follows it through status events.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return Response.json(view());
+  }
+  if (action === "apply") {
+    if (!isPackaged()) {
+      return Response.json({ error: "Updates install into the packaged Exordium only." }, { status: 409 });
+    }
+    await refreshSessions();
+    if (sessionRunning.length + legacyRunning.length > 0) {
+      return Response.json({ error: "Close your games first: Exordium backs them up when they end." }, {
+        status: 409,
+      });
+    }
+    try {
+      const version = await updater.apply();
+      appLog("info", `update: ${APP_VERSION} -> ${version} applied; restarting`);
+    } catch (error) {
+      if (error instanceof UpdateError) return Response.json({ error: error.message }, { status: 500 });
+      throw error;
+    }
+    // After the answer has gone out, so the page knows to expect the restart.
+    setTimeout(() => void restartForUpdate(), 300);
+    return Response.json({ ok: true, restarting: true });
+  }
+  return Response.json({ error: "Unknown action" }, { status: 400 });
+}
+
+/** Starts the updated Exordium.exe and exits this one. The new one claims instance.json. */
+async function restartForUpdate(): Promise<void> {
+  await Deno.remove(instanceFile).catch(() => {});
+  await discordPresence.set(null).catch(() => {});
+  const exe = Deno.execPath();
+  const args = Deno.args.filter((arg, i, all) => arg !== "--play" && all[i - 1] !== "--play");
+  if (!startDetached(exe, args, appDir)) {
+    appLog("error", `update: could not start the updated Exordium (${exe}); start it again by hand`);
+  }
+  Deno.exit(0);
 }
 
 // ---- One Exordium at a time: `--play` from a desktop shortcut -------------------------------------

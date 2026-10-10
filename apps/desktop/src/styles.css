@@ -3655,3 +3655,41 @@ fieldset legend {
 .install-modal .row-actions {
   justify-content: flex-end;
 }
+
+.update-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.update-row p,
+.update-notes p {
+  margin: 4px 0 0;
+}
+
+.update-row .row-actions {
+  justify-content: flex-end;
+}
+
+.update-notes {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.update-notes-text {
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.update-progress {
+  height: 4px;
+  background: var(--raised);
+}
+
+.update-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}

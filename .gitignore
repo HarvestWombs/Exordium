@@ -14,3 +14,6 @@ apps/desktop/Exordium/
 
 # Blizzard's per-version game files and their zips: hosted separately, never in the repository.
 Cores/
+
+# Release zips made by apps/desktop/release.ts.
+apps/desktop/release/

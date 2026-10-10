@@ -12,7 +12,7 @@ function parent(path: string): string {
   return slash(path).replace(/\/[^/]*$/, "");
 }
 
-function isPackagedExe(): boolean {
+export function isPackagedExe(): boolean {
   return !/(^|[\\/])deno(\.exe)?$/i.test(Deno.execPath());
 }
 
