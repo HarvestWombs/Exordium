@@ -46,7 +46,9 @@ import {
   jobList,
   KEYWORD_GROUPS,
   MODDB_URL,
+  modDbList,
   startJob,
+  startUrlJob,
   throughput,
 } from "./browse.ts";
 import { appLog, type Heartbeat, heartbeat, startAppLog } from "./applog.ts";
@@ -70,9 +72,13 @@ import {
   runActivity,
 } from "./discord.ts";
 import { DOC_TYPES, findDocs, modLinks, webUrl } from "./docs.ts";
-import { copyTree } from "./install.ts";
+import { copyTree, installArchive } from "./install.ts";
+import { exordiumManifestFromD2SE } from "./mod-manifest.ts";
 import { runHidden } from "./native.ts";
+import { pickFolderNative, pickOpenFilesNative } from "./native-dialog.ts";
+import { exordiumRoot } from "./paths.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
+import { powerShellLiteral, runPowerShellHidden } from "./windows-hidden-process.ts";
 import { hardenedWebViewEnv, startDetached, watchWebView } from "./webview.ts";
 import {
   closeWindow,
@@ -88,7 +94,6 @@ import {
 const isDev = Deno.env.get("EXORDIUM_DEV") === "1";
 const viteDevOrigin = `http://127.0.0.1:${Deno.env.get("VITE_DEV_PORT") ?? "5273"}`;
 const distDir = new URL("./dist/", import.meta.url);
-const exordiumRoot = `${Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()}/Exordium`.replace(/\\/g, "/");
 /** The name the loader has inside a box; see installNativeLoader. */
 const GAME_EXE = "Game.exe";
 /** Old injector-sidecar names. Release boxes delete these if an earlier build left them behind. */
@@ -97,6 +102,17 @@ const PRESENCE_EXE = "exordium-presence.exe";
 const HOOK_DLL = "exordium-hook.dll";
 const EXORDIUM_MOD_FILE = "exordium.mod.json";
 const EXPANSION_ARCHIVES = new Set(["d2exp.mpq", "d2xmusic.mpq", "d2xtalk.mpq", "d2xvideo.mpq"]);
+
+function coreTitle(version: string): string {
+  return `${version} ${coreLabel(version)}`;
+}
+
+function coreLabel(version: string): "LOD" | "Diablo II" {
+  const match = /^1\.(\d{2})[a-z]?$/i.exec(version.trim());
+  if (!match) return "LOD";
+  return Number(match[1]) <= 6 ? "Diablo II" : "LOD";
+}
+
 // First, so everything after it is on the record (applog.ts). The details are read every ten
 // minutes, long after the module has finished loading.
 startAppLog(() => ({ eventStreams: eventStreams.size, running: sessionRunning.length + legacyRunning.length }));
@@ -115,6 +131,9 @@ const server = Deno.serve(
 async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/api/scan-d2se") return await scanD2SE(url);
+  if (url.pathname === "/api/import-d2se-metadata") return await importD2SEMetadata(request);
+  if (url.pathname === "/api/d2se-converter/preview") return await d2seConverterPreview(request);
+  if (url.pathname === "/api/d2se-converter/write") return await d2seConverterWrite(request);
   if (url.pathname === "/api/build-box") return await buildBox(request);
   if (url.pathname === "/api/play") return await play(request);
   if (url.pathname === "/api/status") return Response.json(await status());
@@ -138,6 +157,10 @@ async function handleRequest(request: Request): Promise<Response> {
   }
   if (url.pathname === "/api/backups") return await backups(request, url);
   if (url.pathname === "/api/discord") return await discordRoute(request);
+  if (localOnlyGuarded(url.pathname)) {
+    const refusal = await localOnlyRefusal();
+    if (refusal) return refusal;
+  }
   if (url.pathname === "/api/discord/connect") return await discordConnect(request);
   if (url.pathname === "/api/discord/callback") return await discordCallback(url);
   if (url.pathname === "/api/discord/disconnect") return await discordDisconnect(request);
@@ -146,6 +169,11 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/logs") return await logs(request, url);
   if (url.pathname === "/api/open-folder") return await openFolder(request);
   if (url.pathname === "/api/open-link") return await openLink(request);
+  if (url.pathname === "/api/pick-folder") return await pickFolderRoute(url);
+  if (url.pathname === "/api/pick-open-files") return await pickOpenFilesRoute(url);
+  if (url.pathname === "/api/symlink-status") return Response.json(await symlinkStatus());
+  if (url.pathname === "/api/restart-admin") return await restartAdmin(request);
+  if (url.pathname === "/api/install-local-archive") return await installLocalArchive(request);
   if (url.pathname.startsWith("/api/library/")) return await libraryRoute(request, url);
   if (url.pathname.startsWith("/api/docs/")) return await serveDoc(url);
   if (url.pathname === "/api/browse" || url.pathname.startsWith("/api/browse/")) {
@@ -273,17 +301,19 @@ interface ExordiumModManifest {
   skipToBNet?: unknown;
   seed?: unknown;
   startAct?: unknown;
-  launch?: Record<string, unknown>;
-  loads?: Record<string, unknown>;
+  launch?: Record<string, unknown> | null;
+  loads?: Record<string, unknown> | null;
   mpqs?: unknown;
   dlls?: unknown;
   author?: unknown;
   links?: unknown;
   description?: unknown;
   readme?: unknown;
-  art?: { banner?: unknown; icon?: unknown; portrait?: unknown };
+  art?: { banner?: unknown; icon?: unknown; portrait?: unknown } | null;
+  realm?: Record<string, unknown> | null;
   update?: unknown;
   updates?: unknown;
+  d2seUpdate?: unknown;
 }
 
 /**
@@ -324,6 +354,8 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
   }
 
   const manifest = json as ExordiumModManifest;
+  const launch = isRecord(manifest.launch) ? manifest.launch : {};
+  const loads = isRecord(manifest.loads) ? manifest.loads : {};
   const title = textValue(manifest.title) ?? textValue(manifest.name) ?? folder.slice(folder.lastIndexOf("/") + 1);
   const core = textValue(manifest.core);
   if (!core) problems.push({ level: "error", message: `${EXORDIUM_MOD_FILE} must set "core", for example "1.13c".` });
@@ -332,27 +364,29 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
     title,
     version: textValue(manifest.version),
     core,
-    renderer: rendererValue(manifest.launch?.renderer ?? manifest.renderer, problems),
-    windowed: boolValue(manifest.launch?.windowed ?? manifest.windowed, false),
-    noSound: boolValue(manifest.launch?.noSound ?? manifest.noSound, false),
-    direct: boolValue(manifest.launch?.direct ?? manifest.direct, false),
-    txt: boolValue(manifest.launch?.txt ?? manifest.txt, false),
-    hardcore: boolValue(manifest.launch?.hardcore ?? manifest.hardcore, true),
-    plugY: boolValue(manifest.launch?.plugY ?? manifest.plugY, false),
-    language: textValue(manifest.launch?.language ?? manifest.language),
-    skipToBNet: boolValue(manifest.launch?.skipToBNet ?? manifest.skipToBNet, false),
-    seed: seedValue(manifest.launch?.seed ?? manifest.seed),
-    startAct: actValue(manifest.launch?.startAct ?? manifest.startAct),
+    renderer: rendererValue(launch.renderer ?? manifest.renderer, problems),
+    windowed: boolValue(launch.windowed ?? manifest.windowed, false),
+    noSound: boolValue(launch.noSound ?? manifest.noSound, false),
+    direct: boolValue(launch.direct ?? manifest.direct, false),
+    txt: boolValue(launch.txt ?? manifest.txt, false),
+    hardcore: boolValue(launch.hardcore ?? manifest.hardcore, true),
+    plugY: boolValue(launch.plugY ?? manifest.plugY, false),
+    language: textValue(launch.language ?? manifest.language),
+    skipToBNet: boolValue(launch.skipToBNet ?? manifest.skipToBNet, false),
+    seed: seedValue(launch.seed ?? manifest.seed),
+    startAct: actValue(launch.startAct ?? manifest.startAct),
     description: textValue(manifest.description),
     readme: textValue(manifest.readme),
-    d2mod: boolValue(manifest.loads?.d2mod, false),
-    nefex: boolValue(manifest.loads?.nefex, false),
-    d2extra: boolValue(manifest.loads?.d2extra, false),
-    d2seUtility: boolValue(manifest.loads?.d2seUtility, false),
-    d2se: boolValue(manifest.loads?.d2se, false),
-    d2seDll: textValue(manifest.loads?.d2seDll),
-    mpqs: textList(manifest.loads?.mpqs ?? manifest.mpqs, "mpqs", problems),
-    dlls: textList(manifest.loads?.dlls ?? manifest.dlls, "dlls", problems),
+    d2mod: boolValue(loads.d2mod, false),
+    nefex: boolValue(loads.nefex, false),
+    d2extra: boolValue(loads.d2extra, false),
+    d2seUtility: boolValue(loads.d2seUtility, false),
+    d2se: boolValue(loads.d2se, false),
+    d2seDll: textValue(loads.d2seDll),
+    mpqs: textList(loads.mpqs ?? manifest.mpqs, "mpqs", problems),
+    dlls: textList(loads.dlls ?? manifest.dlls, "dlls", problems),
+    realm: realmValue(manifest.realm, problems),
+    legacyUpdate: d2seUpdateValue(manifest.d2seUpdate, problems),
   });
   const result: TitleSetup = {
     setup,
@@ -390,6 +424,8 @@ function nativeSetup(input: {
   d2seDll?: string | null;
   mpqs?: string[];
   dlls?: string[];
+  realm?: ModSetup["realm"];
+  legacyUpdate?: ModSetup["update"];
 }): ModSetup {
   const renderer = input.renderer ?? "glide";
   const rendererCode = { ddraw: 0, d3d: 1, opengl: 2, glide: 3 }[renderer];
@@ -439,8 +475,8 @@ function nativeSetup(input: {
       patchD2: true,
       mpqs: input.mpqs ?? [],
     },
-    realm: null,
-    update: null,
+    realm: input.realm ?? null,
+    update: input.legacyUpdate ?? null,
   };
 }
 
@@ -509,6 +545,46 @@ function updateSettingsValue(
   return settings;
 }
 
+function realmValue(value: unknown, problems: TitleSetup["problems"]): ModSetup["realm"] {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    problems.push({ level: "warning", message: `${EXORDIUM_MOD_FILE} "realm" should be an object.` });
+    return null;
+  }
+  const realm = {
+    gateway: textValue(value.gateway),
+    timezone: textValue(value.timezone),
+    gatewayName: textValue(value.gatewayName),
+    selected: textValue(value.selected),
+    port: textValue(value.port),
+  };
+  return Object.values(realm).some((entry) => entry !== null) ? realm : null;
+}
+
+function d2seUpdateValue(value: unknown, problems: TitleSetup["problems"]): ModSetup["update"] {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    problems.push({ level: "warning", message: `${EXORDIUM_MOD_FILE} "d2seUpdate" should be an object.` });
+    return null;
+  }
+  const mirrors = textList(value.mirrors, "d2seUpdate.mirrors", problems);
+  const file = textValue(value.file);
+  return file || mirrors.length > 0 ? { file, mirrors } : null;
+}
+
+async function writeExordiumModDraft(folder: string, setup: ModSetup): Promise<"created" | "exists"> {
+  const file = `${folder}/${EXORDIUM_MOD_FILE}`;
+  try {
+    await Deno.stat(file);
+    return "exists";
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  const manifest = exordiumManifestFromD2SE(setup);
+  await Deno.writeTextFile(file, JSON.stringify(manifest, null, 2) + "\n");
+  return "created";
+}
+
 async function scanD2SE(url: URL): Promise<Response> {
   const root = url.searchParams.get("root")?.trim();
   if (!root) return Response.json({ error: "Missing root" }, { status: 400 });
@@ -516,9 +592,18 @@ async function scanD2SE(url: URL): Promise<Response> {
   const imported = await readD2SE(root, { hash: false, hashWritable: false, linkData: true });
   if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
   const cores = new Map(imported.cores.map((core) => [core.version.toLowerCase(), core]));
+  const importableMods: { folder: string; title: string; core: string | null }[] = [];
   const mods = await Promise.all(imported.mods.map(async (mod) => {
+    const folder = `${imported.layout.root}/MODS/${mod.folder}`;
     // exordium.mod.json wins over D2SE_SETUP.ini (readTitleSetup).
-    const native = await readExordiumMod(`${imported.layout.root}/MODS/${mod.folder}`);
+    const native = await readExordiumMod(folder);
+    if (!native && mod.setup) {
+      importableMods.push({
+        folder: mod.folder,
+        title: mod.setup.mod.title ?? mod.setup.mod.name ?? mod.folder,
+        core: mod.setup.mod.core,
+      });
+    }
     const target = { kind: "mod" as const, folder: mod.folder };
     const key = entryKey(target);
     const options = state.options[entryKey(target)] ?? {};
@@ -585,7 +670,7 @@ async function scanD2SE(url: URL): Promise<Response> {
       key,
       art: await artSummary(imported.layout.root, target),
       folder: core.version,
-      title: options.title ?? setup?.mod.name ?? `Diablo II ${core.version}`,
+      title: coreTitle(core.version),
       author: options.author ?? null,
       realm: setup?.realm ?? null,
       description: plainDescription(setup?.mod.description),
@@ -611,6 +696,12 @@ async function scanD2SE(url: URL): Promise<Response> {
       settings: loader?.settings ?? null,
     };
   }));
+  if (appSettingsFromState(state).boxes.autoCleanStale) {
+    await cleanStaleBoxes(imported.layout.root, [
+      ...imported.mods.map((mod) => ({ kind: "mod" as const, folder: mod.folder })),
+      ...imported.cores.map((core) => ({ kind: "core" as const, version: core.version })),
+    ]).catch((error) => appLog("warn", `stale box cleanup: ${(error as Error).message}`));
+  }
   return Response.json({
     root: imported.layout.root,
     activeFolder: imported.launcher?.activeFolder ?? null,
@@ -618,7 +709,102 @@ async function scanD2SE(url: URL): Promise<Response> {
     missingGameArchives: imported.missingGameArchives,
     cores: coreEntries,
     mods,
+    importableMods: importableMods.sort((a, b) => a.title.localeCompare(b.title)),
   });
+}
+
+async function importD2SEMetadata(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as { root?: unknown; folders?: unknown } | null;
+  const root = typeof body?.root === "string" ? body.root.trim() : "";
+  if (!root) return Response.json({ error: "Missing root" }, { status: 400 });
+  const wanted = Array.isArray(body?.folders)
+    ? body.folders.filter((item): item is string => typeof item === "string")
+    : undefined;
+  const result = await importD2SEMetadataForFolders(root, wanted);
+  if (!result) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
+  return Response.json(result);
+}
+
+async function importD2SEMetadataForFolders(root: string, wanted?: string[]) {
+  const imported = await readD2SE(root, {
+    hash: false,
+    hashWritable: false,
+    linkData: true,
+    ...(wanted ? { mods: wanted } : {}),
+  });
+  if (!imported) return null;
+
+  const created: string[] = [];
+  const skipped: string[] = [];
+  const failed: { folder: string; error: string }[] = [];
+  for (const mod of imported.mods) {
+    if (!mod.setup) {
+      skipped.push(mod.folder);
+      continue;
+    }
+    try {
+      const result = await writeExordiumModDraft(`${imported.layout.root}/MODS/${mod.folder}`, mod.setup);
+      if (result === "created") created.push(mod.folder);
+      else skipped.push(mod.folder);
+    } catch (error) {
+      failed.push({ folder: mod.folder, error: (error as Error).message });
+    }
+  }
+  return { created, skipped, failed };
+}
+
+async function d2seConverterPreview(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as { root?: unknown; folder?: unknown } | null;
+  const root = typeof body?.root === "string" ? body.root.trim() : "";
+  const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
+  if (!root || !folder) return Response.json({ error: "Missing root or folder." }, { status: 400 });
+  const imported = await readD2SE(root, { hash: false, hashWritable: false, linkData: true, mods: [folder] });
+  if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
+  const mod = imported.mods.find((item) => item.folder.toLowerCase() === folder.toLowerCase());
+  if (!mod?.setup) return Response.json({ error: "That mod has no D2SE_SETUP.ini to convert." }, { status: 404 });
+  const target = `${imported.layout.root}/MODS/${mod.folder}/${EXORDIUM_MOD_FILE}`;
+  const exists = await Deno.stat(target).then(() => true).catch(() => false);
+  return Response.json({
+    folder: mod.folder,
+    path: winPath(target),
+    exists,
+    manifest: exordiumManifestFromD2SE(mod.setup),
+  });
+}
+
+async function d2seConverterWrite(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as
+    | { root?: unknown; folder?: unknown; text?: unknown; overwrite?: unknown }
+    | null;
+  const root = typeof body?.root === "string" ? body.root.trim() : "";
+  const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
+  const text = typeof body?.text === "string" ? body.text : "";
+  if (!root || !folder || !text.trim()) {
+    return Response.json({ error: "Missing root, folder, or JSON." }, {
+      status: 400,
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return Response.json({ error: `Invalid JSON: ${(error as Error).message}` }, { status: 400 });
+  }
+  if (!isRecord(parsed)) return Response.json({ error: "The manifest must be a JSON object." }, { status: 400 });
+  const imported = await readD2SE(root, { hash: false, hashWritable: false, linkData: true, mods: [folder] });
+  if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
+  const mod = imported.mods.find((item) => item.folder.toLowerCase() === folder.toLowerCase());
+  if (!mod) return Response.json({ error: "That mod is not in this install." }, { status: 404 });
+  const target = `${imported.layout.root}/MODS/${mod.folder}/${EXORDIUM_MOD_FILE}`;
+  const exists = await Deno.stat(target).then(() => true).catch(() => false);
+  if (exists && body?.overwrite !== true) {
+    return Response.json({ error: `${EXORDIUM_MOD_FILE} already exists for ${mod.folder}.` }, { status: 409 });
+  }
+  await Deno.writeTextFile(target, JSON.stringify(parsed, null, 2) + "\n");
+  return Response.json({ ok: true, folder: mod.folder, path: winPath(target) });
 }
 
 /** What a box runs: a mod folder, or a D2SE core on its own (vanilla, with the core's own setup). */
@@ -637,7 +823,7 @@ function coreFolder(root: string, version: string): string {
 async function readCoreSetup(root: string, version: string): Promise<ModSetup | null> {
   const setup = await readSetupFile(coreFolder(root, version));
   if (setup) return setup;
-  return nativeSetup({ title: `Diablo II ${version}`, core: version, renderer: "ddraw", windowed: true });
+  return nativeSetup({ title: coreTitle(version), core: version, renderer: "ddraw", windowed: true });
 }
 
 /**
@@ -691,7 +877,9 @@ async function buildBox(request: Request): Promise<Response> {
   const action = typeof body?.action === "string" ? body.action : "build";
 
   try {
-    return Response.json(action === "verify" ? await verifyD2SEBox(root, target) : await realiseD2SEBox(root, target));
+    if (action === "verify") return Response.json(await verifyD2SEBox(root, target));
+    if (action === "rebuild") await backUpBeforeRebuild(root, target);
+    return Response.json(await realiseD2SEBox(root, target));
   } catch (error) {
     if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
     throw error;
@@ -836,9 +1024,7 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
   const lowerRegistry = resolve({ files: [], registry: [base, settings, box] }).registry;
   const hive = await installRegistry(boxes.folder(id), registry, lowerRegistry, copy);
   lap("registry");
-  const title = target.kind === "mod"
-    ? setup.mod.title ?? target.folder
-    : setup.mod.name ?? `Diablo II ${target.version}`;
+  const title = target.kind === "mod" ? setup.mod.title ?? target.folder : coreTitle(target.version);
   const iconFile = await artFile(imported.layout.root, target, "icon");
   const icon = iconFile ? winPath(iconFile) : null;
   const presence = gamePresenceAllowed(state, appSettings)
@@ -949,30 +1135,24 @@ interface AppSettings {
     extraFolders: string[];
   };
   launch: {
-    keepLauncherOpen: boolean;
+    /** Minimize Exordium's window once a game has started. It keeps running: it follows the run. */
+    minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
-    confirmRebuild: boolean;
   };
   boxes: {
+    /** On each library read, delete the boxes of this install's titles that are gone. */
     autoCleanStale: boolean;
-    rebuildAfterUpdates: boolean;
+    confirmRebuild: boolean;
     backupBeforeRebuild: boolean;
   };
   downloads: {
-    allowBackground: boolean;
     maxParallel: number;
     keepArchives: boolean;
     verifyAfterDownload: boolean;
   };
-  updates: {
-    checkOnStartup: boolean;
-    coreChannel: "stable" | "testing" | "local";
-    autoDownload: boolean;
-    askBeforeApply: boolean;
-  };
   privacy: {
+    /** No network: Browse, cores, Discord sign-in and presence all refuse (localOnlyRefusal). */
     localOnly: boolean;
-    shareInstalledMods: boolean;
   };
   diagnostics: {
     verboseLaunchLogs: boolean;
@@ -1011,7 +1191,8 @@ interface DiscordAccount {
   avatar: string | null;
 }
 
-const stateFile = `${exordiumRoot}/state.json`;
+const stateFile = `${exordiumRoot}/exordium.json`;
+const legacyStateFile = `${(Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()).replace(/\\/g, "/")}/Exordium/state.json`;
 const DEFAULT_APP_SETTINGS: AppSettings = {
   library: {
     autoScanOnStartup: true,
@@ -1020,30 +1201,21 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     extraFolders: [],
   },
   launch: {
-    keepLauncherOpen: true,
+    minimizeOnLaunch: false,
     showLogsOnFailure: true,
-    confirmRebuild: true,
   },
   boxes: {
     autoCleanStale: false,
-    rebuildAfterUpdates: true,
+    confirmRebuild: true,
     backupBeforeRebuild: true,
   },
   downloads: {
-    allowBackground: true,
     maxParallel: 2,
     keepArchives: false,
     verifyAfterDownload: true,
   },
-  updates: {
-    checkOnStartup: true,
-    coreChannel: "stable",
-    autoDownload: false,
-    askBeforeApply: true,
-  },
   privacy: {
     localOnly: false,
-    shareInstalledMods: false,
   },
   diagnostics: {
     verboseLaunchLogs: false,
@@ -1072,6 +1244,8 @@ async function readState(): Promise<AppState> {
     };
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
+      const legacy = await readLegacyState();
+      if (legacy) return legacy;
       return {
         root: null,
         lastPlayed: null,
@@ -1084,6 +1258,25 @@ async function readState(): Promise<AppState> {
       };
     }
     throw error;
+  }
+}
+
+async function readLegacyState(): Promise<AppState | null> {
+  if (legacyStateFile.toLowerCase() === stateFile.toLowerCase()) return null;
+  try {
+    return {
+      root: null,
+      lastPlayed: null,
+      playedAt: {},
+      options: {},
+      updateSettings: {},
+      updateChecks: {},
+      favorites: [],
+      hidden: [],
+      ...JSON.parse(await Deno.readTextFile(legacyStateFile)),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -1180,7 +1373,7 @@ async function updatePresence(): Promise<void> {
   const showIdle = state.discord?.enabled ?? true;
   const showGames = state.discord?.gameActivity !== false;
   let want: Activity | null = null;
-  if (presenceHere() && sessionRunning.length === 0) {
+  if (presenceHere() && sessionRunning.length === 0 && !appSettingsFromState(state).privacy.localOnly) {
     const newest = legacyRunning
       .filter((run) => !endedRuns.has(`${run.key}#${run.copy}`))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
@@ -1516,6 +1709,67 @@ function backupConfig(state: AppState): BackupConfig {
   };
 }
 
+/** Before a Rebuild Box asked for by hand: the title's saves, when "Backup saves before rebuild" is on. */
+async function backUpBeforeRebuild(root: string, target: BoxTarget): Promise<void> {
+  const state = await readState();
+  if (!appSettingsFromState(state).boxes.backupBeforeRebuild) return;
+  const id = boxIdFor(root, target);
+  const saves = (await (await Boxes.open(exordiumRoot)).state(id))?.saves;
+  if (!saves) return;
+  const config = backupConfig(state);
+  const title = target.kind === "mod" ? target.folder : coreTitle(target.version);
+  await takeBackup(saves, `${config.folder}/${id}`, {
+    reason: "before-rebuild",
+    title,
+    keep: config.keep,
+    skipIfUnchanged: true,
+  }).catch((error) => appLog("warn", `backup before rebuilding ${title}: ${(error as Error).message}`));
+}
+
+/**
+ * "Clean stale boxes automatically": deletes this install's boxes whose mod or core is gone. Only
+ * boxes built for this install (its tag ends the id), and nothing while a game runs. A box holds
+ * links and the files the game rewrites; saves, backups and the registry layer live elsewhere.
+ */
+async function cleanStaleBoxes(root: string, titles: BoxTarget[]): Promise<void> {
+  await refreshSessions();
+  if (sessionRunning.length + legacyRunning.length > 0) return;
+  const tag = `-${installTag(root)}`;
+  const live = new Set(titles.map((target) => boxIdFor(root, target)));
+  const boxes = await Boxes.open(exordiumRoot);
+  const stale: string[] = [];
+  for await (const entry of Deno.readDir(`${exordiumRoot}/boxes`)) {
+    if (entry.isDirectory && entry.name.startsWith("d2se-") && entry.name.endsWith(tag) && !live.has(entry.name)) {
+      stale.push(entry.name);
+    }
+  }
+  for (const id of stale) {
+    await boxes.remove(id);
+    appLog("info", `removed stale box ${id}`);
+  }
+}
+
+/** Routes that reach the network, refused in local-only mode. */
+function localOnlyGuarded(path: string): boolean {
+  return path === "/api/cores" || path === "/api/discord/connect" ||
+    [
+      "/api/browse",
+      "/api/browse/item",
+      "/api/browse/image",
+      "/api/browse/moddb",
+      "/api/browse/download",
+      "/api/browse/url-download",
+    ].includes(path);
+}
+
+async function localOnlyRefusal(): Promise<Response | null> {
+  if (!appSettingsFromState(await readState()).privacy.localOnly) return null;
+  return Response.json(
+    { error: "Local-only mode is on, so Exordium stays offline. Turn it off in Settings > Privacy.", localOnly: true },
+    { status: 403 },
+  );
+}
+
 /**
  * When the last copy of a title closes: its save folder, as the box links it, unless it matches the
  * newest backup. Runs as the session settles, so a game that ended while Exordium was closed is
@@ -1574,7 +1828,7 @@ async function backups(request: Request, url: URL): Promise<Response> {
   if (!root || !target) return Response.json({ error: "Missing root or key" }, { status: 400 });
   const folder = `${config.folder}/${boxIdFor(root, target)}`;
   const saves = `${titleFolder(root, target)}/save`;
-  const title = target.kind === "mod" ? target.folder : `Diablo II ${target.version}`;
+  const title = target.kind === "mod" ? target.folder : coreTitle(target.version);
   const id = typeof body?.id === "string" ? body.id : "";
 
   try {
@@ -1765,9 +2019,10 @@ function appSettingsFromState(state: AppState): AppSettings {
   return mergeAppSettings(DEFAULT_APP_SETTINGS, state.app ?? {});
 }
 
-// Boxes link files and copy only what the game rewrites (packages/box): hardlink, then symlink, then
-// copy as a fallback. Not a user setting -- a plain copy would defeat the whole box design.
-const BOX_MODES: readonly LinkMode[] = ["hardlink", "symlink", "copy"];
+// Boxes link files and copy only what the game rewrites (packages/box): symlink first so boxes can
+// cross drives without ballooning, then hardlink. Plain copy is deliberately not a fallback for
+// normal game files.
+const BOX_MODES: readonly LinkMode[] = ["symlink", "hardlink"];
 
 function gamePresenceAllowed(state: AppState, settings: AppSettings): boolean {
   // One switch for game activity: Settings -> Discord -> "Show launched games" (discord.gameActivity).
@@ -1786,31 +2041,22 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     extraFolders: "string[]",
   });
   mergeObject(next.launch, record.launch, {
-    keepLauncherOpen: "boolean",
+    minimizeOnLaunch: "boolean",
     showLogsOnFailure: "boolean",
-    confirmRebuild: "boolean",
   });
   mergeObject(next.boxes, record.boxes, {
     autoCleanStale: "boolean",
-    rebuildAfterUpdates: "boolean",
+    confirmRebuild: "boolean",
     backupBeforeRebuild: "boolean",
   });
   mergeObject(next.downloads, record.downloads, {
-    allowBackground: "boolean",
     maxParallel: "number",
     keepArchives: "boolean",
     verifyAfterDownload: "boolean",
   });
   next.downloads.maxParallel = Math.max(1, Math.min(8, Math.round(next.downloads.maxParallel)));
-  mergeObject(next.updates, record.updates, {
-    checkOnStartup: "boolean",
-    coreChannel: ["stable", "testing", "local"],
-    autoDownload: "boolean",
-    askBeforeApply: "boolean",
-  });
   mergeObject(next.privacy, record.privacy, {
     localOnly: "boolean",
-    shareInstalledMods: "boolean",
   });
   mergeObject(next.diagnostics, record.diagnostics, {
     verboseLaunchLogs: "boolean",
@@ -1990,6 +2236,8 @@ async function titleUpdates(request: Request): Promise<Response> {
   }
 
   if (action === "check") {
+    const refusal = await localOnlyRefusal();
+    if (refusal) return refusal;
     const settings = cleanUpdateSettings(body?.settings ?? (await readState()).updateSettings?.[key]);
     if (!settings.endpoint) return Response.json({ error: "Set an update endpoint first." }, { status: 400 });
     const currentVersion = typeof body?.version === "string" && body.version.trim() ? body.version.trim() : null;
@@ -2654,6 +2902,8 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           jobs: await jobList(downloadsFolder),
           ...throughput(),
         });
+      case "/api/browse/moddb":
+        return Response.json(await modDbList(browseCache, url.searchParams.get("refresh") === "1"));
       case "/api/browse/download":
       case "/api/browse/install": {
         // Download (or take an archive already downloaded), unpack on the install's drive, move the mod
@@ -2689,6 +2939,33 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           : await installDownloaded(downloadsFolder, browseCache, id, file, title, target, downloadSettings);
         return Response.json(job);
       }
+      case "/api/browse/url-download": {
+        if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+        const appSettings = appSettingsFromState(await readState());
+        if (activeJobCount() >= appSettings.downloads.maxParallel) {
+          return Response.json(
+            { error: `Download limit reached (${appSettings.downloads.maxParallel}).` },
+            { status: 409 },
+          );
+        }
+        const body = await request.json().catch(() => null) as
+          | { url?: unknown; root?: unknown; title?: unknown }
+          | null;
+        const downloadUrl = typeof body?.url === "string" ? body.url.trim() : "";
+        const root = typeof body?.root === "string" ? body.root.trim().replace(/[\\/]+$/, "") : "";
+        const title = typeof body?.title === "string" ? body.title.trim() : "";
+        if (!downloadUrl) return Response.json({ error: "Missing URL" }, { status: 400 });
+        const modsDir = `${root.replace(/\\/g, "/")}/MODS`;
+        if (!root || !(await Deno.stat(modsDir).catch(() => null))?.isDirectory) {
+          return Response.json({ error: `No MODS folder in ${winPath(root) || "the install"}.` }, { status: 400 });
+        }
+        const target: InstallTarget = { modsDir, stagingDir: `${root.replace(/\\/g, "/")}/.exordium-staging` };
+        const job = await startUrlJob(downloadsFolder, downloadUrl, title || "ModDB download", target, {
+          keepArchives: appSettings.downloads.keepArchives,
+          verifyAfterDownload: appSettings.downloads.verifyAfterDownload,
+        });
+        return Response.json(job);
+      }
       case "/api/browse/open": {
         // Fixed destinations only: the downloads folder, one item's download folder, ModDB's list, or
         // an archive.org item page for a valid identifier.
@@ -2705,7 +2982,13 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           target = winPath(`${downloadsFolder}/archive/${id}/unpacked`);
         } else if (body?.what === "file" && id) {
           // The downloaded archive itself, selected in its folder.
-          const file = await downloadedFile(downloadsFolder, id, typeof body?.file === "string" ? body.file : "");
+          const name = typeof body?.file === "string" ? body.file : "";
+          let file = await downloadedFile(downloadsFolder, id, name);
+          if (!file && id.startsWith("url-")) {
+            const base = name.split(/[\\/]/).pop() ?? "";
+            const candidate = base && !base.includes("..") ? `${downloadsFolder}/url/${id}/${base}` : "";
+            file = candidate && (await Deno.stat(candidate).catch(() => null))?.isFile ? candidate : null;
+          }
           if (file) {
             showInExplorer(winPath(file), true);
             return Response.json({ ok: true });
@@ -2734,6 +3017,97 @@ async function openLink(request: Request): Promise<Response> {
   if (!url) return Response.json({ error: "Not a web address" }, { status: 400 });
   openExternal(url);
   return Response.json({ ok: true });
+}
+
+async function pickFolderRoute(url: URL): Promise<Response> {
+  const startPath = url.searchParams.get("path") ?? undefined;
+  const title = url.searchParams.get("title") ?? undefined;
+  return Response.json(await pickFolderNative(startPath, title));
+}
+
+async function pickOpenFilesRoute(url: URL): Promise<Response> {
+  const title = url.searchParams.get("title") ?? undefined;
+  const startPath = url.searchParams.get("path") ?? undefined;
+  const multiple = url.searchParams.get("multiple") !== "false";
+  const extensionsText = url.searchParams.get("extensions");
+  const extensions = extensionsText
+    ? JSON.parse(extensionsText) as { label: string; extensions: string[] }[]
+    : undefined;
+  return Response.json(
+    await pickOpenFilesNative({
+      ...(title ? { title } : {}),
+      ...(startPath ? { startPath } : {}),
+      multiple,
+      ...(extensions ? { extensions } : {}),
+    }),
+  );
+}
+
+async function symlinkStatus(): Promise<{ ok: boolean; admin: boolean; error: string | null }> {
+  const folder = await Deno.makeTempDir({ prefix: "exordium-symlink-" });
+  try {
+    const target = `${folder}/target.txt`;
+    const link = `${folder}/link.txt`;
+    await Deno.writeTextFile(target, "ok");
+    await Deno.symlink(target, link, { type: "file" });
+    const ok = (await Deno.lstat(link)).isSymlink;
+    return { ok, admin: await isAdmin(), error: ok ? null : "Windows did not create a file symlink." };
+  } catch (error) {
+    return { ok: false, admin: await isAdmin(), error: (error as Error).message };
+  } finally {
+    await Deno.remove(folder, { recursive: true }).catch(() => {});
+  }
+}
+
+async function isAdmin(): Promise<boolean> {
+  if (Deno.build.os !== "windows") return false;
+  const text = await runPowerShellHidden(
+    "[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()" +
+      ".IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) | Set-Content -LiteralPath $OutFile",
+  );
+  return /^true$/i.test(text?.trim() ?? "");
+}
+
+async function restartAdmin(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  if (Deno.build.os !== "windows") {
+    return Response.json({ error: "Administrator restart is Windows-only." }, {
+      status: 400,
+    });
+  }
+  const exe = Deno.execPath();
+  const script = `Start-Process -FilePath ${
+    powerShellLiteral(exe)
+  } -Verb RunAs; Set-Content -LiteralPath $OutFile -Value ok`;
+  const ok = await runPowerShellHidden(script);
+  return Response.json({ ok: ok !== null });
+}
+
+async function installLocalArchive(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as
+    | { archive?: unknown; root?: unknown; title?: unknown; importMetadata?: unknown }
+    | null;
+  const archive = typeof body?.archive === "string" ? body.archive.trim().replace(/\\/g, "/") : "";
+  const root = typeof body?.root === "string" ? body.root.trim().replace(/[\\/]+$/, "") : "";
+  const title = typeof body?.title === "string" && body.title.trim()
+    ? body.title.trim()
+    : archive.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") ?? "Mod";
+  if (!archive) return Response.json({ error: "Missing archive." }, { status: 400 });
+  const archiveInfo = await Deno.stat(archive).catch(() => null);
+  if (!archiveInfo?.isFile) return Response.json({ error: `${winPath(archive)} is not a file.` }, { status: 404 });
+  const modsDir = `${root.replace(/\\/g, "/")}/MODS`;
+  if (!root || !(await Deno.stat(modsDir).catch(() => null))?.isDirectory) {
+    return Response.json({ error: `No MODS folder in ${winPath(root) || "the install"}.` }, { status: 400 });
+  }
+  const result = await installArchive(archive, `${root.replace(/\\/g, "/")}/.exordium-staging/local`, modsDir, title, {
+    keepDir: `${downloadsFolder}/local/${crypto.randomUUID()}/unpacked`,
+  });
+  const folders = result.installed.map((mod) => mod.name);
+  const metadata = body?.importMetadata === true && folders.length > 0
+    ? await importD2SEMetadataForFolders(root, folders)
+    : null;
+  return Response.json({ result, metadata });
 }
 
 /**
@@ -2863,9 +3237,7 @@ async function makeShortcut(key: string, target: BoxTarget): Promise<Response> {
   const setup = target.kind === "mod"
     ? (await readTitleSetup(`${root}/MODS/${target.folder}`))?.setup
     : await readCoreSetup(root, target.version);
-  const title = target.kind === "mod"
-    ? setup?.mod.title ?? target.folder
-    : setup?.mod.name ?? `Diablo II ${target.version}`;
+  const title = target.kind === "mod" ? setup?.mod.title ?? target.folder : coreTitle(target.version);
   const exe = Deno.execPath();
   let icon = exe;
   const iconPng = await artFile(root, target, "icon");

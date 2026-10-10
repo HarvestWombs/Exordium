@@ -3,9 +3,8 @@
  *
  * - **archive.org** has a public search API (`advancedsearch.php`), per-item metadata listing every
  *   file, a thumbnail service and direct downloads, so it is listed, detailed and downloaded here.
- * - **ModDB** answers every non-browser request, its RSS feed included, with a Cloudflare challenge,
- *   and its robots.txt disallows automated paging and download links. It is not fetched: the browser
- *   links to it, and the player downloads from it themselves.
+ * - **ModDB** has public listing pages for files/addons/mods. Those are cached and listed as a
+ *   lightweight catalog; specific download pages are fetched only when the player installs one.
  *
  * A download goes to Exordium's own folder (`downloads\<source>\<id>\`), is unpacked on the install's
  * drive and moved into its MODS folder (install.ts), and the archive is then deleted.
@@ -15,8 +14,17 @@ import { installArchive, type InstallResult } from "./install.ts";
 
 export const ARCHIVE_QUERY = 'subject:"Diablo 2 mod"';
 export const MODDB_URL = "https://www.moddb.com/games/diablo-2-lod/mods";
+const MODDB_CATALOGS = [
+  { kind: "file", label: "Files", url: "https://www.moddb.com/games/diablo-2-lod/downloads" },
+  { kind: "addon", label: "Addons", url: "https://www.moddb.com/games/diablo-2-lod/addons" },
+  { kind: "mod", label: "Mods", url: "https://www.moddb.com/games/diablo-2-lod/mods" },
+] as const;
 const ARCHIVE_TTL_MS = 12 * 60 * 60 * 1000;
+const MODDB_TTL_MS = 12 * 60 * 60 * 1000;
+const MODDB_MAX_PAGES = 25;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+const DOWNLOAD_FILE = /\.(zip|rar|7z|tar|tgz|gz|bz2|xz)$/i;
+const EXECUTABLE_FILE = /\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar)$/i;
 
 // ---- Keywords ---------------------------------------------------------------------------------------
 
@@ -118,7 +126,9 @@ export function cleanDescription(html: unknown): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)));
   const tidy = text.replace(/[ \t\u00a0]+/g, " ").replace(/\s*\n\s*/g, "\n");
   const cut = tidy.search(/TRANSLATE\s+with\s+x\b/i);
   return (cut >= 0 ? tidy.slice(0, cut) : tidy).trim();
@@ -139,6 +149,20 @@ export interface BrowseItem {
   keywords: string[];
   page: string;
   cover: string;
+}
+
+export interface ModDbItem {
+  source: "moddb";
+  kind: "file" | "addon" | "mod";
+  sourceLabel: string;
+  id: string;
+  title: string;
+  description: string;
+  addedAt: string | null;
+  page: string;
+  installPage: string;
+  cover: string;
+  keywords: string[];
 }
 
 interface ArchiveDoc {
@@ -205,6 +229,177 @@ export async function archiveList(
   return result;
 }
 
+// ---- ModDB --------------------------------------------------------------------------------------
+
+function rssText(item: string, tag: string): string {
+  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i").exec(item);
+  return match ? decodeXml(match[1] ?? "").trim() : "";
+}
+
+function rssAttr(item: string, tag: string, name: string): string {
+  const match = new RegExp(`<(?:media:)?${tag}\\b[^>]*\\s${name}=["']([^"']+)["'][^>]*>`, "i").exec(item);
+  return match ? decodeXml(match[1] ?? "").trim() : "";
+}
+
+function decodeXml(text: string): string {
+  return text
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function modDbId(link: string): string {
+  try {
+    const url = new URL(link);
+    return url.pathname.split("/").filter(Boolean).join("-").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 180) ||
+      crypto.randomUUID();
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+function modDbAbsolute(base: string, href: string): string | null {
+  try {
+    return new URL(decodeXml(href), base).href;
+  } catch {
+    return null;
+  }
+}
+
+function modDbInstallPage(page: string, kind: ModDbItem["kind"]): string {
+  if (kind !== "mod") return page;
+  try {
+    const url = new URL(page);
+    const path = url.pathname.replace(/\/+$/, "");
+    if (/^\/mods\/[^/]+$/i.test(path)) return `${url.origin}${path}/downloads`;
+  } catch {
+    // Fall through to the visible page.
+  }
+  return page;
+}
+
+export function modDbItemsFromHtml(
+  html: string,
+  kind: ModDbItem["kind"],
+  sourceLabel: string,
+  base = "https://www.moddb.com/",
+): ModDbItem[] {
+  return [
+    ...html.matchAll(
+      /<div\s+class=["'][^"']*\browcontent\b[^"']*["'][^>]*>([\s\S]*?)(?=<div\s+class=["'][^"']*\browcontent\b|<\/div>\s*<\/div>\s*(?:<p class=["']view|<div class=["']pagination|$))/gi,
+    ),
+  ]
+    .map((match) => {
+      const row = match[1] ?? "";
+      const titleLink = /<h4>\s*<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>\s*<\/h4>/i.exec(row);
+      const imageHref = /<a\b(?=[^>]*class=["'][^"']*\bimage\b[^"']*["'])[^>]*href=["']([^"']+)["']/i.exec(row)?.[1];
+      const imageTitle = /<a\b(?=[^>]*class=["'][^"']*\bimage\b[^"']*["'])[^>]*title=["']([^"']*)["']/i.exec(row)?.[1];
+      const imageSrc = /<img\b[^>]*src=["']([^"']+)["']/i.exec(row)?.[1];
+      const href = titleLink?.[1] ?? imageHref ?? "";
+      const page = modDbAbsolute(base, href) ?? "";
+      const title = cleanDescription(titleLink?.[2] ?? imageTitle ?? `ModDB ${sourceLabel.toLowerCase()}`);
+      const description = cleanDescription(/<p>([\s\S]*?)<\/p>/i.exec(row)?.[1] ?? "");
+      const datetime = /<time\b[^>]*datetime=["']([^"']+)["']/i.exec(row)?.[1] ?? "";
+      const cover = imageSrc ? modDbAbsolute(base, imageSrc) ?? "" : "";
+      return {
+        source: "moddb" as const,
+        kind,
+        sourceLabel,
+        id: modDbId(page || title),
+        title,
+        description,
+        addedAt: datetime ? new Date(datetime).toISOString() : null,
+        page,
+        installPage: modDbInstallPage(page, kind),
+        cover,
+        keywords: keywordsFor(`${title}\n${description}`),
+      };
+    })
+    .filter((item) => item.page.startsWith("https://www.moddb.com/"));
+}
+
+export function modDbNextPage(html: string, base: string): string | null {
+  const relNext = /<link\b(?=[^>]*\brel=["']next["'])(?=[^>]*\bhref=["']([^"']+)["'])[^>]*>/i.exec(html)?.[1];
+  if (relNext) return modDbAbsolute(base, relNext);
+
+  const pagination =
+    /<a\b(?=[^>]*\bclass=["'][^"']*\bnext\b[^"']*["'])(?=[^>]*\bhref=["']([^"']+)["'])[^>]*>/i.exec(html)?.[1] ??
+      /<a\b(?=[^>]*\bhref=["']([^"']*\/page\/\d+[^"']*)["'])[^>]*>\s*Next\s*<\/a>/i.exec(html)?.[1];
+  return pagination ? modDbAbsolute(base, pagination) : null;
+}
+
+async function modDbCatalogItems(catalog: typeof MODDB_CATALOGS[number]): Promise<ModDbItem[]> {
+  const items: ModDbItem[] = [];
+  const seenPages = new Set<string>();
+  let next: string | null = catalog.url;
+  for (let page = 0; next && page < MODDB_MAX_PAGES; page++) {
+    if (seenPages.has(next)) break;
+    seenPages.add(next);
+    const response = await fetch(next, { headers: { "user-agent": "Exordium" } });
+    if (!response.ok) throw new Error(`ModDB ${catalog.label} answered ${response.status}`);
+    const html = await response.text();
+    items.push(...modDbItemsFromHtml(html, catalog.kind, catalog.label, next));
+    next = modDbNextPage(html, next);
+  }
+  return items;
+}
+
+export function modDbItemsFromRss(
+  xml: string,
+  kind: ModDbItem["kind"] = "file",
+  sourceLabel = "Files",
+): ModDbItem[] {
+  return [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map((match) => {
+    const row = match[1] ?? "";
+    const title = rssText(row, "title") || `ModDB ${sourceLabel.toLowerCase()}`;
+    const page = rssText(row, "link");
+    const description = cleanDescription(rssText(row, "description"));
+    const addedAtText = rssText(row, "pubDate");
+    const cover = rssAttr(row, "thumbnail", "url") || rssAttr(row, "content", "url");
+    return {
+      source: "moddb" as const,
+      kind,
+      sourceLabel,
+      id: modDbId(page || title),
+      title,
+      description,
+      addedAt: addedAtText ? new Date(addedAtText).toISOString() : null,
+      page,
+      installPage: modDbInstallPage(page, kind),
+      cover,
+      keywords: keywordsFor(`${title}\n${description}`),
+    };
+  }).filter((item) => item.page.startsWith("https://www.moddb.com/"));
+}
+
+/** Cached ModDB catalog. Refreshes at most every 12 hours unless the user asks. */
+export async function modDbList(cacheDir: string, refresh = false): Promise<{ items: ModDbItem[]; fetchedAt: string }> {
+  const file = `${cacheDir}/moddb.json`;
+  if (!refresh) {
+    try {
+      const cached = JSON.parse(await Deno.readTextFile(file)) as { items: ModDbItem[]; fetchedAt: string };
+      if (Date.now() - Date.parse(cached.fetchedAt) < MODDB_TTL_MS) return cached;
+    } catch {
+      // Missing or unreadable: fetch.
+    }
+  }
+  const byPage = new Map<string, ModDbItem>();
+  for (const catalog of MODDB_CATALOGS) {
+    for (const item of await modDbCatalogItems(catalog)) byPage.set(`${item.kind}:${item.page}`, item);
+  }
+  const result = {
+    items: [...byPage.values()].sort((a, b) => Date.parse(b.addedAt ?? "0") - Date.parse(a.addedAt ?? "0")),
+    fetchedAt: new Date().toISOString(),
+  };
+  await Deno.mkdir(cacheDir, { recursive: true });
+  await Deno.writeTextFile(file, JSON.stringify(result));
+  return result;
+}
+
 export interface ItemFile {
   name: string;
   size: number;
@@ -233,7 +428,7 @@ export interface ItemDetails {
   unpackedSize: number;
 }
 
-const ARCHIVE_FILE = /\.(zip|rar|7z|exe|mpq)$/i;
+const ARCHIVE_FILE = /\.(zip|rar|7z|mpq)$/i;
 const LISTABLE = /\.(zip|rar|7z)$/i;
 const IMAGE_FILE = /\.(png|jpe?g|gif|bmp|webp)$/i;
 /** Bumped when what is stored per item changes, so old cached details are read again. */
@@ -484,7 +679,7 @@ export async function browseImage(cacheDir: string, id: string, file: string): P
 export type JobState = "downloading" | "extracting" | "installing" | "installed" | "downloaded" | "failed";
 
 export interface Job {
-  source: "archive";
+  source: "archive" | "url";
   id: string;
   title: string;
   file: string;
@@ -504,6 +699,123 @@ export interface Job {
 }
 
 const jobs = new Map<string, Job>();
+
+export function urlDownloadId(url: string): string {
+  const bytes = new TextEncoder().encode(url.trim());
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `url-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ""));
+    } catch {
+      return encoded.replace(/^"|"$/g, "");
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header)?.[1];
+  return plain?.trim() || null;
+}
+
+function safeDownloadName(name: string, fallback: string): string {
+  const raw = name.split(/[\\/]/).pop()?.trim() || fallback;
+  const printable = [...raw].map((char) => (char.charCodeAt(0) < 32 ? " " : char)).join("");
+  const clean = printable.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+  return clean || fallback;
+}
+
+export function executableInstallWarning(name: string): string | null {
+  if (!EXECUTABLE_FILE.test(name)) return null;
+  return `${name} is an executable installer. Exordium will not run or unpack executable downloads automatically. ` +
+    "Open the ModDB page and install it manually only if you trust the author and the file.";
+}
+
+function likelyDownload(response: Response, original: URL): boolean {
+  const name = filenameFromDisposition(response.headers.get("content-disposition")) ??
+    safeDownloadName(new URL(response.url || original.href).pathname.split("/").pop() ?? "", "");
+  const type = response.headers.get("content-type")?.toLowerCase() ?? "";
+  return DOWNLOAD_FILE.test(name) || type.includes("application/octet-stream") || type.includes("application/zip") ||
+    type.includes("application/x-7z-compressed") || type.includes("application/x-rar");
+}
+
+function absoluteUrl(base: URL, href: string): string | null {
+  try {
+    return new URL(href.replace(/&amp;/g, "&"), base).href;
+  } catch {
+    return null;
+  }
+}
+
+export function modDbDownloadLinks(html: string, base = "https://www.moddb.com/"): string[] {
+  const direct: string[] = [];
+  const details: string[] = [];
+  const indexes: string[] = [];
+  const page = new URL(base);
+  const keep = (link: string) => {
+    const url = new URL(link);
+    const path = url.pathname.replace(/\/+$/, "");
+    return path !== page.pathname.replace(/\/+$/, "") && !/\/downloads\/add$/i.test(path);
+  };
+  for (const match of html.matchAll(/href\s*=\s*["']([^"']*(?:\/downloads\/(?:start|mirror)\/[^"']+))["']/gi)) {
+    const link = absoluteUrl(page, match[1]!);
+    if (link && !direct.includes(link)) direct.push(link);
+  }
+  for (const match of html.matchAll(/<h4>\s*<a\b[^>]*href=["']([^"']*\/downloads\/[^"']+)["'][^>]*>/gi)) {
+    const link = absoluteUrl(page, match[1]!);
+    if (link && keep(link) && !details.includes(link)) details.push(link);
+  }
+  for (const match of html.matchAll(/href\s*=\s*["']([^"']*\/mods\/[^"'/]+\/downloads\/?)["']/gi)) {
+    const link = absoluteUrl(page, match[1]!);
+    if (link && keep(link) && !indexes.includes(link)) indexes.push(link);
+  }
+  for (const match of html.matchAll(/<h4>\s*<a\b[^>]*href=["']([^"']*\/addons\/[^"']+)["'][^>]*>/gi)) {
+    const link = absoluteUrl(page, match[1]!);
+    if (link && keep(link) && !details.includes(link)) details.push(link);
+  }
+  direct.sort((a, b) => Number(b.includes("/downloads/mirror/")) - Number(a.includes("/downloads/mirror/")));
+  return [...direct, ...details, ...indexes];
+}
+
+async function openDownload(url: string): Promise<{ response: Response; name: string; finalUrl: string }> {
+  let current = new URL(url);
+  if (current.protocol !== "http:" && current.protocol !== "https:") throw new Error("Only http and https URLs work.");
+  const seen = new Set<string>();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (seen.has(current.href)) break;
+    seen.add(current.href);
+    const response = await fetch(current.href, { headers: { "user-agent": "Exordium" } });
+    const finalUrl = new URL(response.url || current.href);
+    if (!response.ok || !response.body) {
+      throw new Error(`${finalUrl.hostname} answered ${response.status}.`);
+    }
+    if (likelyDownload(response, current)) {
+      const name = safeDownloadName(
+        filenameFromDisposition(response.headers.get("content-disposition")) ??
+          finalUrl.pathname.split("/").pop() ?? "",
+        `${urlDownloadId(url)}.zip`,
+      );
+      const executableWarning = executableInstallWarning(name);
+      if (executableWarning) throw new Error(executableWarning);
+      return { response, name, finalUrl: finalUrl.href };
+    }
+    const type = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!type.includes("text/html")) {
+      throw new Error(`The URL did not return an archive (${type || "unknown content type"}).`);
+    }
+    const html = await response.text();
+    const next = modDbDownloadLinks(html, finalUrl.href)[0];
+    if (!next) throw new Error("That page did not expose an archive download link.");
+    current = new URL(next);
+  }
+  throw new Error("Could not resolve that download link.");
+}
 
 // Throughput, for the downloads page's graph: bytes from the network and bytes written to disk.
 const counters = { net: 0, disk: 0 };
@@ -720,6 +1032,80 @@ export async function startJob(
       return;
     }
     await runInstall(job, `${dir}/${name}`, folder, target, settings);
+  })();
+  return job;
+}
+
+/**
+ * Downloads an archive from a player-provided URL, then unpacks and installs it through the same path
+ * as catalog downloads. This is the ModDB bridge: the player browses/copies, Exordium downloads.
+ */
+export function startUrlJob(
+  folder: string,
+  url: string,
+  title: string,
+  target: InstallTarget,
+  settings: DownloadSettings = {},
+): Job {
+  const trimmed = url.trim();
+  const id = urlDownloadId(trimmed);
+  const key = `url:${id}`;
+  const current = jobs.get(key);
+  if (current && ["downloading", "extracting", "installing"].includes(current.state)) return current;
+
+  const dir = `${folder}/url/${id}`;
+  const job: Job = {
+    source: "url",
+    id,
+    title: title.trim() || id,
+    file: trimmed,
+    path: "",
+    state: "downloading",
+    received: 0,
+    total: 0,
+    extracted: 0,
+    unpackedSize: 0,
+    installing: null,
+    result: null,
+    startedAt: new Date().toISOString(),
+  };
+  jobs.set(key, job);
+  startSampling();
+
+  void (async () => {
+    let partial = "";
+    try {
+      const opened = await openDownload(trimmed);
+      job.file = opened.name;
+      job.total = Number(opened.response.headers.get("content-length")) || 0;
+      await Deno.mkdir(dir, { recursive: true });
+      const archive = `${dir}/${opened.name}`;
+      partial = `${archive}.part`;
+      job.path = archive.replace(/\//g, "\\");
+      const out = await Deno.open(partial, { write: true, create: true, truncate: true });
+      await opened.response.body!
+        .pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              job.received += chunk.length;
+              counters.net += chunk.length;
+              counters.disk += chunk.length;
+              controller.enqueue(chunk);
+            },
+          }),
+        )
+        .pipeTo(out.writable);
+      if (settings.verifyAfterDownload && job.total > 0 && job.received !== job.total) {
+        throw new Error(`Downloaded ${job.received} bytes, expected ${job.total}.`);
+      }
+      await Deno.rename(partial, archive);
+      await runInstall(job, archive, folder, target, settings);
+    } catch (error) {
+      job.state = "failed";
+      job.error = (error as Error).message;
+      job.endedAt = new Date().toISOString();
+      if (partial) await Deno.remove(partial).catch(() => {});
+    }
   })();
   return job;
 }

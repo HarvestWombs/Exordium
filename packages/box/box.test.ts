@@ -56,7 +56,8 @@ Deno.test("a box presents every layer as links, and save is the mod's own folder
   try {
     const box = await f.boxes.realise(await spec(f));
     assertEquals(box.reused, false);
-    assertEquals(box.counts, { hardlink: 5, symlink: 0, copy: 0 });
+    assertEquals(box.counts.copy, 0);
+    assertEquals(box.counts.hardlink + box.counts.symlink, 5);
     assertEquals(await Deno.readTextFile(`${box.folder}/D2Game.dll`), "modded game");
     assertEquals(await Deno.readTextFile(`${box.folder}/Patch_D2.mpq`), "stock patch");
     assertEquals(await Deno.readTextFile(`${box.folder}/d2data.mpq`), "game data");
@@ -107,6 +108,7 @@ Deno.test("integrity check reports corrupt box files", async () => {
     const box = await f.boxes.realise(s);
     assertEquals((await f.boxes.verify(s)).ok, true);
 
+    await Deno.remove(`${box.folder}/Patch_D2.mpq`);
     await Deno.writeTextFile(`${box.folder}/Patch_D2.mpq`, "wrong patch");
     const report = await f.boxes.verify(s);
     assertEquals(report.ok, false);
@@ -148,8 +150,9 @@ Deno.test("a pinned version is protected: its settings are copied, and a write-t
       saves: pinned.saves,
       protect: (_file, source) => source.startsWith(f.library.store),
     });
-    assertEquals(box.counts, { hardlink: 4, symlink: 0, copy: 1 }); // D2Mod.ini is copied
-    // Writing to a protected hardlink would reach the store: caught, and learned.
+    assertEquals(box.counts.copy, 1); // D2Mod.ini is copied
+    assertEquals(box.counts.hardlink + box.counts.symlink, 4);
+    // Writing to a protected link would reach the store: caught, and learned.
     await Deno.writeTextFile(`${box.folder}/D2Game.dll`, "corrupted");
     const after = await f.boxes.afterRun("soul-pinned");
     assertEquals(after.writtenThrough.map((w) => [w.path, w.protected]), [["D2Game.dll", true]]);
@@ -176,7 +179,7 @@ Deno.test("a link the game replaced is noticed, and the next launch rebuilds fro
   }
 });
 
-Deno.test("symlink and copy modes work when hardlinks are not available", async () => {
+Deno.test("symlink mode is preferred, and copy remains explicit", async () => {
   const f = await fixture();
   try {
     const symlinked = await f.boxes.realise({ ...(await spec(f, "sym")) }, { modes: ["symlink", "copy"] });

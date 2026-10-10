@@ -1,5 +1,16 @@
 import { assertEquals } from "@std/assert";
-import { archiveItemFromDoc, cleanDescription, contentKeywords, keywordsFor, parseArchiveListing } from "./browse.ts";
+import {
+  archiveItemFromDoc,
+  cleanDescription,
+  contentKeywords,
+  executableInstallWarning,
+  keywordsFor,
+  modDbDownloadLinks,
+  modDbItemsFromHtml,
+  modDbItemsFromRss,
+  modDbNextPage,
+  parseArchiveListing,
+} from "./browse.ts";
 
 Deno.test("keywords come from the entry's own words", () => {
   assertEquals(keywordsFor("Firozo mod"), []);
@@ -66,4 +77,93 @@ Deno.test("archive.org's listing of an archive's files is read with sizes, and s
     { path: "Firozo/PlugY.dll", size: 200000 },
   ]);
   assertEquals(contentKeywords(members), ["d2se", "plugy"]);
+});
+
+Deno.test("ModDB download pages expose start and mirror links for the in-house downloader", () => {
+  const html = [
+    '<a href="/downloads/start/12345">Download now</a>',
+    '<a href="https://www.moddb.com/downloads/mirror/12345/987/abcdef">Mirror</a>',
+  ].join("\n");
+  assertEquals(modDbDownloadLinks(html, "https://www.moddb.com/mods/example/downloads/file"), [
+    "https://www.moddb.com/downloads/mirror/12345/987/abcdef",
+    "https://www.moddb.com/downloads/start/12345",
+  ]);
+});
+
+Deno.test("executable downloads are manual installs only", () => {
+  assertEquals(executableInstallWarning("setup.exe")?.includes("will not run or unpack"), true);
+  assertEquals(executableInstallWarning("mod.zip"), null);
+});
+
+Deno.test("ModDB RSS rows become cached catalog items", () => {
+  const rss = `<?xml version="1.0"?>
+    <rss xmlns:media="http://search.yahoo.com/mrss/">
+      <channel>
+        <item>
+          <title>Example D2SE Mod 1.13c</title>
+          <link>https://www.moddb.com/mods/example/downloads/example-d2se-mod</link>
+          <description><![CDATA[<p>PlugY overhaul &amp; new skills.</p>]]></description>
+          <pubDate>Sat, 10 Oct 2026 12:00:00 +0000</pubDate>
+          <media:thumbnail url="https://media.moddb.com/cache/images/mods/1/2/thumb.jpg" />
+        </item>
+      </channel>
+    </rss>`;
+  const items = modDbItemsFromRss(rss, "addon", "Addons");
+  assertEquals(items.length, 1);
+  assertEquals(items[0]?.source, "moddb");
+  assertEquals(items[0]?.kind, "addon");
+  assertEquals(items[0]?.sourceLabel, "Addons");
+  assertEquals(items[0]?.title, "Example D2SE Mod 1.13c");
+  assertEquals(items[0]?.keywords, ["1.13", "overhaul", "skills", "plugy", "d2se"]);
+  assertEquals(items[0]?.cover, "https://media.moddb.com/cache/images/mods/1/2/thumb.jpg");
+});
+
+Deno.test("ModDB category pages become files, addons and mods", () => {
+  const html = `
+    <div class="row rowcontent rowtimeframe3 clear">
+      <a href="/mods/diablo-ii-arreat" title="Diablo II Arreat" class="image">
+        <img src="https://media.moddb.com/cache/images/mods/1/74/73279/crop_120x90/Diablo_II_Arreat.jpg" />
+      </a>
+      <div class="content">
+        <h4><a href="/mods/diablo-ii-arreat">Diablo II Arreat</a></h4>
+        <span class="date"><time datetime="2026-10-09T12:57:04+00:00">Oct 9 2026</time></span>
+        <p>Mod for Diablo II Lord of Destruction version 1.13c.</p>
+      </div>
+    </div>`;
+  const items = modDbItemsFromHtml(html, "mod", "Mods", "https://www.moddb.com/games/diablo-2-lod/mods");
+  assertEquals(items.length, 1);
+  assertEquals(items[0]?.title, "Diablo II Arreat");
+  assertEquals(items[0]?.page, "https://www.moddb.com/mods/diablo-ii-arreat");
+  assertEquals(items[0]?.installPage, "https://www.moddb.com/mods/diablo-ii-arreat/downloads");
+  assertEquals(items[0]?.cover.includes("Diablo_II_Arreat.jpg"), true);
+});
+
+Deno.test("ModDB page walking follows category rows before mirror pages", () => {
+  const html = [
+    '<h4><a href="/mods/example/downloads/example-full">Full version</a></h4>',
+    '<h4><a href="/mods/example/downloads/add">Add file</a></h4>',
+    '<a href="/mods/example/downloads">Downloads</a>',
+    '<a href="/downloads/start/12345">Download now</a>',
+  ].join("\n");
+  assertEquals(modDbDownloadLinks(html, "https://www.moddb.com/mods/example/downloads"), [
+    "https://www.moddb.com/downloads/start/12345",
+    "https://www.moddb.com/mods/example/downloads/example-full",
+  ]);
+});
+
+Deno.test("ModDB category pagination follows the next page", () => {
+  assertEquals(
+    modDbNextPage(
+      '<link rel="next" href="/games/diablo-2-lod/mods/page/2" />',
+      "https://www.moddb.com/games/diablo-2-lod/mods",
+    ),
+    "https://www.moddb.com/games/diablo-2-lod/mods/page/2",
+  );
+  assertEquals(
+    modDbNextPage(
+      '<a class="next" href="/games/diablo-2-lod/mods/page/3">Next</a>',
+      "https://www.moddb.com/games/diablo-2-lod/mods/page/2",
+    ),
+    "https://www.moddb.com/games/diablo-2-lod/mods/page/3",
+  );
 });

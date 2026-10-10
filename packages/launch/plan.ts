@@ -81,11 +81,8 @@ export function buildLoaderPlan(
   if (setup.loads.d2extra) {
     plugins.push({ kind: "d2extra", path: "D2Extra.dll", required: true, init: null, release: null });
   }
-  for (const [index, dll] of setup.loads.dlls.entries()) {
+  for (const dll of setup.loads.dlls) {
     plugins.push({ kind: "custom", path: dll, required: true, init: null, release: null });
-    if (index > 2) {
-      problems.push({ level: "warning", message: `D2SE only loads ModDll1..3 here; ${dll} is beyond that range.` });
-    }
   }
   if (setup.loads.d2seUtility) {
     plugins.push({ kind: "d2seUtility", path: "D2SE_Utility.dll", required: true, init: 10000, release: 10001 });

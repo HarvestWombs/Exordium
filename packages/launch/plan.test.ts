@@ -131,6 +131,37 @@ D2SEDllName=ModSystem.dll
   assertEquals(load.problems, []);
 });
 
+Deno.test("custom plugin DLLs are not limited to D2SE's first three slots", () => {
+  const plan = resolve({
+    files: [
+      layer("game", "game", ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"]),
+      layer("core", "core", ["D2Launch.dll", "D2Client.dll", "D2Multi.dll", "patch_d2.mpq"]),
+      layer("mod", "mod", ["One.dll", "Two.dll", "Three.dll", "Four.dll"]),
+    ],
+    registry: [],
+  });
+  const load = buildLoaderPlan(
+    plan,
+    setup(`
+[Protected]
+D2Core=1.10f
+ModDll1=One.dll
+ModDll2=Two.dll
+ModDll3=Three.dll
+ModDll4=Four.dll
+`),
+    { expansion: false },
+  );
+
+  assertEquals(load.plugins.map((plugin) => [plugin.kind, plugin.path]), [
+    ["custom", "One.dll"],
+    ["custom", "Two.dll"],
+    ["custom", "Three.dll"],
+    ["custom", "Four.dll"],
+  ]);
+  assertEquals(load.problems, []);
+});
+
 Deno.test("missing required loader inputs are reported before native launch", () => {
   const plan = resolve({
     files: [

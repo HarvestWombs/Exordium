@@ -9,7 +9,7 @@
 
 import type { Plan, ResolvedFile } from "@exordium/layers";
 
-/** How one file reaches the box, cheapest first. */
+/** How one file reaches the box. */
 export type LinkMode = "hardlink" | "symlink" | "copy";
 
 export interface BoxSpec {
@@ -36,7 +36,7 @@ export interface BoxSpec {
 }
 
 export interface RealiseOptions {
-  /** Link modes to try, in order. Default: hardlink, then symlink, then copy. */
+  /** Link modes to try, in order. Default: symlink, then hardlink. Copies are opt-in. */
   modes?: readonly LinkMode[];
 }
 
@@ -79,7 +79,7 @@ export interface Realised {
   /** The previous box was intact and describes the same plan, so nothing was rebuilt. */
   reused: boolean;
   counts: Record<LinkMode, number>;
-  /** Said once rather than per file: e.g. that symlinks were unavailable and files were copied. */
+  /** Said once rather than per file: e.g. that symlinks were unavailable and hardlinks were tried. */
   notes: string[];
 }
 

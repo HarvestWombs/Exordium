@@ -3,7 +3,7 @@
  *
  * The packaged app has no console, so `console.*` went nowhere and a failure after two days left no
  * trace (the white window of 2026-10-02: no crash report, no event log entry). Everything the
- * server prints now also goes to `%LOCALAPPDATA%\Exordium\logs\exordium.log`, with:
+ * server prints now also goes to Exordium's own `logs\exordium.log`, with:
  *
  * - uncaught errors and rejections;
  * - a health line every 10 minutes: uptime, memory, open event streams, the page's last heartbeat;
@@ -14,7 +14,9 @@
  * It records only; nothing here changes how the app behaves.
  */
 
-const root = `${Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()}/Exordium/logs`.replace(/\\/g, "/");
+import { exordiumRoot } from "./paths.ts";
+
+const root = `${exordiumRoot}/logs`;
 const file = `${root}/exordium.log`;
 /** At start, a log larger than this is kept as `exordium.1.log` and a new one begun. */
 const ROTATE_BYTES = 5 * 1024 * 1024;

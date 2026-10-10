@@ -1,8 +1,8 @@
 /**
  * The library on disk.
  *
- * Decided 2026-09-25: it lives in `%LOCALAPPDATA%\Exordium` — Local, not Roaming, which syncs with a
- * domain profile and is not for gigabytes. Laid out as plain files a person can read:
+ * It lives under Exordium's own data root. The desktop app resolves that root as portable-first
+ * beside Exordium.exe; tests and tools may pass any folder. Laid out as plain files a person can read:
  *
  *   <root>/library/entries/<id>.json     one entry each
  *   <root>/library/store/<ab>/<hash>     pinned content, by SHA-256
@@ -15,11 +15,9 @@ import { type Entry, LibraryError } from "./types.ts";
 
 const ID = /^[a-z0-9][a-z0-9.@-]*$/;
 
-/** `%LOCALAPPDATA%\Exordium`, with `/` separators. */
+/** A development default, with `/` separators. Desktop passes its portable root explicitly. */
 export function defaultRoot(): string {
-  const local = Deno.env.get("LOCALAPPDATA");
-  if (!local) throw new LibraryError("LOCALAPPDATA is not set, so there is nowhere to keep the library");
-  return `${local.replace(/\\/g, "/")}/Exordium`;
+  return (Deno.env.get("EXORDIUM_HOME") ?? `${Deno.cwd()}/.exordium`).replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
 export class Library {

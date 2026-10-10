@@ -34,7 +34,7 @@ import {
 
 const ID = /^[a-z0-9][a-z0-9.@-]*$/;
 const SAVE = "save";
-const DEFAULT_MODES: readonly LinkMode[] = ["hardlink", "symlink", "copy"];
+const DEFAULT_MODES: readonly LinkMode[] = ["symlink", "hardlink"];
 
 /** Plugins keep their settings in `.ini` files and some rewrite them; a protected one is copied. */
 const SETTINGS = /\.ini$/i;
@@ -46,7 +46,7 @@ export class Boxes {
     this.root = `${exordiumRoot.replace(/\\/g, "/").replace(/\/+$/, "")}/boxes`;
   }
 
-  /** `exordiumRoot` is Exordium's folder — `%LOCALAPPDATA%\Exordium`, where the library also lives. */
+  /** `exordiumRoot` is Exordium's own data folder, where the library also lives. */
   static async open(exordiumRoot: string): Promise<Boxes> {
     const boxes = new Boxes(exordiumRoot);
     await Deno.mkdir(boxes.root, { recursive: true });

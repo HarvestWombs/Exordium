@@ -7,6 +7,8 @@
  * running older copy keeps its file locked, and a new build must not need to overwrite it.
  */
 
+import { exordiumRoot } from "./paths.ts";
+
 const SYMBOLS = {
   ExordiumWindowAttach: { parameters: ["pointer", "i32", "i32"], result: "i32" },
   // Waits for the program: off Deno's main thread, so a long extraction does not stall the server.
@@ -24,7 +26,7 @@ export function nativeLibrary(): Promise<Native | null> {
       const bytes = await Deno.readFile(new URL("../../native/window/build/exordium-window.dll", import.meta.url));
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
       const tag = [...digest.slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("");
-      const folder = `${Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()}\\Exordium\\bin`;
+      const folder = `${exordiumRoot}/bin`.replace(/\//g, "\\");
       const path = `${folder}\\exordium-window-${tag}.dll`;
       await Deno.mkdir(folder, { recursive: true });
       const existing = await Deno.stat(path).catch(() => null);

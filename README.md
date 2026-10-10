@@ -18,7 +18,7 @@ The architecture lives in the HarvestLabs vault (`ExcelsiorDeno/docs/vault`), no
 |---|---|
 | `@exordium/layers` | The layer model: stacks, resolution into a plan, fingerprints, diffs. Pure data, no Windows needed. |
 | `@exordium/d2se` | Reading an existing D2SE install, read-only: its settings, cores, mods, what D2SE loads for each mod, and problems. |
-| `@exordium/library` | What Exordium knows: referenced entries registered from an import, the pre-launch change check, and a content-addressed store for pinned versions, in `%LOCALAPPDATA%\Exordium`. |
+| `@exordium/library` | What Exordium knows: referenced entries registered from an import, the pre-launch change check, and a content-addressed store for pinned versions, under Exordium's portable data root. |
 | `@exordium/box` | Realising a plan as a folder the game runs in: links to referenced folders and the store, the saves junction, reuse, and the after-run check. |
 | `@exordium/launch` | The pure loader contract: D2SE-derived archive, language, plugin and handoff plan that native `exordium-game.exe` will consume. |
 

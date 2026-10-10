@@ -8,74 +8,74 @@
   "properties": {
     "$schema": { "type": "string" },
     "title": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "The mod's name as the library shows it. Default: the folder name."
     },
     "name": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Accepted in place of title; title wins when both are set."
     },
     "version": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Shown under the title, e.g. \"1.2.0\"."
     },
     "core": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "The core the mod runs on: a D2SE core, as its folder in D2SE\\CORES is named, or 1.14d when the install itself is 1.14d. A 1.14d mod runs Blizzard's own Game.exe, so D2Mod, Nefex, D2Extra and the D2SE DLLs cannot load; PlugY (11 or later) and plain DLLs can.",
       "examples": ["1.10f", "1.13c", "1.09d", "1.14d"]
     },
     "author": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Shown as \"BY …\" at the top of the mod's page. The player can also set it in Properties → About."
     },
     "description": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "A few paragraphs about the mod, shown as \"About this mod\" on its Overview. Line breaks are kept."
     },
     "readme": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "The mod's readme: a file in its folder (listed first under Documentation), or a web address (shown as a Readme link).",
       "examples": ["Documentation/Readme.txt", "docs/index.html", "https://example.com/readme"]
     },
     "update": {
-      "type": "object",
+      "type": ["object", "null"],
       "description": "Where Exordium checks for this mod's own updates. The endpoint may be http(s), absolute local path, or relative to the mod folder.",
       "properties": {
         "endpoint": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "A JSON manifest with either { version, downloads } or { releases: [...] }.",
           "examples": ["updates.json", "https://example.com/mortalborne/updates.json"]
         },
         "manifest": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Accepted in place of endpoint; endpoint wins when both are set."
         },
         "channel": {
-          "enum": ["stable", "testing", "local"],
+          "enum": ["stable", "testing", "local", null],
           "default": "stable"
         },
-        "automatic": { "type": "boolean", "default": false },
-        "background": { "type": "boolean", "default": true }
+        "automatic": { "type": ["boolean", "null"], "default": false },
+        "background": { "type": ["boolean", "null"], "default": true }
       },
       "additionalProperties": false
     },
     "updates": { "$ref": "#/properties/update" },
     "art": {
-      "type": "object",
+      "type": ["object", "null"],
       "description": "Artwork the mod ships, as PNG files in its folder. Artwork the player sets in Properties → Artwork takes precedence.",
       "properties": {
         "banner": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "The page header, shown full width. PNG, about 1920×500 or larger.",
           "examples": ["art/banner.png"]
         },
         "icon": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "The library list, the game's taskbar icon (Game.exe) and desktop shortcuts. PNG, 256×256.",
           "examples": ["art/icon.png"]
         },
         "portrait": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "For the grid view. PNG, 600×900.",
           "examples": ["art/portrait.png"]
         }
@@ -96,78 +96,103 @@
       }
     },
     "launch": {
-      "type": "object",
+      "type": ["object", "null"],
       "description": "How the game starts. Each is a default the player can change in Properties → General.",
       "properties": {
         "renderer": {
-          "enum": ["glide", "ddraw", "d3d", "opengl"],
+          "enum": ["glide", "ddraw", "d3d", "opengl", null],
           "default": "glide",
           "description": "glide = 3dfx (-3dfx), ddraw = DirectDraw, d3d = Direct3D (-d3d), opengl = -opengl."
         },
-        "windowed": { "type": "boolean", "default": false },
-        "noSound": { "type": "boolean", "default": false },
+        "windowed": { "type": ["boolean", "null"], "default": false },
+        "noSound": { "type": ["boolean", "null"], "default": false },
         "direct": {
-          "type": "boolean",
+          "type": ["boolean", "null"],
           "default": false,
           "description": "-direct: read loose files from the mod's data folder before the MPQs. Also on whenever PlugY is, as under D2SE."
         },
         "txt": {
-          "type": "boolean",
+          "type": ["boolean", "null"],
           "default": false,
           "description": "-txt: compile data\\global\\excel\\*.txt into .bin at startup."
         },
-        "hardcore": { "type": "boolean", "default": true, "description": "Allow hardcore characters." },
+        "hardcore": { "type": ["boolean", "null"], "default": true, "description": "Allow hardcore characters." },
         "plugY": {
-          "type": "boolean",
+          "type": ["boolean", "null"],
           "default": false,
           "description": "Load PlugY (the mod's own PlugY.dll, else the install's)."
         },
         "language": {
-          "type": "string",
+          "type": ["string", "null"],
           "default": "MOD",
           "description": "A Language_<code> folder to load (ENG, DEU, …), or MOD for the mod's own text.",
           "examples": ["MOD", "ENG", "DEU"]
         },
         "skipToBNet": {
-          "type": "boolean",
+          "type": ["boolean", "null"],
           "default": false,
           "description": "-skiptobnet: start at the Battle.net login screen."
         },
         "seed": {
-          "type": ["string", "integer"],
+          "type": ["string", "integer", "null"],
           "description": "-seed <number>: pass a map seed to the game. Exordium keeps only decimal digits."
         },
         "startAct": {
-          "enum": [1, 2, 3, 4, 5],
+          "enum": [1, 2, 3, 4, 5, null],
           "description": "-actN: new single-player characters start in Act N."
         }
       },
       "additionalProperties": false
     },
     "loads": {
-      "type": "object",
+      "type": ["object", "null"],
       "description": "What the loader loads besides the game.",
       "properties": {
         "mpqs": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "type": "string" },
           "description": "The mod's MPQs, lowest priority first, all above patch_d2.mpq (which the game always opens itself). The language MPQ loads above all of them. No limit."
         },
         "d2mod": {
-          "type": "boolean",
+          "type": ["boolean", "null"],
           "default": false,
           "description": "Load D2Mod.dll, which loads the plugins its D2Mod.ini lists."
         },
         "dlls": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": { "type": "string" },
-          "description": "Other plugin DLLs to load, in order (D2SE's ModDll1, ModDll2, …)."
+          "description": "Other plugin DLLs to load, in order. D2SE imports map from ModDll1, ModDll2, …, but Exordium does not cap the list at three."
         },
-        "nefex": { "type": "boolean", "default": false },
-        "d2extra": { "type": "boolean", "default": false },
-        "d2seUtility": { "type": "boolean", "default": false },
-        "d2se": { "type": "boolean", "default": false, "description": "Load a D2SE mod system DLL, named by d2seDll." },
-        "d2seDll": { "type": "string" }
+        "nefex": { "type": ["boolean", "null"], "default": false },
+        "d2extra": { "type": ["boolean", "null"], "default": false },
+        "d2seUtility": { "type": ["boolean", "null"], "default": false },
+        "d2se": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "Load a D2SE mod system DLL, named by d2seDll."
+        },
+        "d2seDll": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "realm": {
+      "type": ["object", "null"],
+      "description": "Private realm settings carried from D2SE_SETUP.ini. Null fields are ignored.",
+      "properties": {
+        "gateway": { "type": ["string", "null"] },
+        "timezone": { "type": ["string", "null"] },
+        "gatewayName": { "type": ["string", "null"] },
+        "selected": { "type": ["string", "null"] },
+        "port": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "d2seUpdate": {
+      "type": ["object", "null"],
+      "description": "Legacy D2SE update file/mirrors preserved from D2SE_SETUP.ini. Exordium's own update object above is preferred.",
+      "properties": {
+        "file": { "type": ["string", "null"] },
+        "mirrors": { "type": ["array", "null"], "items": { "type": "string" } }
       },
       "additionalProperties": false
     },
@@ -175,18 +200,26 @@
       "$ref": "#/properties/launch/properties/renderer",
       "description": "Flat form of launch.renderer; launch wins."
     },
-    "windowed": { "type": "boolean", "description": "Flat form of launch.windowed." },
-    "noSound": { "type": "boolean", "description": "Flat form of launch.noSound." },
-    "direct": { "type": "boolean", "description": "Flat form of launch.direct." },
-    "txt": { "type": "boolean", "description": "Flat form of launch.txt." },
-    "hardcore": { "type": "boolean", "description": "Flat form of launch.hardcore." },
-    "plugY": { "type": "boolean", "description": "Flat form of launch.plugY." },
-    "language": { "type": "string", "description": "Flat form of launch.language." },
-    "skipToBNet": { "type": "boolean", "description": "Flat form of launch.skipToBNet." },
-    "seed": { "type": ["string", "integer"], "description": "Flat form of launch.seed." },
-    "startAct": { "enum": [1, 2, 3, 4, 5], "description": "Flat form of launch.startAct." },
-    "mpqs": { "type": "array", "items": { "type": "string" }, "description": "Flat form of loads.mpqs." },
-    "dlls": { "type": "array", "items": { "type": "string" }, "description": "Flat form of loads.dlls." }
+    "windowed": { "type": ["boolean", "null"], "description": "Flat form of launch.windowed." },
+    "noSound": { "type": ["boolean", "null"], "description": "Flat form of launch.noSound." },
+    "direct": { "type": ["boolean", "null"], "description": "Flat form of launch.direct." },
+    "txt": { "type": ["boolean", "null"], "description": "Flat form of launch.txt." },
+    "hardcore": { "type": ["boolean", "null"], "description": "Flat form of launch.hardcore." },
+    "plugY": { "type": ["boolean", "null"], "description": "Flat form of launch.plugY." },
+    "language": { "type": ["string", "null"], "description": "Flat form of launch.language." },
+    "skipToBNet": { "type": ["boolean", "null"], "description": "Flat form of launch.skipToBNet." },
+    "seed": { "type": ["string", "integer", "null"], "description": "Flat form of launch.seed." },
+    "startAct": { "enum": [1, 2, 3, 4, 5, null], "description": "Flat form of launch.startAct." },
+    "mpqs": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Flat form of loads.mpqs."
+    },
+    "dlls": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Flat form of loads.dlls."
+    }
   },
   "additionalProperties": false
 }

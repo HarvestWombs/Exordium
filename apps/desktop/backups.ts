@@ -4,7 +4,7 @@
  * Laid out per title, in the backups folder (Exordium's own by default, or one the player chose,
  * such as a cloud-synced folder):
  *
- *   <backups>/<box id>/<stamp>[-manual|-before-restore]/   the files, as they were
+ *   <backups>/<box id>/<stamp>[-manual|-before-restore|-before-rebuild]/   the files, as they were
  *   <backups>/<box id>/<stamp>/backup.json                  what it holds, with every file's hash
  *
  * Taken automatically when the last copy of a title closes (the session settles), by hand from the
@@ -20,7 +20,7 @@ const MANIFEST = "backup.json";
 const ID = /^[0-9A-Za-z-]+$/;
 export const DEFAULT_KEEP = 30;
 
-export type BackupReason = "closed" | "manual" | "before-restore";
+export type BackupReason = "closed" | "manual" | "before-restore" | "before-rebuild";
 
 export const CLASSES = ["Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"];
 
@@ -238,7 +238,7 @@ async function removeBackupFolder(titleFolder: string, id: string): Promise<void
   await Deno.rename(folder, `${titleFolder}/.removed-${id}-${crypto.randomUUID().slice(0, 8)}`);
 }
 
-/** Removes automatic and before-restore backups beyond the newest `keep`, and leftovers. */
+/** Removes every backup but manual ones beyond the newest `keep`, and leftovers. */
 async function prune(titleFolder: string, keep: number): Promise<void> {
   const automatic = (await listBackups(titleFolder)).filter((b) => b.reason !== "manual");
   for (const old of automatic.slice(Math.max(1, keep))) await removeBackupFolder(titleFolder, old.id);

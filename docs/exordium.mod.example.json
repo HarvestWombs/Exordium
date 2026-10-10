@@ -17,6 +17,7 @@
   ],
   "update": {
     "endpoint": "updates.json",
+    "manifest": null,
     "channel": "stable",
     "automatic": false,
     "background": true
@@ -24,16 +25,35 @@
   "launch": {
     "renderer": "glide",
     "windowed": true,
+    "noSound": false,
     "direct": true,
     "txt": true,
+    "hardcore": true,
     "plugY": false,
     "language": "ENG",
     "skipToBNet": false,
+    "seed": null,
     "startAct": 1
   },
   "loads": {
-    "mpqs": ["MortalBorne.mpq"],
+    "d2se": false,
+    "d2seDll": null,
+    "d2seUtility": false,
+    "nefex": false,
     "d2mod": true,
+    "d2extra": false,
+    "mpqs": ["MortalBorne.mpq"],
     "dlls": []
+  },
+  "realm": {
+    "gateway": null,
+    "timezone": null,
+    "gatewayName": null,
+    "selected": null,
+    "port": null
+  },
+  "d2seUpdate": {
+    "file": null,
+    "mirrors": []
   }
 }

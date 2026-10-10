@@ -3,9 +3,6 @@ import type { ReactNode } from "react";
 import { Browse, titleKey } from "./Browse.tsx";
 import { Lightbox } from "./Lightbox.tsx";
 
-/** Used until Exordium remembers an install of its own (the first scan saves it). */
-const DEFAULT_ROOT = "I:\\Program Files\\Diablo II";
-
 type Level = "error" | "warning";
 type ArtKind = "banner" | "icon" | "portrait";
 
@@ -133,6 +130,7 @@ interface Scan {
   root: string;
   cores: Title[];
   mods: Title[];
+  importableMods: { folder: string; title: string; core: string | null }[];
 }
 
 interface Running {
@@ -182,7 +180,6 @@ type SettingsSection =
   | "boxes"
   | "backups"
   | "downloads"
-  | "updates"
   | "privacy"
   | "diagnostics"
   | "appearance"
@@ -196,30 +193,21 @@ interface AppPreferences {
     extraFolders: string[];
   };
   launch: {
-    keepLauncherOpen: boolean;
+    minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
-    confirmRebuild: boolean;
   };
   boxes: {
     autoCleanStale: boolean;
-    rebuildAfterUpdates: boolean;
+    confirmRebuild: boolean;
     backupBeforeRebuild: boolean;
   };
   downloads: {
-    allowBackground: boolean;
     maxParallel: number;
     keepArchives: boolean;
     verifyAfterDownload: boolean;
   };
-  updates: {
-    checkOnStartup: boolean;
-    coreChannel: "stable" | "testing" | "local";
-    autoDownload: boolean;
-    askBeforeApply: boolean;
-  };
   privacy: {
     localOnly: boolean;
-    shareInstalledMods: boolean;
   };
   diagnostics: {
     verboseLaunchLogs: boolean;
@@ -276,6 +264,14 @@ export function App() {
   const [activity, setActivity] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [dismissedImportRoot, setDismissedImportRoot] = React.useState<string | null>(() => {
+    try {
+      return localStorage.getItem("exordium.convertDismissed");
+    } catch {
+      return null;
+    }
+  });
+  const [converterOpen, setConverterOpen] = React.useState(false);
   const [menu, setMenu] = React.useState<{ x: number; y: number; t: Title } | null>(null);
   const [confirmBox, setConfirmBox] = React.useState<ConfirmRequest | null>(null);
   const [artVersion, setArtVersion] = React.useState(0);
@@ -290,6 +286,10 @@ export function App() {
   const titles = React.useMemo(() => [...(scan?.mods ?? []), ...(scan?.cores ?? [])], [scan]);
   const selected = titles.find((t) => t.key === selectedKey) ?? null;
   const runningKeys = new Set(status?.running.map((r) => r.key) ?? []);
+  const showImportPrompt = Boolean(
+    view === "library" && root && scan?.root === root && scan.importableMods.length > 0 &&
+      dismissedImportRoot !== root,
+  );
 
   const refreshStatus = React.useCallback(async () => {
     const next = await (await fetch("/api/status")).json() as Status;
@@ -297,7 +297,7 @@ export function App() {
     return next;
   }, []);
 
-  const load = React.useCallback(async (installRoot: string) => {
+  const load = React.useCallback(async (installRoot: string): Promise<boolean> => {
     setScanning(true);
     setError(null);
     try {
@@ -310,8 +310,10 @@ export function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ root: installRoot }),
       });
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setScanning(false);
     }
@@ -331,10 +333,12 @@ export function App() {
     })();
     void (async () => {
       const first = await refreshStatus();
-      const installRoot = first.root ?? DEFAULT_ROOT;
-      setRoot(installRoot);
+      setRoot(first.root);
       if (first.lastPlayed) setSelectedKey(first.lastPlayed);
-      await load(installRoot);
+      // "Scan on startup" off: the library waits for Read library (or a change that reads it).
+      if (first.root && first.appSettings.settings.library.autoScanOnStartup && !await load(first.root)) {
+        setRoot(null);
+      }
     })();
   }, [load, refreshStatus]);
 
@@ -431,12 +435,17 @@ export function App() {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "The game did not start.");
-      await refreshStatus();
+      const next = await refreshStatus();
+      if (next.appSettings.settings.launch.minimizeOnLaunch) void fetch("/api/window/minimize").catch(() => {});
       setActivity(`${title.title} launched`);
       setTimeout(() => setActivity((current) => (current === `${title.title} launched` ? null : current)), 4000);
     } catch (err) {
       setError((err as Error).message);
       setActivity(null);
+      if (status?.appSettings.settings.launch.showLogsOnFailure) {
+        openTitle(title.key);
+        setTab("logs");
+      }
     } finally {
       setStarting(null);
     }
@@ -650,14 +659,6 @@ export function App() {
           </button>
         </nav>
         <div className="grow" />
-        <InstallPath
-          root={root}
-          scanning={scanning}
-          onChange={(next) => {
-            setRoot(next);
-            void load(next);
-          }}
-        />
         {desktop && <WindowControls maximized={maximized} onToggleMaximize={() => void toggleMaximize()} />}
       </header>
 
@@ -667,6 +668,45 @@ export function App() {
         </div>
       )}
       {notice && <div className="banner-note" role="status">{notice}</div>}
+      {showImportPrompt && (
+        <div className="banner-action" role="status">
+          <div>
+            <strong>Convert D2SE metadata?</strong>
+            <span>
+              {scan!.importableMods.length} mod{scan!.importableMods.length === 1 ? "" : "s"}{" "}
+              can be reviewed and saved as editable <code>exordium.mod.json</code> files.
+            </span>
+          </div>
+          <button type="button" className="ghost primary" onClick={() => setConverterOpen(true)}>
+            Open converter
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setDismissedImportRoot(root);
+              try {
+                if (root) localStorage.setItem("exordium.convertDismissed", root);
+              } catch {
+                // Storage unavailable: hidden for this session only.
+              }
+            }}
+          >
+            Not now
+          </button>
+        </div>
+      )}
+      {converterOpen && root && scan && (
+        <D2SEConverter
+          root={root}
+          mods={scan.importableMods}
+          onClose={() => setConverterOpen(false)}
+          onSaved={async (message) => {
+            await load(root);
+            say(message);
+          }}
+        />
+      )}
       {menu && (
         <TitleMenu
           x={menu.x}
@@ -699,7 +739,18 @@ export function App() {
         />
       )}
       {view === "settings" && status && <AppSettings status={status} onChanged={refreshStatus} />}
-      <div className="body" hidden={view !== "library"}>
+      {view === "library" && !root && status && (
+        <SetupPage
+          app={status.appSettings}
+          busy={scanning}
+          onChoose={(next) => {
+            void load(next).then((ok) => {
+              if (ok) setRoot(next);
+            });
+          }}
+        />
+      )}
+      <div className="body" hidden={view !== "library" || !root}>
         <aside className="sidebar">
           <div className="sidebar-head">
             <label className="search">
@@ -728,20 +779,32 @@ export function App() {
           </div>
           <div className="list">
             {scanning && !scan && <p className="muted pad">Reading the install…</p>}
+            {!scanning && !scan && root && (
+              <div className="pad">
+                <p className="muted small">The library has not been read yet.</p>
+                <button type="button" className="ghost primary compact" onClick={() => void load(root)}>
+                  Read library
+                </button>
+              </div>
+            )}
             {filter === "all" && !search && pinned.length > 0 && (
               <ListSection label="FAVORITES">{pinned.map((t) => row(t, "favorite-"))}</ListSection>
             )}
             {filter === "all" && !search && recent.length > 0 && (
               <ListSection label="RECENT">{recent.map((t) => row(t, "recent-"))}</ListSection>
             )}
-            {filter !== "cores" && (
+            {scan && filter !== "cores" && (
               <ListSection label={`MODS · ${visible.filter((t) => t.kind === "mod").length}`}>
-                {visible.filter((t) => t.kind === "mod").map((t) => row(t))}
+                {visible.filter((t) =>
+                  t.kind === "mod"
+                ).map((t) => row(t))}
               </ListSection>
             )}
-            {filter !== "mods" && (
+            {scan && filter !== "mods" && (
               <ListSection label={`CORES · ${visible.filter((t) => t.kind === "core").length}`}>
-                {visible.filter((t) => t.kind === "core").map((t) => row(t))}
+                {visible.filter((t) =>
+                  t.kind === "core"
+                ).map((t) => row(t))}
               </ListSection>
             )}
           </div>
@@ -786,7 +849,19 @@ export function App() {
                 onBack={libraryView === "grid" ? () => setGridHome(true) : undefined}
               />
             )
-            : <div className="empty">{scanning ? "Reading the install…" : "Nothing to show yet."}</div>}
+            : (
+              <div className="empty">
+                {scanning
+                  ? "Reading the install…"
+                  : !scan && root
+                  ? (
+                    <button type="button" className="ghost primary" onClick={() => void load(root)}>
+                      Read library
+                    </button>
+                  )
+                  : "Nothing to show yet."}
+              </div>
+            )}
         </main>
       </div>
 
@@ -830,7 +905,6 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "boxes", label: "Boxes" },
   { id: "backups", label: "Backups" },
   { id: "downloads", label: "Downloads" },
-  { id: "updates", label: "Updates" },
   { id: "privacy", label: "Privacy" },
   { id: "diagnostics", label: "Diagnostics" },
   { id: "appearance", label: "Appearance" },
@@ -891,7 +965,7 @@ function AppSettings({ status, onChanged }: { status: Status; onChanged: () => P
       </aside>
       <div className="settings-page">
         {problem && <p className="error">{problem}</p>}
-        {!app ? <p className="muted">Reading settings...</p> : (
+        {!app ? <p className="muted">Reading settings…</p> : (
           <SettingsSectionView
             section={section}
             app={app}
@@ -921,7 +995,7 @@ function SettingsSectionView(
     return (
       <>
         <SettingsHead title="Discord" text="Account linking and activity visibility." />
-        <DiscordSettings status={status} app={app} busy={busy} onPatch={onPatch} onChanged={onDiscordChanged} />
+        <DiscordSettings status={status} onChanged={onDiscordChanged} />
       </>
     );
   }
@@ -933,7 +1007,7 @@ function SettingsSectionView(
           <PathRow label="Diablo II folder" value={status.root ?? "No install selected"} />
           <ToggleRow
             label="Scan on startup"
-            hint="Read the Diablo II install when Exordium opens, so the library is ready."
+            hint="Read the Diablo II install when Exordium opens, so the library is ready. Off waits for Read library."
             checked={s.library.autoScanOnStartup}
             disabled={busy}
             onChange={(value) => onPatch({ library: { autoScanOnStartup: value } })}
@@ -954,6 +1028,10 @@ function SettingsSectionView(
             onChange={(value) => onPatch({ library: { defaultView: value } })}
           />
         </SettingsGroup>
+        <SettingsGroup title="Storage">
+          <PathRow label="Exordium folder" value={app.paths.data} openKey="data" />
+          <PathRow label="Artwork folder" value={app.paths.art} openKey="art" />
+        </SettingsGroup>
       </>
     );
   }
@@ -963,25 +1041,18 @@ function SettingsSectionView(
         <SettingsHead title="Launching" text="Global launch behavior that applies before per-mod options." />
         <SettingsGroup title="Behavior">
           <ToggleRow
-            label="Keep launcher open after launch"
-            hint="Leave Exordium running after a game starts. Off closes it — which ends Discord game activity, since Exordium reports it."
-            checked={s.launch.keepLauncherOpen}
+            label="Minimize Exordium when a game starts"
+            hint="Exordium keeps running in the taskbar: it follows the game to back up characters and show Discord activity."
+            checked={s.launch.minimizeOnLaunch}
             disabled={busy}
-            onChange={(value) => onPatch({ launch: { keepLauncherOpen: value } })}
+            onChange={(value) => onPatch({ launch: { minimizeOnLaunch: value } })}
           />
           <ToggleRow
             label="Show logs when launch fails"
-            hint="Open the Logs tab automatically when a game fails to start."
+            hint="Open the title's Logs tab when a game fails to start."
             checked={s.launch.showLogsOnFailure}
             disabled={busy}
             onChange={(value) => onPatch({ launch: { showLogsOnFailure: value } })}
-          />
-          <ToggleRow
-            label="Confirm before rebuilding boxes"
-            hint="Ask first when an action would rebuild a mod's box."
-            checked={s.launch.confirmRebuild}
-            disabled={busy}
-            onChange={(value) => onPatch({ launch: { confirmRebuild: value } })}
           />
         </SettingsGroup>
       </>
@@ -990,26 +1061,31 @@ function SettingsSectionView(
   if (section === "boxes") {
     return (
       <>
-        <SettingsHead title="Boxes" text="Where isolated game copies live and how aggressively Exordium reuses them." />
+        <SettingsHead
+          title="Boxes"
+          text="Each title runs from its own box: links to the game and mod files. It is brought up to date every launch."
+        />
         <SettingsGroup title="Storage">
           <PathRow label="Box folder" value={app.paths.boxes} openKey="boxes" />
           <ToggleRow
             label="Clean stale boxes automatically"
-            hint="Remove boxes for mods that are no longer installed."
+            hint="When the library is read, delete the boxes of mods and cores no longer installed. Saves and backups are kept."
             checked={s.boxes.autoCleanStale}
             disabled={busy}
             onChange={(value) => onPatch({ boxes: { autoCleanStale: value } })}
           />
+        </SettingsGroup>
+        <SettingsGroup title="Rebuild Box">
           <ToggleRow
-            label="Rebuild boxes after updates"
-            hint="Rebuild a mod's box when the mod changes, so its box matches. Cores never change."
-            checked={s.boxes.rebuildAfterUpdates}
+            label="Confirm before rebuilding"
+            hint="Ask first when you press Rebuild Box in a title's properties."
+            checked={s.boxes.confirmRebuild}
             disabled={busy}
-            onChange={(value) => onPatch({ boxes: { rebuildAfterUpdates: value } })}
+            onChange={(value) => onPatch({ boxes: { confirmRebuild: value } })}
           />
           <ToggleRow
-            label="Backup saves before rebuild"
-            hint="Copy a mod's characters before rebuilding its box, just in case."
+            label="Back up saves before rebuilding"
+            hint="Copy the title's characters first, to its Backups, unless they match the newest backup."
             checked={s.boxes.backupBeforeRebuild}
             disabled={busy}
             onChange={(value) => onPatch({ boxes: { backupBeforeRebuild: value } })}
@@ -1029,16 +1105,9 @@ function SettingsSectionView(
   if (section === "downloads") {
     return (
       <>
-        <SettingsHead title="Downloads" text="Browse cache and core/mod download behavior." />
-        <SettingsGroup title="Cache">
+        <SettingsHead title="Downloads" text="Mods and cores downloaded from Browse." />
+        <SettingsGroup title="Downloads">
           <PathRow label="Download folder" value={app.paths.downloads} openKey="downloads" />
-          <ToggleRow
-            label="Allow background downloads"
-            hint="Keep downloading while you use the rest of Exordium."
-            checked={s.downloads.allowBackground}
-            disabled={busy}
-            onChange={(value) => onPatch({ downloads: { allowBackground: value } })}
-          />
           <NumberRow
             label="Parallel downloads"
             hint="How many downloads run at once."
@@ -1057,7 +1126,7 @@ function SettingsSectionView(
           />
           <ToggleRow
             label="Verify downloads after completion"
-            hint="Check each download against its checksum before installing."
+            hint="Refuse to install a download that came in shorter or longer than its source said. Cores are always checked against their checksum."
             checked={s.downloads.verifyAfterDownload}
             disabled={busy}
             onChange={(value) => onPatch({ downloads: { verifyAfterDownload: value } })}
@@ -1066,52 +1135,14 @@ function SettingsSectionView(
       </>
     );
   }
-  if (section === "updates") {
-    return (
-      <>
-        <SettingsHead title="Updates" text="How Exordium checks launcher, core, and mod update sources." />
-        <SettingsGroup title="Policy">
-          <ToggleRow
-            label="Check on startup"
-            hint="Look for launcher, core and mod updates when Exordium opens."
-            checked={s.updates.checkOnStartup}
-            disabled={busy}
-            onChange={(value) => onPatch({ updates: { checkOnStartup: value } })}
-          />
-          <SelectRow
-            label="Core channel"
-            hint="Which release line to pull cores and updates from."
-            value={s.updates.coreChannel}
-            disabled={busy}
-            options={[["stable", "Stable"], ["testing", "Testing"], ["local", "Local files only"]]}
-            onChange={(value) => onPatch({ updates: { coreChannel: value } })}
-          />
-          <ToggleRow
-            label="Auto-download updates"
-            hint="Download updates in the background; applying still asks first."
-            checked={s.updates.autoDownload}
-            disabled={busy}
-            onChange={(value) => onPatch({ updates: { autoDownload: value } })}
-          />
-          <ToggleRow
-            label="Ask before applying updates"
-            hint="Confirm before an update replaces what launches next time."
-            checked={s.updates.askBeforeApply}
-            disabled={busy}
-            onChange={(value) => onPatch({ updates: { askBeforeApply: value } })}
-          />
-        </SettingsGroup>
-      </>
-    );
-  }
   if (section === "privacy") {
     return (
       <>
-        <SettingsHead title="Privacy" text="Defaults for social and online behavior." />
-        <SettingsGroup title="Visibility">
+        <SettingsHead title="Privacy" text="What Exordium does online. Discord's own settings are under Discord." />
+        <SettingsGroup title="Network">
           <ToggleRow
             label="Local-only mode"
-            hint="No network at all: no browsing, no updates, no Discord."
+            hint="Stay offline: Browse, cores, Discord sign-in and Discord activity are all off. Games still launch."
             checked={s.privacy.localOnly}
             disabled={busy}
             onChange={(value) => onPatch({ privacy: { localOnly: value } })}
@@ -1177,7 +1208,6 @@ function SettingsSectionView(
           disabled={busy}
           onChange={(value) => onPatch({ appearance: { reduceMotion: value } })}
         />
-        <PathRow label="Artwork folder" value={app.paths.art} openKey="art" />
       </SettingsGroup>
     </>
   );
@@ -1403,11 +1433,8 @@ function BackupSettingsPage() {
 }
 
 function DiscordSettings(
-  { status, app, busy: appBusy, onPatch, onChanged }: {
+  { status, onChanged }: {
     status: Status;
-    app: AppSettingsState;
-    busy: boolean;
-    onPatch: (patch: unknown) => void;
     onChanged: () => Promise<unknown>;
   },
 ) {
@@ -1443,7 +1470,7 @@ function DiscordSettings(
   }
 
   return (
-    <div className="discord-settings">
+    <>
       <SettingsGroup title="Account">
         <div className="settings-row">
           <span className="settings-label">
@@ -1466,7 +1493,7 @@ function DiscordSettings(
               </button>
             )
             : (
-              <button type="button" className="ghost primary" disabled={busy} onClick={() => void connect()}>
+              <button type="button" className="ghost compact" disabled={busy} onClick={() => void connect()}>
                 Connect Discord
               </button>
             )}
@@ -1488,56 +1515,113 @@ function DiscordSettings(
           onChange={(value) => void post("/api/discord", { enabled: value })}
         />
       </SettingsGroup>
-      <SettingsGroup title="Social">
-        <ToggleRow
-          label="Share installed mod list"
-          hint="Let social features see which mods you have installed. Needs a connected account."
-          checked={app.settings.privacy.shareInstalledMods}
-          disabled={appBusy}
-          onChange={(value) => onPatch({ privacy: { shareInstalledMods: value } })}
-        />
-      </SettingsGroup>
       {problem && <p className="error">{problem}</p>}
-    </div>
+    </>
   );
 }
 
-function InstallPath(
-  { root, scanning, onChange }: { root: string | null; scanning: boolean; onChange: (root: string) => void },
+function SetupPage(
+  { app, busy, onChoose }: { app: AppSettingsState; busy: boolean; onChoose: (root: string) => void },
 ) {
-  const [editing, setEditing] = React.useState(false);
-  const [value, setValue] = React.useState(root ?? "");
-  React.useEffect(() => setValue(root ?? ""), [root]);
-  if (editing) {
-    return (
-      <form
-        className="install-edit"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setEditing(false);
-          if (value.trim()) onChange(value.trim());
-        }}
-      >
-        <input
-          value={value}
-          onChange={(e) => setValue(e.currentTarget.value)}
-          aria-label="Diablo II install folder"
-          autoFocus
-        />
-        <button type="submit" className="ghost">Read</button>
-      </form>
-    );
+  const [folder, setFolder] = React.useState("");
+  const [symlink, setSymlink] = React.useState<{ ok: boolean; admin: boolean; error: string | null } | null>(null);
+  const ready = folder.trim().length > 0;
+  React.useEffect(() => {
+    void fetch("/api/symlink-status").then((response) => response.json()).then(setSymlink).catch(() => {});
+  }, []);
+  async function choose(current: string, setter: (value: string) => void, title: string) {
+    const params = new URLSearchParams({ title });
+    if (current) params.set("path", current);
+    const response = await fetch(`/api/pick-folder?${params}`);
+    if (!response.ok) return;
+    const body = await response.json();
+    if (body.path) setter(body.path);
   }
   return (
-    <div className="install">
-      <button type="button" className="install-path" onClick={() => setEditing(true)} title="Change the install">
-        <FolderIcon />
-        {root ?? "No install"}
-      </button>
-      <button type="button" className="ghost" disabled={scanning || !root} onClick={() => root && onChange(root)}>
-        {scanning ? "Reading…" : "Rescan"}
-      </button>
-    </div>
+    <main className="setup-page">
+      <div className="setup-shell">
+        <div className="setup-head">
+          <p className="eyebrow accent">First launch</p>
+          <h1>Set up Exordium</h1>
+          <p className="muted">
+            Pick your Diablo II folder once. Exordium keeps its own files in one portable folder so they are easy to
+            inspect, back up, or clear.
+          </p>
+        </div>
+        <ol className="setup-steps">
+          <li className={`setup-step active ${folder.trim() ? "done" : ""}`}>
+            <span className="setup-num">{folder.trim() ? "✓" : "1"}</span>
+            <div>
+              <h2>Diablo II install</h2>
+              <p className="muted">Choose the folder that contains Game.exe, D2SE.exe, D2SE\CORES, and MODS.</p>
+              <div className="setup-path">
+                <input
+                  value={folder}
+                  placeholder="C:\Program Files (x86)\Diablo II"
+                  disabled={busy}
+                  onChange={(event) => setFolder(event.currentTarget.value)}
+                  onKeyDown={(event) => event.key === "Enter" && ready && !busy && onChoose(folder.trim())}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="ghost primary"
+                  disabled={busy}
+                  onClick={() => void choose(folder, setFolder, "Choose Diablo II install")}
+                >
+                  Choose…
+                </button>
+              </div>
+            </div>
+          </li>
+          <li className="setup-step done">
+            <span className="setup-num">✓</span>
+            <div>
+              <h2>Storage</h2>
+              <p className="muted">Boxes, backups, downloads, logs and settings are kept together in one folder:</p>
+              <code className="setup-code">{app.paths.data}</code>
+            </div>
+          </li>
+          <li className="setup-step">
+            <span className="setup-num">3</span>
+            <div>
+              <h2>
+                Imports <span className="muted small">optional</span>
+              </h2>
+              <p className="muted">
+                D2SE mods are kept in place. After setup, Exordium can create editable exordium.mod.json drafts from
+                D2SE_SETUP.ini.
+              </p>
+            </div>
+          </li>
+        </ol>
+        {symlink && !symlink.ok && (
+          <div className="setup-warning">
+            <strong>Symlinks are not available.</strong>
+            <span>
+              Boxes need file symlinks to avoid copying full MPQs. Enable Windows Developer Mode or restart Exordium as
+              administrator.
+            </span>
+            {!symlink.admin && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => void fetch("/api/restart-admin", { method: "POST" })}
+              >
+                Restart as admin
+              </button>
+            )}
+          </div>
+        )}
+        {ready && (
+          <div className="setup-finish">
+            <button type="button" className="ghost primary" disabled={busy} onClick={() => onChoose(folder.trim())}>
+              {busy ? "Reading…" : "Finish setup"}
+            </button>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -1750,6 +1834,203 @@ function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; onClose:
             {busy ? "Working…" : request.action}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function D2SEConverter(
+  { root, mods, onClose, onSaved }: {
+    root: string;
+    mods: Scan["importableMods"];
+    onClose: () => void;
+    onSaved: (message: string) => Promise<void>;
+  },
+) {
+  const [folder, setFolder] = React.useState(mods[0]?.folder ?? "");
+  const [text, setText] = React.useState("");
+  const [exists, setExists] = React.useState(false);
+  const [path, setPath] = React.useState("");
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [filter, setFilter] = React.useState("");
+  const [saved, setSaved] = React.useState(0);
+  const shownMods = React.useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    return needle ? mods.filter((mod) => `${mod.title} ${mod.folder}`.toLowerCase().includes(needle)) : mods;
+  }, [mods, filter]);
+  const discardOk = React.useCallback(
+    () => !dirty || confirm("Discard your unsaved changes to this exordium.mod.json?"),
+    [dirty],
+  );
+  const close = React.useCallback(() => {
+    if (!busy && discardOk()) onClose();
+  }, [busy, discardOk, onClose]);
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, [close]);
+  const manifest = React.useMemo(() => {
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }, [text]);
+
+  React.useEffect(() => {
+    if (!folder) return;
+    let cancelled = false;
+    setBusy(true);
+    setProblem(null);
+    fetch("/api/d2se-converter/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root, folder }),
+    })
+      .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
+      .then(({ ok, body }) => {
+        if (cancelled) return;
+        if (!ok) throw new Error(body.error ?? "Could not convert this mod.");
+        setText(JSON.stringify(body.manifest, null, 2));
+        setExists(body.exists === true);
+        setPath(body.path ?? "");
+        setDirty(false);
+      })
+      .catch((error) => !cancelled && setProblem((error as Error).message))
+      .finally(() => !cancelled && setBusy(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [folder, root]);
+
+  function patchManifest(key: string, value: string) {
+    const base = manifest ?? {};
+    setText(JSON.stringify({ ...base, [key]: value }, null, 2));
+    setDirty(true);
+  }
+
+  async function save() {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/api/d2se-converter/write", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ root, folder, text, overwrite: exists }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Could not write exordium.mod.json.");
+      // The saved mod leaves the list once the library is read again: move on to the next one.
+      const at = mods.findIndex((mod) => mod.folder === folder);
+      const next = mods[at + 1] ?? mods[at - 1] ?? null;
+      setDirty(false);
+      setSaved((n) => n + 1);
+      await onSaved(`Saved ${body.path ?? "exordium.mod.json"}.`);
+      if (next) setFolder(next.folder);
+      else onClose();
+    } catch (error) {
+      setProblem((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = (key: "title" | "name" | "author" | "version" | "core") => (
+    <label>
+      <span>{key}</span>
+      <input
+        value={String(manifest?.[key] ?? "")}
+        disabled={busy || !manifest}
+        onChange={(event) => patchManifest(key, event.currentTarget.value)}
+      />
+    </label>
+  );
+
+  return (
+    <div className="scrim" onClick={(event) => event.target === event.currentTarget && close()}>
+      <div className="converter-modal" role="dialog" aria-modal="true" aria-label="D2SE to Exordium converter">
+        <header>
+          <div>
+            <p className="eyebrow accent">D2SE converter</p>
+            <h2>Build exordium.mod.json</h2>
+          </div>
+          <span className="muted small converter-progress">
+            {mods.length} to review{saved > 0 ? ` · ${saved} saved` : ""}
+          </span>
+          <button type="button" className="window-button" aria-label="Close" disabled={busy} onClick={close}>
+            ×
+          </button>
+        </header>
+        <div className="converter-body">
+          <aside className="converter-list">
+            {mods.length > 8 && (
+              <input
+                className="converter-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.currentTarget.value)}
+                placeholder="Filter mods…"
+                aria-label="Filter mods"
+              />
+            )}
+            {shownMods.map((mod) => (
+              <button
+                type="button"
+                key={mod.folder}
+                className={mod.folder === folder ? "on" : ""}
+                disabled={busy}
+                onClick={() => mod.folder !== folder && discardOk() && setFolder(mod.folder)}
+              >
+                <strong>{mod.title}</strong>
+                <span>{mod.folder}{mod.core ? ` · ${mod.core}` : ""}</span>
+              </button>
+            ))}
+          </aside>
+          <section className="converter-editor">
+            <div className="converter-grid">
+              {field("title")}
+              {field("name")}
+              {field("author")}
+              {field("version")}
+              {field("core")}
+            </div>
+            <label className="converter-description">
+              <span>description</span>
+              <textarea
+                value={String(manifest?.description ?? "")}
+                disabled={busy || !manifest}
+                onChange={(event) => patchManifest("description", event.currentTarget.value)}
+              />
+            </label>
+            <label className="converter-json">
+              <span>JSON preview</span>
+              <textarea
+                value={text}
+                disabled={busy}
+                spellCheck={false}
+                onChange={(event) => {
+                  setText(event.currentTarget.value);
+                  setDirty(true);
+                }}
+              />
+            </label>
+            <p className="muted small">
+              {path || "Choose a mod to convert."}
+              {exists ? " Existing file will be overwritten when you save." : ""}
+              {dirty ? " Unsaved changes." : ""}
+            </p>
+            {problem && <p className="bad-text small">{problem}</p>}
+          </section>
+        </div>
+        <footer>
+          <button type="button" className="ghost" disabled={busy} onClick={close}>Close</button>
+          <button type="button" className="ghost primary" disabled={busy || !manifest} onClick={() => void save()}>
+            {busy ? "Working…" : exists ? "Save changes" : "Create file"}
+          </button>
+        </footer>
       </div>
     </div>
   );
@@ -2391,7 +2672,7 @@ interface BackupCharacter {
 interface BackupEntry {
   id: string;
   createdAt: string;
-  reason: "closed" | "manual" | "before-restore";
+  reason: "closed" | "manual" | "before-restore" | "before-rebuild";
   files: number;
   bytes: number;
   characters: BackupCharacter[];
@@ -2408,6 +2689,7 @@ const BACKUP_REASONS: Record<BackupEntry["reason"], string> = {
   closed: "Automatic",
   manual: "Manual",
   "before-restore": "Before restore",
+  "before-rebuild": "Before rebuild",
 };
 
 /**
@@ -2789,6 +3071,8 @@ function ActivityFeed({ root, t, running }: { root: string; t: Title; running: n
             ? "Backed up by hand"
             : backup.reason === "before-restore"
             ? "Backed up before a restore"
+            : backup.reason === "before-rebuild"
+            ? "Backed up before a box rebuild"
             : "Characters backed up",
           detail: backup.characters.map((c) => c.name).join(", ") || `${backup.files} files`,
           bad: false,
@@ -3286,7 +3570,7 @@ function GeneralPage({ t, root, onChanged }: { t: Title; root: string; onChanged
             Reset
           </button>
           <button type="button" className="ghost primary" disabled={!changed || saving} onClick={() => void apply()}>
-            {saving ? "Applying..." : "Apply"}
+            {saving ? "Applying…" : "Apply"}
           </button>
         </div>
       </footer>
@@ -3438,7 +3722,7 @@ function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; onChanged
             disabled={busy !== null || (!changed && !draft.endpoint)}
             onClick={() => void post("check")}
           >
-            {busy === "check" ? "Checking..." : "Check Now"}
+            {busy === "check" ? "Checking…" : "Check now"}
           </button>
           <button
             type="button"
@@ -3454,7 +3738,7 @@ function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; onChanged
             disabled={!changed || busy !== null}
             onClick={() => void post("save")}
           >
-            {busy === "save" ? "Applying..." : "Apply"}
+            {busy === "save" ? "Applying…" : "Apply"}
           </button>
         </div>
       </footer>
@@ -3480,6 +3764,14 @@ function FilesPage({ t, root }: { t: Title; root: string }) {
   }
 
   async function build(action: "rebuild" | "verify") {
+    const settings = action === "rebuild"
+      ? await fetch("/api/app-settings").then((r) => r.json()).then((body) => body.settings as AppPreferences)
+        .catch(() => null)
+      : null;
+    if (
+      action === "rebuild" && settings?.boxes.confirmRebuild !== false &&
+      !confirm(`Rebuild ${t.title}'s box? Its links and copied files are brought up to date; saves are not touched.`)
+    ) return;
     setBusy(action);
     setResult(null);
     try {
