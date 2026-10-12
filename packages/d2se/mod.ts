@@ -25,12 +25,17 @@ export {
 } from "./scan.ts";
 export {
   type CoreImport,
+  D2SE_FOLDERS,
   type D2SEImport,
   type D2SELayout,
   findD2SE,
   GAME_ARCHIVES,
   type ImportOptions,
   INSTALL_FILES,
+  type LayoutFolders,
+  layoutPath,
+  LIBRARY_FOLDERS,
+  LIBRARY_MARKER,
   type ModImport,
   modProblems,
   PLUGY_FOLDER,

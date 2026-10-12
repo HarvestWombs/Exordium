@@ -382,7 +382,12 @@ export async function modDbList(cacheDir: string, refresh = false): Promise<{ it
   if (!refresh) {
     try {
       const cached = JSON.parse(await Deno.readTextFile(file)) as { items: ModDbItem[]; fetchedAt: string };
-      if (Date.now() - Date.parse(cached.fetchedAt) < MODDB_TTL_MS) return cached;
+      if (Date.now() - Date.parse(cached.fetchedAt) < MODDB_TTL_MS) {
+        return {
+          ...cached,
+          items: cached.items.map((item) => ({ ...item, cover: modDbImage(item.cover, "thumb_620x2000") })),
+        };
+      }
     } catch {
       // Missing or unreadable: fetch.
     }
@@ -397,7 +402,194 @@ export async function modDbList(cacheDir: string, refresh = false): Promise<{ it
   };
   await Deno.mkdir(cacheDir, { recursive: true });
   await Deno.writeTextFile(file, JSON.stringify(result));
-  return result;
+  return {
+    ...result,
+    items: result.items.map((item) => ({ ...item, cover: modDbImage(item.cover, "thumb_620x2000") })),
+  };
+}
+
+/**
+ * A ModDB image at one of the sizes its cache serves for every picture: `crop_120x90` (what listings
+ * show) for strips, `thumb_620x2000` (what entry pages show) for a full view. The same picture is at
+ * `media.moddb.com/cache/images/<path>/<size>/<name>` (originals drop `cache/` and the size). Other
+ * sizes exist only where ModDB's own pages used them (measured 2026-10-10).
+ */
+export function modDbImage(url: string, size: "crop_120x90" | "thumb_620x2000"): string {
+  const match =
+    /^https:\/\/media\.moddb\.com\/(?:cache\/)?images\/([a-z]+\/\d+\/\d+\/\d+)\/(?:(?:crop|thumb|resize)_\d+x\d+\/)?([^/?#]+)$/i
+      .exec(url.trim());
+  return match ? `https://media.moddb.com/cache/images/${match[1]}/${size}/${match[2]}` : url;
+}
+
+export interface ModDbFile {
+  /** The file's ModDB page, which leads to its download. */
+  page: string;
+  name: string;
+  /** Bytes, from the size ModDB shows ("15.29mb"); null when it shows none. */
+  size: number | null;
+  category: string | null;
+}
+
+export interface ModDbDetails {
+  page: string;
+  description: string;
+  creator: string | null;
+  addedAt: string | null;
+  updatedAt: string | null;
+  /** A single file's size, in bytes (file and addon pages). */
+  size: number | null;
+  downloads: number | null;
+  /** A single file's name: `.exe` ones are never installed for the player. */
+  filename: string | null;
+  screenshots: { full: string; thumb: string }[];
+  /** A mod's files, newest first, for choosing which to install. */
+  files: ModDbFile[];
+  links: { label: string; url: string }[];
+  /** A file's or addon's mod, whose screenshots it borrows when it has few of its own. */
+  parentMod: string | null;
+}
+
+/** ModDB's own size text ("15.29mb", "1.05gb", "512kb") in bytes. */
+export function modDbBytes(text: string): number | null {
+  const exact = /\(([\d,]+)\s*bytes\)/i.exec(text);
+  if (exact) return Number(exact[1]!.replace(/,/g, ""));
+  const match = /([\d.]+)\s*(b|kb|mb|gb)\b/i.exec(text);
+  if (!match) return null;
+  const scale = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }[match[2]!.toLowerCase() as "b"];
+  return Math.round(Number(match[1]) * scale);
+}
+
+/** The `<h5>Label</h5><span class="summary">…</span>` rows of ModDB's side tables, by label. */
+function modDbFacts(html: string): Map<string, string> {
+  const facts = new Map<string, string>();
+  for (const match of html.matchAll(/<h5>([^<]+)<\/h5>\s*<span class="summary">([\s\S]*?)<\/span>\s*<\/div>/gi)) {
+    const label = match[1]!.trim().toLowerCase();
+    if (!facts.has(label)) facts.set(label, match[2]!);
+  }
+  return facts;
+}
+
+/** The text of the element whose opening tag carries `id`, up to its first closing `</div>`. */
+function modDbBlock(html: string, id: string): string {
+  const at = html.search(new RegExp(`<[a-z]+\\b[^>]*\\bid=["']${id}["'][^>]*>`, "i"));
+  if (at < 0) return "";
+  const open = html.indexOf(">", at) + 1;
+  const end = html.indexOf("</div>", open);
+  return html.slice(open, end < 0 ? undefined : end);
+}
+
+export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
+  const facts = modDbFacts(html);
+  const text = (label: string) => {
+    const raw = facts.get(label);
+    return raw === undefined ? null : cleanDescription(raw).replace(/\s+/g, " ").trim() || null;
+  };
+  const time = (label: string) => {
+    const at = /<time\b[^>]*datetime=["']([^"']+)["']/i.exec(facts.get(label) ?? "")?.[1];
+    return at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : null;
+  };
+
+  const description = cleanDescription(modDbBlock(html, "downloaddescription").replace(/<hr\s*\/?>/gi, "")) ||
+    cleanDescription(modDbBlock(html, "profiledescription")) ||
+    cleanDescription(/<p\b[^>]*id=["']downloadsummary["'][^>]*>([\s\S]*?)<\/p>/i.exec(html)?.[1] ?? "") ||
+    decodeXml(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i.exec(html)?.[1] ?? "");
+
+  const shots: ModDbDetails["screenshots"] = [];
+  const seen = new Set<string>();
+  const addShot = (url: string) => {
+    const full = modDbImage(url, "thumb_620x2000");
+    if (seen.has(full) || !full.startsWith("https://media.moddb.com/")) return;
+    seen.add(full);
+    shots.push({ full, thumb: modDbImage(url, "crop_120x90") });
+  };
+  for (const match of modDbBlock(html, "imagebox").matchAll(/<img\b[^>]*src=["']([^"']+)["']/gi)) addShot(match[1]!);
+  // A file's or addon's own picture; a mod's og:image is its logo, kept last.
+  const og = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)?.[1];
+  if (og && /\/images\/downloads\//i.test(og)) {
+    shots.unshift({ full: modDbImage(og, "thumb_620x2000"), thumb: modDbImage(og, "crop_120x90") });
+  } else if (og && shots.length === 0) addShot(og);
+
+  // The side profile is the entry's mod's, or the game's for a game-level addon: its files and
+  // homepage count only when they are a mod's own.
+  const location = facts.get("location") ?? "";
+  const parent = [...location.matchAll(/href=["'](\/mods\/[^"'/]+)["']/gi)].map((m) => m[1]!).at(-1);
+  const parentMod = parent ? modDbAbsolute(page, parent) : null;
+  const ownMod = /^https:\/\/www\.moddb\.com\/mods\/[^/]+$/i.test(page.replace(/\/+$/, "")) ? page : parentMod;
+
+  // The sidebar's download buttons: every file of the mod, with its category and size.
+  const files: ModDbFile[] = [];
+  for (
+    const match of html.matchAll(
+      /<a\s+href=["']([^"']+\/downloads\/[^"'#?]+)["'][^>]*class=["']button buttonfull["'][^>]*>([\s\S]*?)<\/a>/gi,
+    )
+  ) {
+    const filePage = modDbAbsolute(page, match[1]!);
+    if (!filePage || !ownMod || !filePage.startsWith(`${ownMod.replace(/\/+$/, "")}/downloads/`)) continue;
+    if (files.some((f) => f.page === filePage)) continue;
+    const spans = [...match[2]!.matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)].map((s) => cleanDescription(s[1]!));
+    files.push({
+      page: filePage,
+      category: spans[0] || null,
+      name: spans[1] || filePage.split("/").pop()!,
+      size: spans[3] ? modDbBytes(spans[3]) : null,
+    });
+  }
+
+  const links: ModDbDetails["links"] = [];
+  const homepage = /<a\b[^>]*href=["'](https?:\/\/[^"']+)["']/i.exec(facts.get("homepage") ?? "")?.[1];
+  if (homepage && ownMod) links.push({ label: "Homepage", url: decodeXml(homepage) });
+
+  const downloads = /([\d,]+)/.exec(text("downloads") ?? "")?.[1];
+  return {
+    page,
+    description,
+    creator: (text("uploader") ?? text("creator") ?? text("developer") ?? text("publisher") ?? text("author"))
+      ?.replace(/^\((.*)\)$/, "$1") ?? null,
+    addedAt: time("added") ?? time("release date"),
+    updatedAt: time("updated") ?? time("last update"),
+    size: facts.has("size") ? modDbBytes(cleanDescription(facts.get("size")!)) : null,
+    downloads: downloads ? Number(downloads.replace(/,/g, "")) : null,
+    filename: text("filename"),
+    screenshots: shots,
+    files,
+    links,
+    parentMod,
+  };
+}
+
+const MODDB_DETAILS_TTL_MS = 12 * 60 * 60 * 1000;
+
+async function fetchModDbDetails(page: string): Promise<ModDbDetails> {
+  const response = await fetch(page, { headers: { "user-agent": "Exordium" } });
+  if (!response.ok) throw new Error(`ModDB answered ${response.status} for this page.`);
+  return modDbDetailsFromHtml(await response.text(), page);
+}
+
+/**
+ * One ModDB entry's page, read once its card comes on screen and cached for 12 hours. A file or
+ * addon with fewer than two pictures also shows its mod's screenshots.
+ */
+export async function modDbDetails(cacheDir: string, page: string, refresh = false): Promise<ModDbDetails> {
+  if (!/^https:\/\/www\.moddb\.com\/[^?#]+$/i.test(page)) throw new Error("Not a ModDB page.");
+  const file = `${cacheDir}/moddb-items/${modDbId(page)}.json`;
+  if (!refresh) {
+    try {
+      const cached = JSON.parse(await Deno.readTextFile(file)) as { at: string; details: ModDbDetails };
+      if (Date.now() - Date.parse(cached.at) < MODDB_DETAILS_TTL_MS) return cached.details;
+    } catch {
+      // Missing or unreadable: fetch.
+    }
+  }
+  const details = await fetchModDbDetails(page);
+  if (details.parentMod && details.parentMod !== page && details.screenshots.length < 2) {
+    const parent = await modDbDetails(cacheDir, details.parentMod).catch(() => null);
+    for (const shot of parent?.screenshots ?? []) {
+      if (!details.screenshots.some((s) => s.full === shot.full)) details.screenshots.push(shot);
+    }
+  }
+  await Deno.mkdir(`${cacheDir}/moddb-items`, { recursive: true });
+  await Deno.writeTextFile(file, JSON.stringify({ at: new Date().toISOString(), details }));
+  return details;
 }
 
 export interface ItemFile {

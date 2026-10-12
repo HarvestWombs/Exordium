@@ -1,38 +1,42 @@
 /**
- * Cores from HarvestLabs' own host (Google Drive, 2026-10-05): the browser's Cores tab.
+ * Cores from HarvestLabs' own host: the browser's Cores tab and setup's second step.
  *
  * Exordium ships no game files. Cores are per-version Blizzard files (the DLLs, `Patch_D2.mpq` and
- * `Game.exe`) hosted beside a catalog, `cores.json`, which lists each zip with its size and SHA-256.
+ * `Game.exe`) kept in the HarvestWombs/Exordium-Cores repository (moved off Google Drive 2026-10-11).
+ * Its workflow zips each core folder and publishes a release with a catalog, `cores.json`, which
+ * lists each zip with its size, SHA-256 and download link.
  * A zip holds one folder named for the version, e.g. `1.10/`.
  *
- * Installing downloads the zip, checks it against the catalog, unpacks it beside the install and
- * moves the folder into `D2SE\CORES\<name>`. Zips are named as mods name cores (`1.10f`, not `1.10`).
+ * Installing downloads the zip, checks it against the catalog, unpacks it in the library and
+ * moves the folder into `cores/<name>`. Zips are named as mods name cores (`1.10f`, not `1.10`).
  * Like mods, a core is never installed over one that exists. 1.14 cores are the install itself
  * (Blizzard's installer provides them), so they are listed but not installed here.
  */
 
-import { isSingleExeCore } from "@exordium/d2se";
+import { isSingleExeCore, LIBRARY_FOLDERS } from "@exordium/d2se";
 import { extract } from "./install.ts";
 
 /**
- * The catalog, `cores.json` in HarvestLabs' Drive folder. Replace it there with "Manage versions" so
- * this link stays the same. `EXORDIUM_CORES_URL` overrides it (tests, a mirror).
+ * The catalog, `cores.json` in the cores repository's latest release; pushing a change to a core
+ * folder there publishes a new one. `EXORDIUM_CORES_URL` overrides it (tests, a mirror; a Drive share
+ * link still works, see directUrl).
  */
-export const CORES_CATALOG_URL = "https://drive.google.com/file/d/1u7cuKYK-oNL2Amg29lg3d_CplCIqKKO_/view";
+export const CORES_CATALOG_URL = "https://github.com/HarvestWombs/Exordium-Cores/releases/latest/download/cores.json";
 
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 
 export interface CatalogCore {
   /** Blizzard's name for the patch, as the zip is named: `1.10`. */
   version: string;
-  /** The name a mod's `D2Core` uses, and the folder under `D2SE\CORES`: `1.10f`. */
+  /** The name a mod's `D2Core` uses, and the folder under the library's `cores/`: `1.10f`. */
   core: string;
   file: string;
   size: number;
   sha256: string;
   /**
-   * Where to download it, when not beside the catalog. Google Drive gives every file its own id, so a
-   * Drive-hosted catalog lists each zip's link; a share link is turned into a direct download.
+   * Where to download it, when not beside the catalog. A release's catalog names its own release's
+   * zips, so a catalog cached before a newer release still downloads the zips it was hashed from.
+   * Google Drive gives every file its own id, so a Drive-hosted catalog lists each zip's link too.
    */
   url?: string;
 }
@@ -42,12 +46,8 @@ export interface Catalog {
   cores: CatalogCore[];
 }
 
-/** The cores D2SE ran, which Exordium's loader has been built against. Others are offered, untested. */
-const TESTED = new Set(["1.07", "1.08", "1.09b", "1.09d", "1.10f", "1.11b", "1.12a", "1.13c", "1.13d", "1.14d"]);
-
 export interface CoreEntry extends CatalogCore {
-  tested: boolean;
-  /** `installed`: in `D2SE\CORES` (or the install's own 1.14). `install`: the install itself. */
+  /** `installed`: in the library's `cores/` (or the install's own 1.14). `install`: the install itself. */
   status: "available" | "installed" | "install";
   job: CoreJob | null;
 }
@@ -147,10 +147,9 @@ export async function coreEntries(root: string | null, list: Catalog, _rootCore:
   for (const c of list.cores) {
     if (isSingleExeCore(c.core)) continue;
     let status: CoreEntry["status"] = "available";
-    if (root && await isDir(`${root}/D2SE/CORES/${c.core}`)) status = "installed";
+    if (root && await isDir(`${root}/${LIBRARY_FOLDERS.cores}/${c.core}`)) status = "installed";
     entries.push({
       ...c,
-      tested: TESTED.has(c.core.toLowerCase()),
       status,
       job: jobs.get(c.core.toLowerCase()) ?? null,
     });
@@ -163,8 +162,8 @@ export class CoreInstallError extends Error {
 }
 
 /**
- * Starts installing `core` into `root`'s `D2SE\CORES`. Refuses a 1.14 core, a core already there, an
- * install without D2SE's layout, and a second install of the same core at once.
+ * Starts installing `core` into the library's `cores` folder. Refuses a 1.14 core, a core already
+ * there, a root that is not the library, and a second install of the same core at once.
  */
 export async function startCoreInstall(root: string, core: string, downloads: string): Promise<CoreJob> {
   const list = await catalog();
@@ -173,8 +172,8 @@ export async function startCoreInstall(root: string, core: string, downloads: st
   if (isSingleExeCore(entry.core)) {
     throw new CoreInstallError(`${entry.core} is the Diablo II install itself; Blizzard's installer provides it.`);
   }
-  const coresDir = `${root}/D2SE/CORES`;
-  if (!(await isDir(coresDir))) throw new CoreInstallError(`No D2SE\\CORES folder in ${root}.`);
+  const coresDir = `${root}/${LIBRARY_FOLDERS.cores}`;
+  if (!(await isDir(coresDir))) throw new CoreInstallError(`No cores folder in ${root}: run setup first.`);
   const target = `${coresDir}/${entry.core}`;
   if (await isDir(target)) throw new CoreInstallError(`Core ${entry.core} is already installed.`);
   const key = entry.core.toLowerCase();

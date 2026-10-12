@@ -13,7 +13,6 @@ interface CoreEntry {
   core: string;
   file: string;
   size: number;
-  tested: boolean;
   status: "available" | "installed" | "install";
   job: CoreJob | null;
 }
@@ -26,7 +25,7 @@ function formatMB(bytes: number): string {
 
 /**
  * The browser's Cores tab: one version's game files per row, from HarvestLabs' host (cores.ts),
- * installed into D2SE\CORES under the name mods ask for.
+ * installed into the library's cores folder under the name mods ask for.
  */
 export function Cores(
   { root, onInstalled }: { root: string | null; onInstalled: (core: string) => void },
@@ -82,7 +81,7 @@ export function Cores(
         <p className="muted">
           One Diablo II version's own files each: its DLLs, <code>Patch_D2.mpq</code> and{" "}
           <code>Game.exe</code>. A mod built on a version needs its core. They install into{" "}
-          <code>D2SE\CORES</code>, and Exordium checks each download against its published checksum.
+          Exordium's library, and Exordium checks each download against its published checksum.
         </p>
         <button type="button" className="ghost" onClick={() => void load(true)}>Refresh</button>
       </div>
@@ -91,7 +90,7 @@ export function Cores(
       {list === null && <p className="muted pad">Reading the cores…</p>}
       {list && !list.configured && <p className="muted pad">Cores are not published yet.</p>}
       {list && !root && list.configured && (
-        <p className="muted pad">Choose your Diablo II install in the library first: cores go into its D2SE folder.</p>
+        <p className="muted pad">Set up Exordium's library first: cores are installed into it.</p>
       )}
       {list && list.cores.length > 0 && (
         <ul className="core-list">
@@ -104,9 +103,6 @@ export function Cores(
                   <strong>{c.version}</strong>
                   {c.core !== c.version && <span className="muted small">mods call it {c.core}</span>}
                 </div>
-                <span className={c.tested ? "pill" : "pill untested"}>
-                  {c.tested ? "Runs in Exordium" : "Untested in Exordium"}
-                </span>
                 <span className="muted small">{formatMB(c.size)}</span>
                 <div className="grow" />
                 {job?.state === "failed" && <span className="bad-text small">{job.error}</span>}

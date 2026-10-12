@@ -195,3 +195,30 @@ Deno.test("hash cache: a second import reads nothing unchanged, and a changed fi
   assertEquals(cache.size, size);
   await Deno.remove(root, { recursive: true });
 });
+
+Deno.test("Exordium's library reads with its own folders: game, cores, mods", async () => {
+  const root = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  try {
+    const write = async (path: string, text: string) => {
+      await Deno.mkdir(`${root}/${path}`.replace(/\/[^/]+$/, ""), { recursive: true });
+      await Deno.writeTextFile(`${root}/${path}`, text);
+    };
+    await write("exordium-library.json", "{}");
+    await write("game/d2data.mpq", "data");
+    await write("game/PlugY/PlugY.dll", "plugy");
+    await write("cores/1.10f/D2Game.dll", "game");
+    await write("mods/Some Mod/D2SE_SETUP.ini", "[Protected]\nModName=Some Mod\nD2Core=1.10f\n");
+    const imported = (await readD2SE(root, { hash: false }))!;
+    assertEquals(imported.layout.library, true);
+    assertEquals(imported.layout.folders, { game: "game", cores: "cores", mods: "mods" });
+    // In the box the game files sit at the root; they are read from the library's game folder.
+    assertEquals(
+      imported.game.map((f) => [f.path, f.source]).sort(),
+      [["PlugY/PlugY.dll", "game/PlugY/PlugY.dll"], ["d2data.mpq", "game/d2data.mpq"]],
+    );
+    assertEquals(imported.cores.map((c) => [c.version, c.folder]), [["1.10f", "cores/1.10f"]]);
+    assertEquals(imported.mods.map((m) => m.folder), ["Some Mod"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});

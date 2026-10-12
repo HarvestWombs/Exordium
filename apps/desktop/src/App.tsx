@@ -149,7 +149,11 @@ interface Playtime {
 }
 
 interface Status {
+  /** Exordium's own library (library-setup.ts); null until setup has copied the game files. */
   root: string | null;
+  /** The player's Diablo II install, read by setup and the mod import only. */
+  install: string | null;
+  library: string;
   lastPlayed: string | null;
   playedAt: Record<string, string>;
   favorites: string[];
@@ -273,6 +277,7 @@ export function App() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
+  const [browseStart, setBrowseStart] = React.useState<"archive" | "cores">("archive");
   const [dismissedImportRoot, setDismissedImportRoot] = React.useState<string | null>(() => {
     try {
       return localStorage.getItem("exordium.convertDismissed");
@@ -574,7 +579,7 @@ export function App() {
           const characters = response.ok ? ((await response.json()).characters as unknown[]).length : 0;
           setConfirmBox({
             title: `Uninstall ${t.title}?`,
-            body: `This deletes ${root}\\MODS\\${t.folder} and everything in it.${
+            body: `This deletes ${root}\\mods\\${t.folder} from Exordium's library.${
               characters ? ` Its save folder holds ${characters} character${characters === 1 ? "" : "s"}.` : ""
             }`,
             action: "Uninstall",
@@ -705,14 +710,14 @@ export function App() {
       {showImportPrompt && (
         <div className="banner-action" role="status">
           <div>
-            <strong>Convert D2SE metadata?</strong>
+            <strong>Import your D2SE mods?</strong>
             <span>
-              {scan!.importableMods.length} mod{scan!.importableMods.length === 1 ? "" : "s"}{" "}
-              can be reviewed and saved as editable <code>exordium.mod.json</code> files.
+              {scan!.importableMods.length} mod{scan!.importableMods.length === 1 ? " is" : "s are"}{" "}
+              in your Diablo II install. Each is reviewed, then copied into Exordium's library.
             </span>
           </div>
           <button type="button" className="ghost primary" onClick={() => setConverterOpen(true)}>
-            Open converter
+            Import mods
           </button>
           <button
             type="button"
@@ -757,6 +762,7 @@ export function App() {
 
       {view === "browse" && (
         <Browse
+          initialView={browseStart}
           installed={new Set(titles.flatMap((t) => [titleKey(t.title), titleKey(t.folder)]))}
           root={root}
           onInstalled={(name) => {
@@ -776,11 +782,19 @@ export function App() {
       {view === "library" && !root && status && (
         <SetupPage
           app={status.appSettings}
-          busy={scanning}
-          onChoose={(next) => {
-            void load(next).then((ok) => {
-              if (ok) setRoot(next);
-            });
+          install={status.install}
+          onDone={(next) => {
+            void (async () => {
+              const fresh = await refreshStatus();
+              if (fresh.root) {
+                setRoot(fresh.root);
+                await load(fresh.root);
+              }
+              if (next === "cores") {
+                setBrowseStart("cores");
+                setView("browse");
+              }
+            })();
           }}
         />
       )}
@@ -1037,9 +1051,13 @@ function SettingsSectionView(
   if (section === "library") {
     return (
       <>
-        <SettingsHead title="Library" text="How Exordium finds and presents your Diablo II install." />
+        <SettingsHead
+          title="Library"
+          text="Exordium runs everything from its own library: the game files, cores and mods copied or installed into it."
+        />
         <SettingsGroup title="Install">
-          <PathRow label="Diablo II folder" value={status.root ?? "No install selected"} />
+          <PathRow label="Diablo II install" value={status.install ?? "Not linked"} />
+          <PathRow label="Library folder" value={status.library} openKey="library" />
           <ToggleRow
             label="Scan on startup"
             hint="Read the Diablo II install when Exordium opens, so the library is ready. Off waits for Read library."
@@ -1579,23 +1597,319 @@ function DiscordSettings(
   );
 }
 
+interface InstallCheck {
+  install: string;
+  gameFiles: { name: string; size: number }[];
+  gameBytes: number;
+  missing: string[];
+  problem: string | null;
+  d2se: boolean;
+  cores: { version: string; size: number }[];
+  mods: string[];
+}
+
+interface CopyJob {
+  id: string;
+  kind: "game" | "core" | "mod";
+  label: string;
+  state: "copying" | "done" | "failed";
+  copied: number;
+  total: number;
+  error: string | null;
+}
+
+function setupPost(body: unknown) {
+  return fetch("/api/setup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) }));
+}
+
+/** Follows a copy job (library-setup.ts) until it ends; `onTick` gets every state on the way. */
+async function followCopy(job: CopyJob, onTick: (job: CopyJob) => void): Promise<CopyJob> {
+  let current = job;
+  onTick(current);
+  while (current.state === "copying") {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const { body } = await setupPost({ action: "job", job: current.id });
+    if (!body.job) break;
+    current = body.job as CopyJob;
+    onTick(current);
+  }
+  return current;
+}
+
+function CopyProgress({ job, label }: { job: CopyJob; label?: string }) {
+  const percent = job.total > 0 ? Math.min(100, Math.round((job.copied / job.total) * 100)) : 0;
+  return (
+    <div className="setup-progress">
+      <div className="update-progress" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <span className="muted small">
+        {job.state === "failed"
+          ? job.error
+          : `${label ?? (job.state === "done" ? "Copied" : "Copying")} — ${formatSize(job.copied)} of ${
+            formatSize(job.total)
+          }`}
+      </span>
+    </div>
+  );
+}
+
+interface CatalogCore {
+  version: string;
+  core: string;
+  size: number;
+  status: "available" | "installed" | "install";
+  job: {
+    state: "downloading" | "verifying" | "installing" | "installed" | "failed";
+    received: number;
+    total: number;
+    error?: string;
+  } | null;
+}
+
+/**
+ * Setup's second step: the cores from HarvestLabs' catalog (cores.ts), downloaded into the library
+ * one at a time. Cores already in the library show ticked and cannot be chosen again. A failed one is
+ * reported and the rest carry on; the step can be skipped and finished later from Browse → Cores.
+ */
+function SetupCores({ onDone }: { onDone: () => void }) {
+  const [library, setLibrary] = React.useState<string | null>(null);
+  const [list, setList] = React.useState<CatalogCore[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [chosen, setChosen] = React.useState<Set<string>>(new Set());
+  const [running, setRunning] = React.useState<
+    { core: string; index: number; count: number; received: number; total: number } | null
+  >(null);
+  const [failed, setFailed] = React.useState<{ core: string; error: string }[]>([]);
+
+  const read = React.useCallback(async (root: string) => {
+    const response = await fetch(`/api/cores?root=${encodeURIComponent(root)}`);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? "Could not read the cores catalog.");
+    if (body.error) throw new Error(body.error);
+    if (!body.configured) throw new Error("No cores are published yet.");
+    return body.cores as CatalogCore[];
+  }, []);
+
+  React.useEffect(() => {
+    void (async () => {
+      try {
+        const setup = await (await fetch("/api/setup")).json();
+        const root = String(setup.library ?? "").replace(/\\/g, "/");
+        setLibrary(root);
+        const cores = await read(root);
+        setList(cores);
+        setChosen(new Set(cores.filter((c) => c.status === "available").map((c) => c.core)));
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    })();
+  }, [read]);
+
+  async function download() {
+    if (!library || !list) return;
+    const queue = list.filter((c) => c.status === "available" && chosen.has(c.core));
+    const failures: { core: string; error: string }[] = [];
+    for (const [index, entry] of queue.entries()) {
+      setRunning({ core: entry.core, index: index + 1, count: queue.length, received: 0, total: entry.size });
+      const response = await fetch("/api/cores", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ root: library, core: entry.core }),
+      });
+      if (!response.ok) {
+        failures.push({
+          core: entry.core,
+          error: (await response.json().catch(() => ({}))).error ?? "It did not start.",
+        });
+        continue;
+      }
+      // Follow this core's job until it ends, then the next one.
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const job = (await read(library).catch(() => [])).find((c) => c.core === entry.core)?.job;
+        if (job) setRunning((r) => r && { ...r, received: job.received, total: job.total || r.total });
+        if (!job || job.state === "installed") break;
+        if (job.state === "failed") {
+          failures.push({ core: entry.core, error: job.error ?? "The download failed." });
+          break;
+        }
+      }
+    }
+    setRunning(null);
+    setFailed(failures);
+    setList(await read(library).catch(() => list));
+    if (failures.length === 0) onDone();
+  }
+
+  const available = list?.filter((c) => c.status === "available") ?? [];
+  const queued = available.filter((c) => chosen.has(c.core));
+  const bytes = queued.reduce((sum, c) => sum + c.size, 0);
+  const busy = running !== null;
+  const toggle = (core: string) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (next.has(core)) next.delete(core);
+      else next.add(core);
+      return next;
+    });
+
+  if (error) {
+    return (
+      <>
+        <p className="bad-text small">{error}</p>
+        <p className="muted small">You can install cores later from Browse → Cores.</p>
+        <div className="setup-actions">
+          <button type="button" className="ghost" onClick={onDone}>Skip for now</button>
+        </div>
+      </>
+    );
+  }
+  if (!list) return <p className="muted small">Reading the cores catalog…</p>;
+  return (
+    <>
+      <p className="muted small">
+        Downloaded from HarvestLabs and checked against their published checksums. Choose which to install:
+      </p>
+      <div className="setup-cores">
+        {list.map((core) => (
+          <label key={core.core} className="confirm-check">
+            <input
+              type="checkbox"
+              checked={core.status !== "available" || chosen.has(core.core)}
+              disabled={busy || core.status !== "available"}
+              onChange={() => toggle(core.core)}
+            />
+            {core.core}
+            <span className="muted small">{core.status === "available" ? formatSize(core.size) : "installed"}</span>
+          </label>
+        ))}
+      </div>
+      {available.length > 1 && !busy && (
+        <div className="setup-actions">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setChosen(new Set(available.map((c) => c.core)))}
+          >
+            Select all
+          </button>
+          <button type="button" className="link-button" onClick={() => setChosen(new Set())}>Select none</button>
+        </div>
+      )}
+      {running && (
+        <CopyProgress
+          job={{
+            id: running.core,
+            kind: "core",
+            label: running.core,
+            state: "copying",
+            copied: running.received,
+            total: running.total,
+            error: null,
+          }}
+          label={`Downloading ${running.core} (${running.index} of ${running.count})`}
+        />
+      )}
+      {failed.length > 0 && (
+        <p className="bad-text small">
+          Not installed: {failed.map((f) => `${f.core} (${f.error})`).join("; ")}
+        </p>
+      )}
+      <div className="setup-actions">
+        <button
+          type="button"
+          className="ghost primary"
+          disabled={busy || queued.length === 0}
+          onClick={() => void download()}
+        >
+          {busy
+            ? "Downloading…"
+            : failed.length > 0
+            ? "Try again"
+            : `Download ${queued.length} core${queued.length === 1 ? "" : "s"} (${formatSize(bytes)})`}
+        </button>
+        <button type="button" className="ghost" disabled={busy} onClick={onDone}>
+          {available.length === 0 ? "Continue" : failed.length > 0 ? "Continue without them" : "Skip"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * First launch: link the Diablo II install, copy its game files into Exordium's own library, copy
+ * its D2SE cores (or get them from the Cores tab), then the library, where D2SE mods are imported
+ * through the converter. Nothing in the install is changed, and nothing runs from it afterwards.
+ */
 function SetupPage(
-  { app, busy, onChoose }: { app: AppSettingsState; busy: boolean; onChoose: (root: string) => void },
+  { app, install, onDone }: {
+    app: AppSettingsState;
+    install: string | null;
+    onDone: (next: "library" | "cores") => void;
+  },
 ) {
-  const [folder, setFolder] = React.useState("");
+  const [folder, setFolder] = React.useState(install ?? "");
+  const [check, setCheck] = React.useState<InstallCheck | null>(null);
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [step, setStep] = React.useState<"install" | "cores" | "done">("install");
+  const [gameJob, setGameJob] = React.useState<CopyJob | null>(null);
   const [symlink, setSymlink] = React.useState<{ ok: boolean; admin: boolean; error: string | null } | null>(null);
-  const ready = folder.trim().length > 0;
   React.useEffect(() => {
     void fetch("/api/symlink-status").then((response) => response.json()).then(setSymlink).catch(() => {});
   }, []);
-  async function choose(current: string, setter: (value: string) => void, title: string) {
-    const params = new URLSearchParams({ title });
-    if (current) params.set("path", current);
+
+  async function inspect(path: string) {
+    setProblem(null);
+    setCheck(null);
+    if (!path.trim()) return;
+    setBusy(true);
+    const { body } = await setupPost({ action: "check", install: path.trim() });
+    setBusy(false);
+    if (body.check) {
+      setCheck(body.check);
+      if (body.check.problem) setProblem(body.check.problem);
+    } else setProblem(body.error ?? "Could not read that folder.");
+  }
+
+  React.useEffect(() => {
+    if (install) void inspect(install);
+    // Only the install known at first launch; later checks follow the folder field.
+  }, []);
+
+  async function choose() {
+    const params = new URLSearchParams({ title: "Choose your Diablo II folder" });
+    if (folder) params.set("path", folder);
     const response = await fetch(`/api/pick-folder?${params}`);
     if (!response.ok) return;
     const body = await response.json();
-    if (body.path) setter(body.path);
+    if (body.path) {
+      setFolder(body.path);
+      void inspect(body.path);
+    }
   }
+
+  async function copyGame() {
+    setBusy(true);
+    setProblem(null);
+    const { ok, body } = await setupPost({ action: "start", install: folder.trim() });
+    if (!ok || !body.job) {
+      setBusy(false);
+      return setProblem(body.error ?? body.check?.problem ?? "Could not start copying.");
+    }
+    const job = await followCopy(body.job, setGameJob);
+    setBusy(false);
+    if (job.state === "done") setStep("cores");
+    else setProblem(job.error ?? "Copying stopped.");
+  }
+
+  const ready = check !== null && !check.problem;
+
   return (
     <main className="setup-page">
       <div className="setup-shell">
@@ -1603,57 +1917,97 @@ function SetupPage(
           <p className="eyebrow accent">First launch</p>
           <h1>Set up Exordium</h1>
           <p className="muted">
-            Pick your Diablo II folder once. Exordium keeps its own files in one portable folder so they are easy to
-            inspect, back up, or clear.
+            Exordium keeps its own copy of the game files, cores and mods it runs, so your Diablo II folder is only read
+            during setup and is never changed.
           </p>
         </div>
         <ol className="setup-steps">
-          <li className={`setup-step active ${folder.trim() ? "done" : ""}`}>
-            <span className="setup-num">{folder.trim() ? "✓" : "1"}</span>
+          <li className={`setup-step ${step === "install" ? "active" : "done"}`}>
+            <span className="setup-num">{step === "install" ? "1" : "✓"}</span>
             <div>
-              <h2>Diablo II install</h2>
-              <p className="muted">Choose the folder that contains Game.exe, D2SE.exe, D2SE\CORES, and MODS.</p>
+              <h2>Your Diablo II install</h2>
+              <p className="muted">The folder with Diablo II: Lord of Destruction (d2data.mpq, d2exp.mpq).</p>
               <div className="setup-path">
                 <input
                   value={folder}
                   placeholder="C:\Program Files (x86)\Diablo II"
-                  disabled={busy}
+                  disabled={busy || step !== "install"}
                   onChange={(event) => setFolder(event.currentTarget.value)}
-                  onKeyDown={(event) => event.key === "Enter" && ready && !busy && onChoose(folder.trim())}
+                  onBlur={() => folder.trim() && folder.trim() !== check?.install && void inspect(folder)}
+                  onKeyDown={(event) => event.key === "Enter" && void inspect(folder)}
                   autoFocus
                 />
                 <button
                   type="button"
-                  className="ghost primary"
-                  disabled={busy}
-                  onClick={() => void choose(folder, setFolder, "Choose Diablo II install")}
+                  className="ghost"
+                  disabled={busy || step !== "install"}
+                  onClick={() => void choose()}
                 >
                   Choose…
                 </button>
               </div>
+              {check && !check.problem && (
+                <ul className="setup-found">
+                  <li>
+                    {GAME_ARCHIVE_COUNT - check.missing.length} of {GAME_ARCHIVE_COUNT} game archives
+                    {check.missing.length > 0 && (
+                      <span className="warn-text">(missing {check.missing.join(", ")})</span>
+                    )}
+                  </li>
+                  <li>
+                    {check.d2se
+                      ? `D2SE: ${check.mods.length} mod${check.mods.length === 1 ? "" : "s"} to import`
+                      : "No D2SE in this install"}
+                  </li>
+                </ul>
+              )}
+              {gameJob && <CopyProgress job={gameJob} />}
+              {step === "install" && ready && (
+                <div className="setup-actions">
+                  <button type="button" className="ghost primary" disabled={busy} onClick={() => void copyGame()}>
+                    {busy && gameJob ? "Copying…" : `Copy game files (${formatSize(check.gameBytes)})`}
+                  </button>
+                  <span className="muted small">Into {app.paths.data}\library</span>
+                </div>
+              )}
             </div>
           </li>
-          <li className="setup-step done">
-            <span className="setup-num">✓</span>
+
+          <li className={`setup-step ${step === "cores" ? "active" : step === "done" ? "done" : ""}`}>
+            <span className="setup-num">{step === "done" ? "✓" : "2"}</span>
             <div>
-              <h2>Storage</h2>
-              <p className="muted">Boxes, backups, downloads, logs and settings are kept together in one folder:</p>
-              <code className="setup-code">{app.paths.data}</code>
+              <h2>Cores</h2>
+              <p className="muted">The game versions mods run on, such as 1.10f or 1.13c.</p>
+              {step === "cores" && <SetupCores onDone={() => setStep("done")} />}
             </div>
           </li>
-          <li className="setup-step">
+
+          <li className={`setup-step ${step === "done" ? "active" : ""}`}>
             <span className="setup-num">3</span>
             <div>
-              <h2>
-                Imports <span className="muted small">optional</span>
-              </h2>
+              <h2>Library</h2>
               <p className="muted">
-                D2SE mods are kept in place. After setup, Exordium can create editable exordium.mod.json drafts from
-                D2SE_SETUP.ini.
+                {check && check.mods.length > 0
+                  ? `${check.mods.length} D2SE mod${
+                    check.mods.length === 1 ? " was" : "s were"
+                  } found in your install. The library offers to import them, each reviewed in the converter first.`
+                  : "Install mods from Browse, or import a mod archive from disk."}
               </p>
+              {step === "done" && (
+                <div className="setup-actions">
+                  <button type="button" className="ghost primary" onClick={() => onDone("library")}>
+                    Open the library
+                  </button>
+                </div>
+              )}
             </div>
           </li>
         </ol>
+        {problem && (
+          <div className="setup-warning">
+            <strong>{problem}</strong>
+          </div>
+        )}
         {symlink && !symlink.ok && (
           <div className="setup-warning">
             <strong>Symlinks are not available.</strong>
@@ -1672,17 +2026,12 @@ function SetupPage(
             )}
           </div>
         )}
-        {ready && (
-          <div className="setup-finish">
-            <button type="button" className="ghost primary" disabled={busy} onClick={() => onChoose(folder.trim())}>
-              {busy ? "Reading…" : "Finish setup"}
-            </button>
-          </div>
-        )}
       </div>
     </main>
   );
 }
+
+const GAME_ARCHIVE_COUNT = 10;
 
 function ListSection({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -1909,12 +2258,16 @@ function D2SEConverter(
   const [folder, setFolder] = React.useState(mods[0]?.folder ?? "");
   const [text, setText] = React.useState("");
   const [exists, setExists] = React.useState(false);
-  const [path, setPath] = React.useState("");
+  const [from, setFrom] = React.useState("");
+  const [size, setSize] = React.useState(0);
+  const [copy, setCopy] = React.useState<CopyJob | null>(null);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [filter, setFilter] = React.useState("");
   const [saved, setSaved] = React.useState(0);
+  // Off by default: a copy leaves the install intact. Move removes the folder from the install.
+  const [move, setMove] = React.useState(false);
   const shownMods = React.useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return needle ? mods.filter((mod) => `${mod.title} ${mod.folder}`.toLowerCase().includes(needle)) : mods;
@@ -1940,6 +2293,14 @@ function D2SEConverter(
     }
   }, [text]);
 
+  // The fields and import read the JSON. While the textarea is mid-edit it is often briefly invalid;
+  // keep the last valid parse so the upper form shows it instead of blanking on every keystroke.
+  const [lastValid, setLastValid] = React.useState<Record<string, unknown> | null>(null);
+  React.useEffect(() => {
+    if (manifest) setLastValid(manifest);
+  }, [manifest]);
+  const shown = manifest ?? lastValid;
+
   React.useEffect(() => {
     if (!folder) return;
     let cancelled = false;
@@ -1956,7 +2317,9 @@ function D2SEConverter(
         if (!ok) throw new Error(body.error ?? "Could not convert this mod.");
         setText(JSON.stringify(body.manifest, null, 2));
         setExists(body.exists === true);
-        setPath(body.path ?? "");
+        setFrom(body.from ?? "");
+        setSize(typeof body.size === "number" ? body.size : 0);
+        setCopy(null);
         setDirty(false);
       })
       .catch((error) => !cancelled && setProblem((error as Error).message))
@@ -1967,7 +2330,7 @@ function D2SEConverter(
   }, [folder, root]);
 
   function patchManifest(key: string, value: string) {
-    const base = manifest ?? {};
+    const base = manifest ?? shown ?? {};
     setText(JSON.stringify({ ...base, [key]: value }, null, 2));
     setDirty(true);
   }
@@ -1979,16 +2342,19 @@ function D2SEConverter(
       const response = await fetch("/api/d2se-converter/write", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ root, folder, text, overwrite: exists }),
+        body: JSON.stringify({ root, folder, text, overwrite: exists, move }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "Could not write exordium.mod.json.");
-      // The saved mod leaves the list once the library is read again: move on to the next one.
+      if (!response.ok) throw new Error(body.error ?? "Could not import the mod.");
+      // The folder is copied in the background; the mod is in the library once that ends.
+      const done = body.job ? await followCopy(body.job, setCopy) : null;
+      if (done && done.state !== "done") throw new Error(done.error ?? "Copying stopped.");
+      // The imported mod leaves the list once the library is read again: move on to the next one.
       const at = mods.findIndex((mod) => mod.folder === folder);
       const next = mods[at + 1] ?? mods[at - 1] ?? null;
       setDirty(false);
       setSaved((n) => n + 1);
-      await onSaved(`Saved ${body.path ?? "exordium.mod.json"}.`);
+      await onSaved(`${move ? "Moved" : "Imported"} ${folder} into Exordium's library.`);
       if (next) setFolder(next.folder);
       else onClose();
     } catch (error) {
@@ -2002,7 +2368,7 @@ function D2SEConverter(
     <label>
       <span>{key}</span>
       <input
-        value={String(manifest?.[key] ?? "")}
+        value={String(shown?.[key] ?? "")}
         disabled={busy || !manifest}
         onChange={(event) => patchManifest(key, event.currentTarget.value)}
       />
@@ -2014,8 +2380,8 @@ function D2SEConverter(
       <div className="converter-modal" role="dialog" aria-modal="true" aria-label="D2SE to Exordium converter">
         <header>
           <div>
-            <p className="eyebrow accent">D2SE converter</p>
-            <h2>Build exordium.mod.json</h2>
+            <p className="eyebrow accent">D2SE import</p>
+            <h2>Import into the library</h2>
           </div>
           <span className="muted small converter-progress">
             {mods.length} to review{saved > 0 ? ` · ${saved} saved` : ""}
@@ -2059,7 +2425,7 @@ function D2SEConverter(
             <label className="converter-description">
               <span>description</span>
               <textarea
-                value={String(manifest?.description ?? "")}
+                value={String(shown?.description ?? "")}
                 disabled={busy || !manifest}
                 onChange={(event) => patchManifest("description", event.currentTarget.value)}
               />
@@ -2076,18 +2442,40 @@ function D2SEConverter(
                 }}
               />
             </label>
+            {!manifest && text.trim() !== "" && (
+              <p className="warn-text small">The JSON is not valid yet — fix it to edit the fields or import.</p>
+            )}
             <p className="muted small">
-              {path || "Choose a mod to convert."}
-              {exists ? " Existing file will be overwritten when you save." : ""}
-              {dirty ? " Unsaved changes." : ""}
+              {from
+                ? `Copies ${from}${
+                  size ? ` (${formatSize(size)})` : ""
+                } into the library and writes this exordium.mod.json there. Your install is not changed.`
+                : "Choose a mod to import."}
+              {exists ? " It is already in the library." : ""}
+              {dirty ? " Edited." : ""}
             </p>
+            <label className="confirm-check">
+              <input
+                type="checkbox"
+                checked={move}
+                disabled={busy}
+                onChange={(event) => setMove(event.currentTarget.checked)}
+              />
+              Move instead of copy — removes {folder || "the mod"} from your Diablo II install to save space
+            </label>
+            {copy && <CopyProgress job={copy} />}
             {problem && <p className="bad-text small">{problem}</p>}
           </section>
         </div>
         <footer>
           <button type="button" className="ghost" disabled={busy} onClick={close}>Close</button>
-          <button type="button" className="ghost primary" disabled={busy || !manifest} onClick={() => void save()}>
-            {busy ? "Working…" : exists ? "Save changes" : "Create file"}
+          <button
+            type="button"
+            className="ghost primary"
+            disabled={busy || !manifest || exists}
+            onClick={() => void save()}
+          >
+            {busy ? (copy ? "Importing…" : "Working…") : "Import"}
           </button>
         </footer>
       </div>
@@ -3093,7 +3481,8 @@ function Backups({ root, titleKey, running }: { root: string; titleKey: string; 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 async function openLink(url: string) {
@@ -3961,7 +4350,7 @@ function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; onChanged
 }
 
 function installLocation(root: string, t: Title): string {
-  return t.kind === "core" ? `${root}\\D2SE\\CORES\\${t.folder}` : `${root}\\MODS\\${t.folder}`;
+  return t.kind === "core" ? `${root}\\cores\\${t.folder}` : `${root}\\mods\\${t.folder}`;
 }
 
 function FilesPage({ t, root }: { t: Title; root: string }) {
@@ -4071,10 +4460,55 @@ function FilesPage({ t, root }: { t: Title; root: string }) {
 }
 
 const ART_SLOTS: { kind: ArtKind; label: string; hint: string }[] = [
-  { kind: "banner", label: "BANNER", hint: "The title's page header. PNG, 1920×500 or larger." },
-  { kind: "icon", label: "ICON", hint: "The library list and Game.exe in the taskbar. PNG, 256×256." },
-  { kind: "portrait", label: "PORTRAIT", hint: "For the grid view, later. PNG, 600×900." },
+  { kind: "banner", label: "BANNER", hint: "The title's page header. 1920×500 or larger." },
+  { kind: "icon", label: "ICON", hint: "The library list and Game.exe in the taskbar. Square, 256×256." },
+  { kind: "portrait", label: "PORTRAIT", hint: "The grid view's capsule. 600×900." },
 ];
+
+/** What the picker offers. Anything the WebView can decode works; these are the usual ones. */
+const ART_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,image/x-icon,image/svg+xml,.ico";
+
+/** The longest side kept for a banner or portrait; larger images are scaled down to it. */
+const ART_MAX_SIDE = 4096;
+
+/**
+ * Any image the WebView decodes (PNG, JPEG, WebP, GIF's first frame, BMP, AVIF, ICO, SVG) as a PNG,
+ * which is all the art store keeps: the icon goes into Game.exe and shortcuts as PNG-in-ICO. An icon
+ * is fitted inside 256×256 and centred on a transparent square; a banner or portrait keeps its size
+ * up to ART_MAX_SIDE. A PNG that already fits is sent unchanged.
+ */
+async function artAsPng(file: File, kind: ArtKind): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    try {
+      await img.decode();
+    } catch {
+      throw new Error(`${file.name} is not an image this app can read.`);
+    }
+    const width = img.naturalWidth || 256;
+    const height = img.naturalHeight || 256;
+    const limit = kind === "icon" ? 256 : ART_MAX_SIDE;
+    const fits = width <= limit && height <= limit && (kind !== "icon" || width === height);
+    if (file.type === "image/png" && fits) return file;
+    const scale = Math.min(1, limit / Math.max(width, height));
+    const w = Math.max(1, Math.round(width * scale));
+    const h = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = kind === "icon" ? Math.max(w, h) : w;
+    canvas.height = kind === "icon" ? Math.max(w, h) : h;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not convert that image.");
+    context.imageSmoothingQuality = "high";
+    context.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!png) throw new Error("Could not convert that image.");
+    return png;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 function ArtworkPage(
   { t, root, art, onChanged }: { t: Title; root: string; art: number; onChanged: () => Promise<void> },
@@ -4086,9 +4520,10 @@ function ArtworkPage(
     setBusy(kind);
     setProblem(null);
     try {
+      const png = await artAsPng(file, kind);
       const response = await fetch(`/api/art?key=${encodeURIComponent(t.key)}&kind=${kind}`, {
         method: "POST",
-        body: await file.arrayBuffer(),
+        body: await png.arrayBuffer(),
       });
       if (!response.ok) throw new Error((await response.json()).error ?? "Could not save that image.");
       await onChanged();
@@ -4130,10 +4565,10 @@ function ArtworkPage(
           </p>
           <div className="row-actions">
             <label className={busy === kind ? "ghost disabled" : "ghost"}>
-              {busy === kind ? "Saving…" : "Choose PNG…"}
+              {busy === kind ? "Saving…" : "Choose image…"}
               <input
                 type="file"
-                accept="image/png"
+                accept={ART_ACCEPT}
                 hidden
                 disabled={busy !== null}
                 onChange={(e) => {

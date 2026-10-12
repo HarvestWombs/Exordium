@@ -65,12 +65,12 @@ Deno.test("writes a catalog in version order", async () => {
   }
 });
 
-Deno.test("installs a core into D2SE\\CORES from the catalog, and never over one", async () => {
+Deno.test("installs a core into the library from the catalog, and never over one", async () => {
   const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
   const host = `${dir}/host`;
   const root = `${dir}/Diablo II`;
   await Deno.mkdir(host);
-  await Deno.mkdir(`${root}/D2SE/CORES/1.13c`, { recursive: true });
+  await Deno.mkdir(`${root}/cores/1.13c`, { recursive: true });
   const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen() {} }, async (request) => {
     const name = new URL(request.url).pathname.slice(1);
     const bytes = await Deno.readFile(`${host}/${name}`).catch(() => null);
@@ -99,7 +99,7 @@ Deno.test("installs a core into D2SE\\CORES from the catalog, and never over one
     const after = (await coreEntries(root, list, null)).find((e) => e.core === "1.10f")!;
     assertEquals(after.job?.error, undefined);
     assertEquals(after.status, "installed");
-    assertEquals(await Deno.readTextFile(`${root}/D2SE/CORES/1.10f/Storm.dll`), "storm");
+    assertEquals(await Deno.readTextFile(`${root}/cores/1.10f/Storm.dll`), "storm");
 
     await assertRejects(() => startCoreInstall(root, "1.13c", `${dir}/downloads`), CoreInstallError, "already");
     await assertRejects(() => startCoreInstall(root, "1.14d", `${dir}/downloads`), CoreInstallError, "install itself");
@@ -116,7 +116,7 @@ Deno.test("a download that does not match its checksum installs nothing", async 
   const host = `${dir}/host`;
   const root = `${dir}/Diablo II`;
   await Deno.mkdir(host);
-  await Deno.mkdir(`${root}/D2SE/CORES`, { recursive: true });
+  await Deno.mkdir(`${root}/cores`, { recursive: true });
   const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen() {} }, async (request) => {
     const name = new URL(request.url).pathname.slice(1);
     if (name === "1.07.zip") return new Response("<html>Google Drive can't scan this file</html>".padEnd(300, " "));

@@ -27,6 +27,16 @@ export interface BuildLoaderPlanOptions {
   expansion?: boolean;
 }
 
+/**
+ * Battle.net is allowed only when the mod declares a custom realm with a server address. A mod with
+ * no realm (the usual case) must not connect to official Battle.net through Exordium's loader, so the
+ * loader greys the main-menu Battle.net button and blocks the connect. The gateway address is what a
+ * realm needs: a realm object without one does not count.
+ */
+export function battlenetAllowed(setup: ModSetup): boolean {
+  return (setup.realm?.gateway ?? "").trim().length > 0;
+}
+
 export function buildLoaderPlan(
   plan: Plan,
   setup: ModSetup,
@@ -48,8 +58,11 @@ export function buildLoaderPlan(
     for (const path of EXPANSION_ARCHIVES) archives.push({ kind: "expansion", path, priority: 3000, required: true });
   }
   if (setup.loads.patchD2) {
+    // 1.00 (Diablo II) and 1.07 (Lord of Destruction) are the base releases, with no patch to load:
+    // the catalog ships them a 0-byte placeholder and a D2SE install has none (ModUsePatch_D2=0).
     const core = setup.mod.core?.trim().toLowerCase();
-    archives.push({ kind: "patch", path: "patch_d2.mpq", priority: 5000, required: core !== "1.00" });
+    const required = core !== "1.00" && core !== "1.07";
+    archives.push({ kind: "patch", path: "patch_d2.mpq", priority: 5000, required });
   }
 
   // The mod's MPQs, each above the last, as many as it lists (D2SE stops at three).
@@ -64,7 +77,9 @@ export function buildLoaderPlan(
     archives.push({ kind: "language", path: `${language}.mpq`, priority: 6000 + mpqs.length * 1000, required: true });
   }
 
-  for (const archive of archives) need(archive.path, `${archive.kind} archive load`);
+  // An optional archive (a base release's patch_d2.mpq) is loaded when it is there; the loader skips it
+  // otherwise, so only the required ones have to be in the box.
+  for (const archive of archives) if (archive.required) need(archive.path, `${archive.kind} archive load`);
 
   const settings = launchSettings(setup);
   const plugins: PluginLoad[] = [];
@@ -141,6 +156,7 @@ export function buildLoaderPlan(
 
   return {
     settings,
+    battlenetAllowed: battlenetAllowed(setup),
     commandLine: gameCommandLine(settings),
     gameVersion: gameVersion(setup.mod.core),
     core: setup.mod.core?.trim().toLowerCase() || null,

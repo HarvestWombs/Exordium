@@ -533,6 +533,39 @@ button:disabled {
   color: var(--text);
 }
 
+.setup-found {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.setup-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.setup-cores {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+
+.setup-cores .muted {
+  margin-left: auto;
+}
+
 .setup-code {
   display: block;
   width: fit-content;
@@ -1902,187 +1935,6 @@ fieldset legend {
   gap: 14px;
 }
 
-.moddb-panel {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 18px 24px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.moddb-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.moddb-toolbar .chips {
-  flex-wrap: wrap;
-}
-
-.moddb-toolbar .chip span {
-  margin-left: 6px;
-  color: var(--text-mute);
-}
-
-.moddb-toolbar .search {
-  width: min(320px, 100%);
-}
-
-.moddb-url-form {
-  display: flex;
-  gap: 8px;
-}
-
-.moddb-url-form input {
-  min-width: 0;
-  flex: 1;
-  height: 36px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  padding: 0 10px;
-  background: var(--ground);
-  color: var(--text);
-}
-
-.moddb-url-hint {
-  margin: -4px 0 0;
-}
-
-.moddb-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  color: var(--text-mute);
-  font-size: 12px;
-}
-
-.moddb-meta > span {
-  flex-grow: 1;
-}
-
-.moddb-results {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.moddb-result {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) auto;
-  min-height: 140px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--card);
-}
-
-.moddb-result-cover {
-  position: relative;
-  min-height: 140px;
-  background: #07080a;
-}
-
-.moddb-result-cover img,
-.moddb-result-fallback {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.moddb-result-fallback {
-  display: grid;
-  place-items: center;
-  background: var(--ground);
-  color: var(--accent);
-  font-family: var(--display);
-  font-size: 42px;
-}
-
-.moddb-result-cover > span {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.moddb-result-body {
-  min-width: 0;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.moddb-result h3 {
-  margin: 0;
-  font-family: var(--display);
-  font-size: 20px;
-  line-height: 1.12;
-  color: var(--text-strong);
-}
-
-.moddb-result p {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.moddb-result .mod-tags {
-  margin-top: auto;
-}
-
-.moddb-result-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-  padding: 16px 18px;
-  border-left: 1px solid var(--line);
-  background: var(--raised);
-}
-
-.moddb-result-actions .ghost {
-  width: 130px;
-}
-
-.moddb-footnote {
-  margin: 4px 0 0;
-}
-
-@media (max-width: 1000px) {
-  .moddb-result {
-    grid-template-columns: 150px minmax(0, 1fr);
-  }
-
-  .moddb-result-actions {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    justify-content: flex-end;
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
-}
-
 .path-field small {
   font-weight: 400;
   letter-spacing: 0;
@@ -3217,10 +3069,6 @@ fieldset legend {
   font-size: 16px;
 }
 
-.pill.untested {
-  color: var(--warn);
-}
-
 .core-progress {
   display: flex;
   align-items: center;
@@ -3692,4 +3540,28 @@ fieldset legend {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s ease;
+}
+
+.browse-tab .tab-count {
+  margin-left: 6px;
+  color: var(--text-mute);
+  font-weight: 600;
+}
+
+.link-install {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.link-install input {
+  min-width: 0;
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--text);
+  font-size: 12px;
 }

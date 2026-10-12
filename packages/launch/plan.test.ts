@@ -303,3 +303,24 @@ Deno.test("early cores use the loader for custom MPQs and plugins", () => {
     "language archive load needs ENG.mpq, which is not in the box.",
   ]);
 });
+
+Deno.test("battlenet is allowed only for a mod with a custom realm gateway", () => {
+  const plan = resolve({ files: [], registry: [] });
+  const base = "[USERSETTINGS]\nLanguage=MOD\n[Protected]\nD2Core=1.10f\n";
+  // No realm: the usual mod. Exordium must not be a way onto official Battle.net.
+  assertEquals(buildLoaderPlan(plan, setup(base)).battlenetAllowed, false);
+  // A realm section with no gateway address does not count.
+  assertEquals(buildLoaderPlan(plan, setup(`${base}RealmSelected=1\n`)).battlenetAllowed, false);
+  // A declared custom realm gateway: allowed.
+  const withRealm = buildLoaderPlan(plan, setup(`${base}RealmGateway=realm.example.net\n`));
+  assertEquals(withRealm.battlenetAllowed, true);
+});
+
+Deno.test("the base releases 1.00 and 1.07 load patch_d2.mpq only when it is there", () => {
+  const plan = resolve({ files: [], registry: [] });
+  const patch = (core: string) =>
+    buildLoaderPlan(plan, setup(`[Protected]\nD2Core=${core}\n`)).archives.find((a) => a.kind === "patch");
+  assertEquals(patch("1.00")?.required, false);
+  assertEquals(patch("1.07")?.required, false);
+  assertEquals(patch("1.10f")?.required, true);
+});

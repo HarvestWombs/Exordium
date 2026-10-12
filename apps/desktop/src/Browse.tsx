@@ -58,6 +58,23 @@ interface ModDbItem {
 
 type ModDbKind = "file" | "addon" | "mod";
 
+/** One ModDB entry's own page, read when its card comes on screen (browse.ts modDbDetails). */
+interface ModDbDetails {
+  page: string;
+  description: string;
+  creator: string | null;
+  addedAt: string | null;
+  updatedAt: string | null;
+  size: number | null;
+  downloads: number | null;
+  filename: string | null;
+  screenshots: { full: string; thumb: string }[];
+  files: { page: string; name: string; size: number | null; category: string | null }[];
+  links: { label: string; url: string }[];
+}
+
+type Shot = { full: string; thumb: string };
+
 interface Details {
   id: string;
   description: string;
@@ -198,20 +215,22 @@ function jobLabel(job: Job): string {
 }
 
 export function Browse(
-  { installed, root, onInstalled, onCoreInstalled }: {
+  { initialView, installed, root, onInstalled, onCoreInstalled }: {
+    /** The tab to open on: setup sends players without cores straight to Cores. */
+    initialView?: "archive" | "cores";
     installed: Set<string>;
     /** The D2SE install mods are installed into (its MODS folder). */
     root: string | null;
     /** A mod was installed as MODS\<name>: rescan and show it. */
     onInstalled: (name: string) => void;
-    /** A core was installed as D2SE\CORES\<core>: rescan and show it. */
+    /** A core was installed into the library's cores folder: rescan and show it. */
     onCoreInstalled: (core: string) => void;
   },
 ) {
   const [data, setData] = React.useState<{ sources: Source[]; groups: Group[]; items: Item[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [view, setView] = React.useState<BrowseView>("archive");
+  const [view, setView] = React.useState<BrowseView>(initialView ?? "archive");
   const [archiveSort, setArchiveSort] = React.useState<ArchiveSort>("all");
   const [search, setSearch] = React.useState("");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -229,10 +248,38 @@ export function Browse(
       file: string;
       title: string;
       url?: string;
+      /** The ModDB card the download was started from, so it can show the job. */
+      itemKey?: string;
     } | null
   >(null);
   const [metadataJobs, setMetadataJobs] = React.useState<Set<string>>(new Set());
   const importedJobs = React.useRef(new Set<string>());
+  const [modDb, setModDb] = React.useState<{ items: ModDbItem[]; fetchedAt: string | null } | null>(null);
+  const [modDbLoading, setModDbLoading] = React.useState(false);
+  const [modDbError, setModDbError] = React.useState<string | null>(null);
+  const [modDbKind, setModDbKind] = React.useState<"all" | ModDbKind>("all");
+  const [linkAddress, setLinkAddress] = React.useState("");
+  /** ModDB card -> the id of the link download started from it. */
+  const [urlJobs, setUrlJobs] = React.useState<Record<string, string>>({});
+
+  const loadModDb = React.useCallback(async (refresh = false) => {
+    setModDbLoading(true);
+    setModDbError(null);
+    try {
+      const response = await fetch(`/api/browse/moddb${refresh ? "?refresh=1" : ""}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not read ModDB.");
+      setModDb({ items: body.items ?? [], fetchedAt: body.fetchedAt ?? null });
+    } catch (err) {
+      setModDbError((err as Error).message);
+    } finally {
+      setModDbLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (view === "moddb" && !modDb && !modDbLoading && !modDbError) void loadModDb();
+  }, [view, modDb, modDbLoading, modDbError, loadModDb]);
 
   const load = React.useCallback(async (refresh = false) => {
     setLoading(true);
@@ -270,7 +317,7 @@ export function Browse(
     return () => clearInterval(timer);
   }, [busy, view, refreshJobs]);
 
-  React.useEffect(() => setShown(PAGE), [archiveSort, search, selected, hideInstalled]);
+  React.useEffect(() => setShown(PAGE), [view, archiveSort, modDbKind, search, selected, hideInstalled]);
 
   const isInstalled = React.useCallback((item: Item) => installed.has(titleKey(item.title)), [installed]);
   const keywordsOf = React.useCallback(
@@ -300,14 +347,45 @@ export function Browse(
     return list;
   }, [matches, archiveSort]);
 
+  // ModDB lists a mod's page and its download separately; "All" shows one, the download first.
+  const modDbMatches = React.useMemo(() => {
+    if (!modDb) return [];
+    const needle = search.trim().toLowerCase();
+    const rank: Record<ModDbKind, number> = { file: 0, addon: 1, mod: 2 };
+    const first = new Map<string, ModDbItem>();
+    if (modDbKind === "all") {
+      for (const item of modDb.items) {
+        const key = titleKey(item.title);
+        const kept = first.get(key);
+        if (!kept || rank[item.kind] < rank[kept.kind]) first.set(key, item);
+      }
+    }
+    return modDb.items.filter((item) => {
+      if (modDbKind === "all" ? first.get(titleKey(item.title)) !== item : item.kind !== modDbKind) return false;
+      if (needle && !`${item.title}\n${item.description}`.toLowerCase().includes(needle)) return false;
+      if (hideInstalled && installed.has(titleKey(item.title))) return false;
+      for (const keyword of selected) if (!item.keywords.includes(keyword)) return false;
+      return true;
+    });
+  }, [modDb, modDbKind, search, hideInstalled, installed, selected]);
+
   // How many of the current matches each keyword would keep: the numbers beside the filters.
   const counts = React.useMemo(() => {
     const result = new Map<string, number>();
-    for (const item of matches) {
-      for (const keyword of keywordsOf(item)) result.set(keyword, (result.get(keyword) ?? 0) + 1);
+    const lists: string[][] = view === "moddb"
+      ? modDbMatches.map((item) => item.keywords)
+      : matches.map((item) => keywordsOf(item));
+    for (const keywords of lists) {
+      for (const keyword of keywords) result.set(keyword, (result.get(keyword) ?? 0) + 1);
     }
     return result;
-  }, [matches, keywordsOf]);
+  }, [view, matches, modDbMatches, keywordsOf]);
+  const modDbCounts = React.useMemo(() => {
+    const kinds = new Map<"all" | ModDbKind, number>([["file", 0], ["addon", 0], ["mod", 0]]);
+    for (const item of modDb?.items ?? []) kinds.set(item.kind, (kinds.get(item.kind) ?? 0) + 1);
+    kinds.set("all", new Set(modDb?.items.map((item) => titleKey(item.title)) ?? []).size);
+    return kinds;
+  }, [modDb]);
 
   const toggle = (keyword: string) =>
     setSelected((current) => {
@@ -361,20 +439,13 @@ export function Browse(
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? "It did not start.");
+    const itemKey = request.itemKey;
+    if (itemKey && typeof body.id === "string") setUrlJobs((current) => ({ ...current, [itemKey]: body.id }));
     if (importMetadata) {
       const key = `${body.id ?? request.id}/${body.file ?? request.file}`;
       setMetadataJobs((current) => new Set(current).add(key));
     }
     await refreshJobs();
-  }
-
-  async function pickFolder(startPath: string): Promise<string | null> {
-    const params = new URLSearchParams({ title: "Choose install folder" });
-    if (startPath) params.set("path", startPath);
-    const response = await fetch(`/api/pick-folder?${params}`);
-    if (!response.ok) return null;
-    const body = await response.json();
-    return body.path ?? null;
   }
 
   async function pickArchive(startPath: string): Promise<string | null> {
@@ -406,7 +477,7 @@ export function Browse(
     setInstallRequest({ item, id, file, title, mode: fromDisk ? "downloaded" : "archive" });
   }
 
-  function queueUrlInstall(url: string, title: string) {
+  function queueUrlInstall(url: string, title: string, itemKey?: string) {
     setInstallRequest({
       item: null,
       id: `url-${Date.now()}`,
@@ -414,8 +485,12 @@ export function Browse(
       url,
       title: title.trim() || "ModDB download",
       mode: "url",
+      ...(itemKey ? { itemKey } : {}),
     });
   }
+
+  const linkUrl = modDbAddress(linkAddress);
+  const linkOk = linkUrl ? installableModDbUrl(linkUrl) : false;
 
   async function startInstall(
     request: NonNullable<typeof installRequest>,
@@ -459,8 +534,7 @@ export function Browse(
       {installRequest && (
         <InstallModModal
           request={installRequest}
-          defaultRoot={localStorage.getItem("exordium.installRoot") ?? root ?? ""}
-          onPickFolder={pickFolder}
+          defaultRoot={root ?? ""}
           onClose={() => setInstallRequest(null)}
           onInstall={(installRoot, importMetadata) =>
             installRequest.mode === "local"
@@ -512,7 +586,7 @@ export function Browse(
           </button>
         </section>
 
-        {view === "archive" && (
+        {(view === "archive" || view === "moddb") && (
           <>
             <h2 className="filters-title filters-title-secondary">FILTERS</h2>
             {selected.size > 0 && (
@@ -529,7 +603,15 @@ export function Browse(
                 ))}
               </div>
             )}
-            <p className="muted small">{data ? `${matches.length} matches` : loading ? "Reading sources…" : ""}</p>
+            <p className="muted small">
+              {view === "moddb"
+                ? modDb ? `${modDbMatches.length} matches` : modDbLoading ? "Reading ModDB…" : ""
+                : data
+                ? `${matches.length} matches`
+                : loading
+                ? "Reading sources…"
+                : ""}
+            </p>
 
             {data?.groups.map((group) => (
               <section key={group.id} className="filter-group">
@@ -562,10 +644,60 @@ export function Browse(
               >
                 <span>Hide mods in my library</span>
               </button>
-              <button type="button" className="filter-row" disabled={loading} onClick={() => void load(true)}>
-                <span>{loading ? "Refreshing…" : "Refresh source"}</span>
-              </button>
+              {view === "moddb"
+                ? (
+                  <button
+                    type="button"
+                    className="filter-row"
+                    disabled={modDbLoading}
+                    onClick={() => void loadModDb(true)}
+                  >
+                    <span>{modDbLoading ? "Refreshing…" : "Refresh source"}</span>
+                  </button>
+                )
+                : (
+                  <button type="button" className="filter-row" disabled={loading} onClick={() => void load(true)}>
+                    <span>{loading ? "Refreshing…" : "Refresh source"}</span>
+                  </button>
+                )}
+              {view === "moddb" && (
+                <button
+                  type="button"
+                  className="filter-row"
+                  onClick={() => openPlace({ what: "moddb" })}
+                >
+                  <span>Open ModDB ↗</span>
+                </button>
+              )}
             </section>
+
+            {view === "moddb" && (
+              <section className="filter-group">
+                <h3>FROM A LINK</h3>
+                <form
+                  className="link-install"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!linkUrl || !linkOk) return;
+                    queueUrlInstall(linkUrl, titleFromUrl(linkUrl));
+                    setLinkAddress("");
+                  }}
+                >
+                  <input
+                    value={linkAddress}
+                    onChange={(event) => setLinkAddress(event.currentTarget.value)}
+                    placeholder="ModDB page or archive link"
+                    aria-label="Download address"
+                  />
+                  <button type="submit" className="ghost primary compact" disabled={!linkOk || !root}>
+                    Install
+                  </button>
+                </form>
+                {linkAddress.trim() && !linkOk && (
+                  <p className="warn-text small">Use a ModDB mod, addon or download page, or a link to an archive.</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </aside>
@@ -582,11 +714,21 @@ export function Browse(
               {t.label}
             </button>
           ))}
-          {view === "moddb" && <span className="browse-context">MODDB</span>}
+          {view === "moddb" && MODDB_KINDS.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              className={modDbKind === t.id ? "browse-tab on" : "browse-tab"}
+              onClick={() => setModDbKind(t.id)}
+            >
+              {t.label.toUpperCase()}
+              {modDb && <span className="tab-count">{modDbCounts.get(t.id) ?? 0}</span>}
+            </button>
+          ))}
           {view === "cores" && <span className="browse-context">CORES</span>}
           {view === "downloads" && <span className="browse-context">DOWNLOADS</span>}
           <div className="grow" />
-          {view === "archive" && (
+          {(view === "archive" || view === "moddb") && (
             <label className="search browse-search">
               <input
                 type="text"
@@ -601,12 +743,45 @@ export function Browse(
 
         {view === "cores" && <Cores root={root} onInstalled={onCoreInstalled} />}
         {view === "moddb" && (
-          <ModDbPanel
-            root={root}
-            isInstalled={(title) => installed.has(titleKey(title))}
-            onOpen={openPlace}
-            onInstall={queueUrlInstall}
-          />
+          <div className="browse-list">
+            {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}
+            {!modDb && !modDbError && <p className="muted pad">Reading ModDB…</p>}
+            {modDb && modDbMatches.length === 0 && <p className="muted pad">Nothing matches these filters.</p>}
+            {modDbMatches.slice(0, shown).map((item) => {
+              const key = `moddb:${item.kind}:${item.id}`;
+              return (
+                <ModDbCard
+                  key={key}
+                  item={item}
+                  labels={labels}
+                  installed={installed.has(titleKey(item.title))}
+                  expanded={open[key] ?? false}
+                  onExpand={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}
+                  jobs={jobs.filter((job) => job.source === "url" && job.id === urlJobs[key])}
+                  root={root}
+                  onInstall={(url) => queueUrlInstall(url, item.title, key)}
+                  onInstalled={onInstalled}
+                  onOpen={(what, job) => openPlace({ what, id: job.id, file: job.file })}
+                  onKeyword={toggle}
+                />
+              );
+            })}
+            {modDbMatches.length > shown && (
+              <button
+                type="button"
+                className="ghost more"
+                onClick={() => setShown((n) => n + PAGE)}
+              >
+                Show more ({modDbMatches.length - shown} left)
+              </button>
+            )}
+            {modDb && (
+              <p className="muted small pad">
+                Installers (.exe) are never run for you: open their page and install them yourself if you trust them.
+                {modDb.fetchedAt && ` ModDB read ${new Date(modDb.fetchedAt).toLocaleString()}.`}
+              </p>
+            )}
+          </div>
         )}
         {view === "cores" || view === "moddb" ? null : view === "downloads"
           ? (
@@ -659,15 +834,15 @@ export function Browse(
 }
 
 function InstallModModal(
-  { request, defaultRoot, onPickFolder, onInstall, onClose }: {
+  { request, defaultRoot, onInstall, onClose }: {
     request: { file: string; title: string; mode: "archive" | "downloaded" | "local" | "url"; url?: string };
+    /** Exordium's library: every install goes into it. */
     defaultRoot: string;
-    onPickFolder: (startPath: string) => Promise<string | null>;
     onInstall: (root: string, importMetadata: boolean) => Promise<void>;
     onClose: () => void;
   },
 ) {
-  const [folder, setFolder] = React.useState(defaultRoot.replaceAll("/", "\\"));
+  const folder = defaultRoot.replaceAll("/", "\\");
   const [importMetadata, setImportMetadata] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -678,10 +853,6 @@ function InstallModModal(
     globalThis.addEventListener("keydown", onKey);
     return () => globalThis.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
-  async function choose() {
-    const picked = await onPickFolder(folder);
-    if (picked) setFolder(picked);
-  }
   async function run() {
     if (!ready) return;
     setBusy(true);
@@ -718,16 +889,7 @@ function InstallModModal(
         <p className="muted">
           {what} and adds it to the Diablo II install below. Existing mod folders are never overwritten.
         </p>
-        <label className="path-field">
-          <span>Diablo II folder</span>
-          <div>
-            <input value={folder} disabled={busy} onChange={(event) => setFolder(event.currentTarget.value)} />
-            <button type="button" className="ghost" disabled={busy} onClick={() => void choose()}>
-              Choose…
-            </button>
-          </div>
-          {target && <small className="muted">Installs into {target}\MODS</small>}
-        </label>
+        {target && <p className="muted small">Installs into {target}\mods</p>}
         <label className="confirm-check">
           <input
             type="checkbox"
@@ -749,204 +911,242 @@ function InstallModModal(
   );
 }
 
-function ModDbPanel(
-  { root, isInstalled, onOpen, onInstall }: {
-    root: string | null;
-    isInstalled: (title: string) => boolean;
-    onOpen: (body: unknown) => void;
-    onInstall: (url: string, title: string) => void;
-  },
-) {
-  const [address, setAddress] = React.useState("");
-  const [items, setItems] = React.useState<ModDbItem[]>([]);
-  const [fetchedAt, setFetchedAt] = React.useState<string | null>(null);
-  const [search, setSearch] = React.useState("");
-  const [kind, setKind] = React.useState<"all" | ModDbKind>("all");
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [shown, setShown] = React.useState(PAGE);
-  const normalized = modDbAddress(address);
-  const canInstall = normalized ? installableModDbUrl(normalized) : false;
-
-  const load = React.useCallback(async (refresh = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/browse/moddb${refresh ? "?refresh=1" : ""}`);
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not read ModDB.");
-      setItems(body.items ?? []);
-      setFetchedAt(body.fetchedAt ?? null);
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void load();
-  }, [load]);
-
-  React.useEffect(() => setShown(PAGE), [kind, search]);
-
-  const matches = React.useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    // ModDB lists a mod's page and its download separately; "All" shows one, the download first.
-    const rank: Record<ModDbKind, number> = { file: 0, addon: 1, mod: 2 };
-    const first = new Map<string, ModDbItem>();
-    if (kind === "all") {
-      for (const item of items) {
-        const key = titleKey(item.title);
-        const kept = first.get(key);
-        if (!kept || rank[item.kind] < rank[kept.kind]) first.set(key, item);
-      }
-    }
-    return items.filter((item) => {
-      if (kind === "all" && first.get(titleKey(item.title)) !== item) return false;
-      if (kind !== "all" && item.kind !== kind) return false;
-      if (!needle) return true;
-      return `${item.title} ${item.description} ${item.keywords.join(" ")}`.toLowerCase().includes(needle);
-    });
-  }, [items, kind, search]);
-
-  const counts = React.useMemo(() => {
-    const next = new Map<"all" | ModDbKind, number>([
-      ["all", new Set(items.map((item) => titleKey(item.title))).size],
-      ["file", 0],
-      ["addon", 0],
-      ["mod", 0],
-    ]);
-    for (const item of items) next.set(item.kind, (next.get(item.kind) ?? 0) + 1);
-    return next;
-  }, [items]);
-
-  function installAddress() {
-    if (!canInstall || !normalized) return;
-    onInstall(normalized, titleFromUrl(normalized));
-    setAddress("");
-  }
-
+/** A card's screenshots: the one shown large, a strip of four, and the full gallery on click. */
+function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) {
+  const [shot, setShot] = React.useState(0);
+  const [gallery, setGallery] = React.useState(false);
   return (
-    <div className="moddb-panel">
-      <div className="moddb-toolbar">
-        <div className="chips" role="tablist" aria-label="ModDB result type">
-          {MODDB_KINDS.map((option) => (
+    <div className="mod-shots">
+      {shots.length > 0
+        ? (
+          <>
             <button
               type="button"
-              role="tab"
-              aria-selected={kind === option.id}
-              key={option.id}
-              className={kind === option.id ? "chip on" : "chip"}
-              onClick={() => setKind(option.id)}
+              className="shot-main-button"
+              title="Open the gallery"
+              onClick={() => setGallery(true)}
             >
-              {option.label} <span>{counts.get(option.id) ?? 0}</span>
+              <img className="shot-main" src={shots[shot]?.full} alt="" onError={smallerModDbImage} />
+            </button>
+            <div className="shot-strip">
+              {shots.slice(0, 4).map((s, i) => (
+                <button
+                  type="button"
+                  key={s.thumb}
+                  className={i === shot ? "shot on" : "shot"}
+                  onClick={() => setShot(i)}
+                >
+                  <img src={s.thumb} alt="" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          </>
+        )
+        : <div className="shot-empty muted small">{empty}</div>}
+      {gallery && (
+        <Lightbox
+          images={shots.map((s) => ({ src: s.full, thumb: s.thumb }))}
+          start={shot}
+          onClose={() => setGallery(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A large ModDB picture its cache does not have: fall back to the listing's crop, which it always has. */
+function smallerModDbImage(event: React.SyntheticEvent<HTMLImageElement>) {
+  const img = event.currentTarget;
+  const smaller = img.src.replace("/thumb_620x2000/", "/crop_120x90/");
+  if (smaller !== img.src) img.src = smaller;
+}
+
+const INSTALLER_FILE = /\.(exe|msi|bat|cmd|com|scr)$/i;
+
+/**
+ * A ModDB entry, laid out as an archive.org card. The listing gives a title, a blurb and a picture;
+ * the entry's own page (read once the card nears the screen) adds the full description, who made
+ * it, its downloads, screenshots and, for a mod, its files to choose from.
+ */
+function ModDbCard(
+  { item, labels, installed, expanded, onExpand, jobs, root, onInstall, onInstalled, onOpen, onKeyword }: {
+    item: ModDbItem;
+    labels: Map<string, string>;
+    installed: boolean;
+    expanded: boolean;
+    onExpand: () => void;
+    jobs: Job[];
+    root: string | null;
+    onInstall: (url: string) => void;
+    onInstalled: (name: string) => void;
+    onOpen: (what: "file" | "unpacked", job: Job) => void;
+    onKeyword: (keyword: string) => void;
+  },
+) {
+  const ref = React.useRef<HTMLElement>(null);
+  const [details, setDetails] = React.useState<ModDbDetails | null>(null);
+  const [detailsError, setDetailsError] = React.useState<string | null>(null);
+  const [file, setFile] = React.useState("");
+
+  React.useEffect(() => {
+    const node = ref.current;
+    if (!node || details) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      void (async () => {
+        const response = await fetch(`/api/browse/moddb-item?page=${encodeURIComponent(item.page)}`);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) return setDetailsError(body.error ?? "Could not read this page.");
+        setDetails(body);
+        setFile(body.files?.[0]?.page ?? "");
+        for (const s of body.screenshots as Shot[]) new Image().src = s.full;
+      })();
+    }, { rootMargin: "300px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [item.page, details]);
+
+  const job = jobs[0];
+  const progress = job ? jobProgress(job) : null;
+  const running = job ? ACTIVE.includes(job.state) : false;
+  const description = details?.description || item.description;
+  const shots = details?.screenshots ?? [];
+  const isMod = item.kind === "mod";
+  const chosen = isMod ? details?.files.find((f) => f.page === file) ?? null : null;
+  const size = isMod ? chosen?.size ?? null : details?.size ?? null;
+  const installer = !isMod && INSTALLER_FILE.test(details?.filename ?? "");
+  const target = isMod ? chosen?.page ?? item.installPage : item.installPage || item.page;
+
+  return (
+    <article ref={ref} className="mod-card">
+      <div className="mod-cover">
+        <img src={shots[0]?.full ?? item.cover} alt="" loading="lazy" onError={smallerModDbImage} />
+        {installed && <span className="ribbon">IN LIBRARY</span>}
+      </div>
+
+      <div className="mod-info">
+        <h2 className="mod-title">{item.title}</h2>
+        <p className={expanded ? "mod-description open" : "mod-description"}>
+          {description || (details ? "The author gave no description." : "…")}
+        </p>
+        <div className="mod-under">
+          {description.length > 280 && (
+            <button type="button" className="link-button" onClick={onExpand}>{expanded ? "Less" : "More"}</button>
+          )}
+          {details?.links.map((link) => (
+            <button
+              type="button"
+              key={link.url}
+              className="link-button"
+              title={link.url}
+              onClick={() => openLink(link.url)}
+            >
+              {link.label} ↗
             </button>
           ))}
         </div>
+        {item.keywords.length > 0 && (
+          <div className="mod-tags">
+            <span className="eyebrow">TAGS</span>
+            {item.keywords.map((keyword) => (
+              <button
+                type="button"
+                key={keyword}
+                className="mod-tag"
+                onClick={() => onKeyword(keyword)}
+              >
+                {labels.get(keyword) ?? keyword}
+              </button>
+            ))}
+          </div>
+        )}
+        <dl className="mod-facts">
+          <dt>ADDED</dt>
+          <dd>
+            {(details?.addedAt ?? item.addedAt)
+              ? new Date(details?.addedAt ?? item.addedAt!).toLocaleDateString()
+              : "—"}
+          </dd>
+          <dt>BY</dt>
+          <dd>{details?.creator ?? "—"}</dd>
+          {details?.updatedAt
+            ? (
+              <>
+                <dt>UPDATED</dt>
+                <dd>{new Date(details.updatedAt).toLocaleDateString()}</dd>
+              </>
+            )
+            : null}
+          {isMod
+            ? (
+              <>
+                <dt>FILES</dt>
+                <dd>{details ? details.files.length : "—"}</dd>
+              </>
+            )
+            : (
+              <>
+                <dt>DOWNLOADS</dt>
+                <dd>{details?.downloads != null ? details.downloads.toLocaleString() : "—"}</dd>
+              </>
+            )}
+        </dl>
+      </div>
+
+      <ShotGallery shots={shots} empty={details ? "No screenshots" : detailsError ?? "…"} />
+
+      <div className="mod-bar">
+        <span className="source-badge">ModDB · {item.sourceLabel}</span>
+        <button type="button" className="link-button" onClick={() => openLink(item.page)}>Page ↗</button>
         <div className="grow" />
-        <label className="search">
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-            placeholder="Search ModDB…"
-            aria-label="Search ModDB"
-          />
-        </label>
-      </div>
-
-      <form
-        className="moddb-url-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          installAddress();
-        }}
-      >
-        <input
-          value={address}
-          onChange={(event) => setAddress(event.currentTarget.value)}
-          placeholder="Or paste a ModDB download page, or a link to a .zip, .7z or .rar"
-          aria-label="Download address"
-        />
-        <button type="submit" className="ghost primary compact" disabled={!canInstall}>
-          Install from link
-        </button>
-      </form>
-      {address.trim() && !canInstall && (
-        <p className="warn-text small moddb-url-hint">
-          That is not a download. Use a ModDB mod, addon or download page, or a direct link to an archive.
-        </p>
-      )}
-
-      <div className="moddb-meta">
-        <span>
-          {loading && items.length === 0
-            ? "Reading ModDB…"
-            : `${matches.length} result${matches.length === 1 ? "" : "s"}`}
-          {fetchedAt && ` · updated ${new Date(fetchedAt).toLocaleString()}`}
-        </span>
-        <button type="button" className="link-button" disabled={loading} onClick={() => void load(true)}>
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
-        <button type="button" className="link-button" onClick={() => onOpen({ what: "moddb" })}>
-          Open ModDB ↗
-        </button>
-      </div>
-      {error && <div className="banner-error" role="alert">{error}</div>}
-
-      <div className="moddb-results">
-        {matches.slice(0, shown).map((item) => {
-          const inLibrary = isInstalled(item.title);
-          return (
-            <article key={`${item.kind}:${item.id}`} className="moddb-result">
-              <div className="moddb-result-cover">
-                {item.cover
-                  ? <img src={item.cover} alt="" loading="lazy" />
-                  : <div className="moddb-result-fallback" aria-hidden="true">{item.title.slice(0, 1)}</div>}
-                <span>{inLibrary ? "In library" : item.sourceLabel}</span>
-              </div>
-              <div className="moddb-result-body">
-                <h3>{item.title}</h3>
-                <p>{item.description || "No description given."}</p>
-                <div className="mod-tags">
-                  {item.addedAt && <span className="muted small">{new Date(item.addedAt).toLocaleDateString()}</span>}
-                  {item.keywords.slice(0, 5).map((keyword) => <span key={keyword} className="mod-tag">{keyword}</span>)}
-                </div>
-              </div>
-              <div className="moddb-result-actions">
-                <button type="button" className="ghost" onClick={() => openLink(item.page)}>
-                  Page ↗
-                </button>
-                <button
-                  type="button"
-                  className="ghost primary"
-                  disabled={!root}
-                  onClick={() => onInstall(item.installPage || item.page, item.title)}
-                >
-                  {inLibrary ? "Install again" : "Install"}
-                </button>
-              </div>
-            </article>
-          );
-        })}
-        {!loading && items.length > 0 && matches.length === 0 && (
-          <p className="muted pad">Nothing on ModDB matches that search.</p>
+        {detailsError && <span className="bad-text small">{detailsError}</span>}
+        {job && <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job)} />}
+        {running && progress !== null && (
+          <span className="progress">
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
+          </span>
         )}
-        {matches.length > shown && (
-          <button
-            type="button"
-            className="ghost more"
-            onClick={() => setShown((n) => n + PAGE)}
+        {isMod && details && details.files.length > 1 && !running && (
+          <select
+            value={file}
+            onChange={(e) => setFile(e.currentTarget.value)}
+            aria-label="File to install"
           >
-            Show more ({matches.length - shown} left)
-          </button>
+            {details.files.map((f) => (
+              <option key={f.page} value={f.page}>
+                {f.name}
+                {f.size ? ` (${formatBytes(f.size)})` : ""}
+              </option>
+            ))}
+          </select>
         )}
+        {size !== null && <span className="mod-size">{formatBytes(size)}</span>}
+        {installer
+          ? (
+            <button
+              type="button"
+              className="download"
+              title="An installer: Exordium never runs one for you. Open its page and install it yourself."
+              onClick={() => openLink(item.page)}
+            >
+              INSTALLER ↗
+            </button>
+          )
+          : (
+            <button
+              type="button"
+              className="download"
+              disabled={!details || !root || running || job?.state === "installed" ||
+                (isMod && !chosen && details.files.length > 0)}
+              title={root ? undefined : "Choose the Diablo II install first"}
+              onClick={() => onInstall(target)}
+            >
+              {job ? jobLabel(job) : "INSTALL"}
+            </button>
+          )}
       </div>
-      <p className="muted small moddb-footnote">
-        Installers (.exe) are never run for you: open their page and install them yourself if you trust the file.
-      </p>
-    </div>
+    </article>
   );
 }
 
@@ -985,8 +1185,6 @@ function ModCard(
   const [details, setDetails] = React.useState<Details | null>(null);
   const [detailsError, setDetailsError] = React.useState<string | null>(null);
   const [file, setFile] = React.useState<string>("");
-  const [shot, setShot] = React.useState(0);
-  const [gallery, setGallery] = React.useState(false);
 
   // Details (screenshots, files, the archive's own readme) are asked for once the card is near the
   // screen; the full screenshots are then preloaded, so switching between them is instant.
@@ -1078,41 +1276,7 @@ function ModCard(
         </dl>
       </div>
 
-      <div className="mod-shots">
-        {shots.length > 0
-          ? (
-            <>
-              <button
-                type="button"
-                className="shot-main-button"
-                title="Open the gallery"
-                onClick={() => setGallery(true)}
-              >
-                <img className="shot-main" src={shots[shot]?.full} alt="" />
-              </button>
-              <div className="shot-strip">
-                {shots.slice(0, 4).map((s, i) => (
-                  <button
-                    type="button"
-                    key={s.thumb}
-                    className={i === shot ? "shot on" : "shot"}
-                    onClick={() => setShot(i)}
-                  >
-                    <img src={s.thumb} alt="" loading="lazy" />
-                  </button>
-                ))}
-              </div>
-            </>
-          )
-          : <div className="shot-empty muted small">{details ? "No screenshots" : detailsError ?? "…"}</div>}
-        {gallery && (
-          <Lightbox
-            images={shots.map((s) => ({ src: s.full, thumb: s.thumb }))}
-            start={shot}
-            onClose={() => setGallery(false)}
-          />
-        )}
-      </div>
+      <ShotGallery shots={shots} empty={details ? "No screenshots" : detailsError ?? "…"} />
 
       <div className="mod-bar">
         <span className="source-badge">Internet Archive</span>
@@ -1313,7 +1477,7 @@ function DownloadRow({ job, rate }: { job: Job; rate: number }) {
     ? `${formatBytes(job.received)} of ${formatBytes(job.total)}`
     : job.state === "extracting"
     ? job.unpackedSize ? `${formatBytes(job.extracted)} of ${formatBytes(job.unpackedSize)} unpacked` : "Unpacking…"
-    : `Moving ${job.installing ?? "the mod"} into MODS`;
+    : `Moving ${job.installing ?? "the mod"} into the library`;
   const left = job.state === "downloading" && rate > 0 ? (job.total - job.received) / rate : null;
   return (
     <div className="dl-row active">

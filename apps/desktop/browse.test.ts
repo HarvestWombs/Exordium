@@ -5,7 +5,10 @@ import {
   contentKeywords,
   executableInstallWarning,
   keywordsFor,
+  modDbBytes,
+  modDbDetailsFromHtml,
   modDbDownloadLinks,
+  modDbImage,
   modDbItemsFromHtml,
   modDbItemsFromRss,
   modDbNextPage,
@@ -166,4 +169,67 @@ Deno.test("ModDB category pagination follows the next page", () => {
     ),
     "https://www.moddb.com/games/diablo-2-lod/mods/page/3",
   );
+});
+
+Deno.test("ModDB pictures are asked for at sizes its cache always has", () => {
+  const crop = "https://media.moddb.com/cache/images/mods/1/43/42940/crop_120x90/005_-_Start.jpg";
+  assertEquals(
+    modDbImage(crop, "thumb_620x2000"),
+    "https://media.moddb.com/cache/images/mods/1/43/42940/thumb_620x2000/005_-_Start.jpg",
+  );
+  assertEquals(
+    modDbImage("https://media.moddb.com/images/downloads/1/252/251341/Andariel.jpg", "crop_120x90"),
+    "https://media.moddb.com/cache/images/downloads/1/252/251341/crop_120x90/Andariel.jpg",
+  );
+  assertEquals(modDbImage("https://example.com/a.jpg", "crop_120x90"), "https://example.com/a.jpg");
+});
+
+Deno.test("ModDB sizes read as bytes", () => {
+  assertEquals(modDbBytes("15.29mb (16,034,640 bytes)"), 16034640);
+  assertEquals(modDbBytes("1.05gb"), Math.round(1.05 * 1024 ** 3));
+  assertEquals(modDbBytes("none"), null);
+});
+
+const MODDB_ROW = (label: string, value: string) =>
+  `<div class="row clear"><h5>${label}</h5><span class="summary">${value}</span></div>`;
+
+Deno.test("a ModDB file page gives its facts, description, picture and its mod's files", () => {
+  const html =
+    `<meta property="og:image" content="https://media.moddb.com/images/downloads/1/252/251341/Andariel.jpg" />
+    ${MODDB_ROW("Location", '<a href="/games">Games</a> : <a href="/mods/dreamaker-mod">Dreamaker-Mod</a>')}
+    ${MODDB_ROW("Filename", "Dreamaker-Mod_2026-10-10.exe")}
+    ${MODDB_ROW("Uploader", '<a href="/members/dreamaker-mod">(Dreamaker)</a>')}
+    ${MODDB_ROW("Added", '<time datetime="2023-06-06T11:49:33+00:00">Jun 6th, 2023</time>')}
+    ${MODDB_ROW("Size", "15.29mb (16,034,640 bytes)")}
+    ${MODDB_ROW("Downloads", '<a href="/statistics">3,203 (9 today)</a>')}
+    <div id="downloaddescription" style="display: none;"><hr /><p># Diablo II by Dreamaker<br />Quality of Life</p></div>
+    <a href="/mods/dreamaker-mod/downloads/dreamaker-mod-2026-10-10" class="button buttonfull"><span style="float: right;">PATCH</span><span>Dreamaker-Mod</span><hr><span>3.2K</span><span>15.29mb</span></a>
+    <a href="/games/diablo-2-lod/downloads/hero-editor" class="button buttonfull"><span>FULL</span><span>Hero Editor</span><hr><span>1K</span><span>5mb</span></a>
+    ${MODDB_ROW("Homepage", '<a href="https://bio.link/dreamaker">Bio.link</a>')}`;
+  const page = "https://www.moddb.com/mods/dreamaker-mod/downloads/dreamaker-mod-2026-10-10";
+  const details = modDbDetailsFromHtml(html, page);
+  assertEquals(details.creator, "Dreamaker");
+  assertEquals(details.filename, "Dreamaker-Mod_2026-10-10.exe");
+  assertEquals(details.size, 16034640);
+  assertEquals(details.downloads, 3203);
+  assertEquals(details.addedAt, "2023-06-06T11:49:33.000Z");
+  assertEquals(details.description, "# Diablo II by Dreamaker\nQuality of Life");
+  assertEquals(details.parentMod, "https://www.moddb.com/mods/dreamaker-mod");
+  assertEquals(details.screenshots, [{
+    full: "https://media.moddb.com/cache/images/downloads/1/252/251341/thumb_620x2000/Andariel.jpg",
+    thumb: "https://media.moddb.com/cache/images/downloads/1/252/251341/crop_120x90/Andariel.jpg",
+  }]);
+  // The game's own downloads in the sidebar are not this mod's files.
+  assertEquals(details.files.map((f) => [f.name, f.category, f.size]), [["Dreamaker-Mod", "PATCH", 16032727]]);
+  assertEquals(details.links, [{ label: "Homepage", url: "https://bio.link/dreamaker" }]);
+});
+
+Deno.test("a game-level ModDB addon takes nothing from the game's own profile", () => {
+  const html = `${MODDB_ROW("Location", '<a href="/games/diablo-2-lod">Diablo II</a>')}
+    ${MODDB_ROW("Homepage", '<a href="http://sea.blizzard.com/">Blizzard</a>')}
+    <a href="/games/diablo-2-lod/downloads/hero-editor" class="button buttonfull"><span>FULL</span><span>Hero Editor</span><hr><span>1K</span><span>5mb</span></a>`;
+  const details = modDbDetailsFromHtml(html, "https://www.moddb.com/games/diablo-2-lod/addons/drop-mod");
+  assertEquals(details.files, []);
+  assertEquals(details.links, []);
+  assertEquals(details.parentMod, null);
 });

@@ -248,6 +248,81 @@ async function setIcon(user: User32, hwnd: Hwnd): Promise<void> {
   }
 }
 
+/** {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}: the PKEY_AppUserModel_* property set. */
+const APP_MODEL_FMTID = [0x9f4c2855, 0x9f79, 0x4b39, [0xa8, 0xd0, 0xe1, 0xd4, 0x2d, 0xe1, 0xd5, 0xf3]] as const;
+/** {886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}: IID_IPropertyStore. */
+const IID_PROPERTY_STORE = [0x886d8eeb, 0x8cf2, 0x4446, [0x8d, 0x02, 0xcd, 0xba, 0x1d, 0xbd, 0xcf, 0x99]] as const;
+const APP_ID = "HarvestLabs.Exordium";
+
+function guid([d1, d2, d3, d4]: readonly [number, number, number, readonly number[]]): Uint8Array {
+  const out = new Uint8Array(16);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, d1, true);
+  view.setUint16(4, d2, true);
+  view.setUint16(6, d3, true);
+  out.set(d4, 8);
+  return out;
+}
+
+/**
+ * The taskbar's identity for the window: an AppUserModelID, and the command, name and icon a pinned
+ * button relaunches with. Left to itself the taskbar showed a blank page for Exordium's button
+ * (combined buttons draw the application's icon, not the window's), even with the icon in the exe
+ * and in WM_SETICON, and with Explorer's icon cache deleted; with these set it shows the exe's icon
+ * (measured 2026-10-10). Packaged only: under `deno run` the exe would be deno.exe.
+ */
+function setAppIdentity(hwnd: Hwnd): void {
+  const exe = Deno.execPath();
+  if (/(^|[\\/])deno(\.exe)?$/i.test(exe)) return;
+  const shell = Deno.dlopen("shell32.dll", {
+    SHGetPropertyStoreForWindow: { parameters: ["pointer", "buffer", "buffer"], result: "i32" },
+  });
+  const ole = Deno.dlopen("ole32.dll", { CoInitializeEx: { parameters: ["pointer", "u32"], result: "i32" } });
+  try {
+    // Apartment-threaded; an already initialised thread answers RPC_E_CHANGED_MODE, which is fine.
+    ole.symbols.CoInitializeEx(null, 0x2);
+    const out = new BigUint64Array(1);
+    if (shell.symbols.SHGetPropertyStoreForWindow(hwnd, guid(IID_PROPERTY_STORE), out) !== 0) return;
+    const store = Deno.UnsafePointer.create(out[0]!);
+    if (!store) return;
+    const vtable = new Deno.UnsafePointerView(store).getPointer(0)!;
+    // A vtable slot, typed by the definition each call site gives it.
+    const method = (index: number) =>
+      new Deno.UnsafePointerView(vtable).getPointer(index * 8) as Deno.PointerObject<never>;
+    // IUnknown (0-2), then GetCount, GetAt, GetValue, SetValue (6), Commit (7).
+    const setValue = new Deno.UnsafeFnPointer(
+      method(6),
+      {
+        parameters: ["pointer", "buffer", "buffer"],
+        result: "i32",
+      } as const,
+    );
+    const commit = new Deno.UnsafeFnPointer(method(7), { parameters: ["pointer"], result: "i32" } as const);
+    const release = new Deno.UnsafeFnPointer(method(2), { parameters: ["pointer"], result: "u32" } as const);
+    const set = (pid: number, value: string) => {
+      const key = new Uint8Array(20);
+      key.set(guid(APP_MODEL_FMTID));
+      new DataView(key.buffer).setUint32(16, pid, true);
+      const text = utf16z(value);
+      // PROPVARIANT: vt = VT_LPWSTR (31), then the string pointer at offset 8. SetValue copies it.
+      const variant = new Uint8Array(24);
+      const view = new DataView(variant.buffer);
+      view.setUint16(0, 31, true);
+      view.setBigUint64(8, BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(text))), true);
+      setValue.call(store, key, variant);
+    };
+    set(5, APP_ID); // PKEY_AppUserModel_ID
+    set(2, `"${exe}"`); // PKEY_AppUserModel_RelaunchCommand
+    set(4, TITLE); // PKEY_AppUserModel_RelaunchDisplayNameResource
+    set(3, `${exe},0`); // PKEY_AppUserModel_RelaunchIconResource
+    commit.call(store);
+    release.call(store);
+  } finally {
+    shell.close();
+    ole.close();
+  }
+}
+
 export async function prepareWindow(): Promise<boolean> {
   const user = lib();
   const hwnd = user && findOwnWindow(user);
@@ -257,6 +332,11 @@ export async function prepareWindow(): Promise<boolean> {
   // still matters without a caption: the taskbar and Alt+Tab show it.
   user.symbols.DefWindowProcW(hwnd, WM_SETTEXT, 0n, utf16z(TITLE));
   await setIcon(user, hwnd).catch(() => {});
+  try {
+    setAppIdentity(hwnd);
+  } catch {
+    // The window keeps the shell's default identity: the taskbar may show a blank page.
+  }
   if (!native) {
     const dll = await nativeLibrary();
     native = dll !== null && dll.symbols.ExordiumWindowAttach(hwnd, MIN_WIDTH, MIN_HEIGHT) === 1;

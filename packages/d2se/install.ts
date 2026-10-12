@@ -37,6 +37,30 @@ export const RENDERER_WRAPPERS = [
  */
 export const INSTALL_FILES = ["d2.lng", "ijl11.dll", "binkw32.dll", "smackw32.dll"] as const;
 
+/**
+ * Marks Exordium's own library (apps/desktop/library-setup.ts). It holds the same three things as a
+ * D2SE install, in its own folders (LIBRARY_FOLDERS); `findD2SE` reads either.
+ */
+export const LIBRARY_MARKER = "exordium-library.json";
+
+/** Where a root keeps its game files, cores and mods, relative to it (`""` is the root itself). */
+export interface LayoutFolders {
+  game: string;
+  cores: string;
+  mods: string;
+}
+
+/** A D2SE install: the game files in the root, `D2SE\CORES\<version>`, `MODS\<folder>`. */
+export const D2SE_FOLDERS: LayoutFolders = { game: "", cores: "D2SE/CORES", mods: "MODS" };
+
+/** Exordium's library: `game\`, `cores\<version>`, `mods\<folder>`. */
+export const LIBRARY_FOLDERS: LayoutFolders = { game: "game", cores: "cores", mods: "mods" };
+
+/** `root` joined with one of its layout folders, and a name under it. */
+export function layoutPath(root: string, folder: string, name?: string): string {
+  return [root.replace(/[\\/]+$/, ""), folder, name].filter((part) => part).join("/");
+}
+
 /** The install's PlugY folder, which D2SE falls back to for PlugY.dll; see `readD2SE`. */
 export const PLUGY_FOLDER = "PlugY";
 
@@ -56,6 +80,9 @@ export const GAME_ARCHIVES = [
 
 export interface D2SELayout {
   root: string;
+  /** D2SE_FOLDERS for a D2SE install, LIBRARY_FOLDERS for Exordium's library. */
+  folders: LayoutFolders;
+  library: boolean;
   /** Folder names under `D2SE\CORES`, e.g. `1.10f`, and the root's own 1.14 core when it has one. */
   cores: string[];
   /** The 1.14 core the root itself is (`1.14d`), from its `Game.exe`; null for an older root. */
@@ -74,12 +101,16 @@ export async function findD2SE(root: string): Promise<D2SELayout | null> {
       return false;
     }
   };
-  if (!(await has("D2SE.exe", false)) || !(await has("MODS", true)) || !(await has("D2SE/CORES", true))) return null;
+  const library = await has(LIBRARY_MARKER, false);
+  if (!library && !(await has("D2SE.exe", false))) return null;
+  const layout = library ? LIBRARY_FOLDERS : D2SE_FOLDERS;
+  if (!(await has(layout.mods, true)) || !(await has(layout.cores, true))) return null;
   // `CORES` also collects D2SE's own folders ("Debug Logs"); a core is a version-named folder.
-  const cores = (await folders(`${root}/D2SE/CORES`)).filter((name) => CORE_NAME.test(name));
-  const rootCore = await rootCoreName(root);
+  const cores = (await folders(layoutPath(root, layout.cores))).filter((name) => CORE_NAME.test(name));
+  // A 1.14 install is its own core; the library never is (its cores are all folders).
+  const rootCore = library ? null : await rootCoreName(root);
   if (rootCore && !cores.some((name) => name.toLowerCase() === rootCore)) cores.push(rootCore);
-  return { root, cores, rootCore, mods: await folders(`${root}/MODS`) };
+  return { root, folders: layout, library, cores, rootCore, mods: await folders(layoutPath(root, layout.mods)) };
 }
 
 const CORE_NAME = /^\d+\.\d+[a-z]?$/i;
@@ -93,7 +124,7 @@ export interface Problem {
 
 export interface CoreImport {
   version: string;
-  /** Relative to the install root: `D2SE/CORES/1.10f`, or `""` for the root's own 1.14 core. */
+  /** Relative to the root: `D2SE/CORES/1.10f` or `cores/1.10f`, or `""` for the root's own 1.14 core. */
   folder: string;
   /** 1.14 and later: the core is Blizzard's `Game.exe`, which the loader cannot become. */
   singleExe: boolean;
@@ -130,20 +161,25 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
   const pick = (all: string[], wanted: readonly string[] | undefined) =>
     wanted ? all.filter((name) => wanted.some((w) => w.toLowerCase() === name.toLowerCase())) : all;
 
-  const launcherText = await readText(`${root}/D2SE.ini`);
-  const archives = await scanNamed(root, GAME_ARCHIVES, options);
+  const launcherText = layout.library ? null : await readText(`${root}/D2SE.ini`);
+  // The game layer's files sit in the box's root whichever folder they come from: `path` stays as
+  // scanned, `source` becomes relative to the root (`game/d2data.mpq` in the library).
+  const gameDir = layoutPath(root, layout.folders.game);
+  const fromRoot = (files: ScannedFile[]) =>
+    layout.folders.game ? files.map((f) => ({ ...f, source: `${layout.folders.game}/${f.source}` })) : files;
+  const archives = fromRoot(await scanNamed(gameDir, GAME_ARCHIVES, options));
   const present = new Set(archives.map((f) => f.path.toLowerCase()));
   // D2SE's "PlugY folder for a proper installed PlugY.dll": the PlugY a core without its own copy
   // loads, and the folder PlugY reads its images from. It belongs with the install, so to the game layer.
-  const wrappers = await scanNamed(root, [...RENDERER_WRAPPERS, ...INSTALL_FILES], options);
-  const game = [...archives, ...wrappers, ...await scanTree(root, PLUGY_FOLDER, options)];
+  const wrappers = fromRoot(await scanNamed(gameDir, [...RENDERER_WRAPPERS, ...INSTALL_FILES], options));
+  const game = [...archives, ...wrappers, ...fromRoot(await scanTree(gameDir, PLUGY_FOLDER, options))];
 
   const cores: CoreImport[] = [];
   for (const version of pick(layout.cores, options.cores)) {
     if (version === layout.rootCore) {
       cores.push({ version, folder: "", singleExe: true, scan: await scanRootCore(root, options) });
     } else {
-      const folder = `D2SE/CORES/${version}`;
+      const folder = layoutPath("", layout.folders.cores, version);
       cores.push({ version, folder, singleExe: false, scan: await scanFolder(`${root}/${folder}`, "core", options) });
     }
   }
@@ -152,7 +188,7 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
 
   const mods: ModImport[] = [];
   for (const folder of pick(layout.mods, options.mods)) {
-    const dir = `${root}/MODS/${folder}`;
+    const dir = layoutPath(root, layout.folders.mods, folder);
     const setupText = await readText(`${dir}/D2SE_SETUP.ini`);
     const setup = setupText === null ? null : readModSetup(parseIni(setupText));
     const scan = await scanFolder(dir, "mod", options);
