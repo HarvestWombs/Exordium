@@ -8,7 +8,7 @@ export interface LightboxImage {
 
 /**
  * Screenshots full size, one at a time: arrows or the thumbnail strip to move, Escape or a click
- * outside the picture to close. Used by the mod browser's cards and the library's Screenshots tab.
+ * anywhere but the picture and the controls to close. Used by the mod browser's cards and the library's Screenshots tab.
  */
 export function Lightbox(
   { images, start, onClose }: { images: LightboxImage[]; start: number; onClose: () => void },
@@ -36,22 +36,40 @@ export function Lightbox(
 
   const image = images[index];
   if (!image) return null;
+  // The stage, bar and strip span the window, so only the picture and the buttons keep a click.
+  const keep = (event: React.MouseEvent) => event.stopPropagation();
   return (
     <div className="lightbox" role="dialog" aria-modal="true" aria-label="Screenshots" onClick={onClose}>
-      <div className="lightbox-stage" onClick={(event) => event.stopPropagation()}>
-        <img className="lightbox-image" src={image.src} alt={image.caption ?? ""} />
+      <div className="lightbox-stage">
+        <img className="lightbox-image" src={image.src} alt={image.caption ?? ""} onClick={keep} />
         {count > 1 && (
           <>
-            <button type="button" className="lightbox-nav prev" aria-label="Previous" onClick={() => move(-1)}>
+            <button
+              type="button"
+              className="lightbox-nav prev"
+              aria-label="Previous"
+              onClick={(event) => {
+                keep(event);
+                move(-1);
+              }}
+            >
               ‹
             </button>
-            <button type="button" className="lightbox-nav next" aria-label="Next" onClick={() => move(1)}>
+            <button
+              type="button"
+              className="lightbox-nav next"
+              aria-label="Next"
+              onClick={(event) => {
+                keep(event);
+                move(1);
+              }}
+            >
               ›
             </button>
           </>
         )}
       </div>
-      <div className="lightbox-bar" onClick={(event) => event.stopPropagation()}>
+      <div className="lightbox-bar">
         <span className="muted small">
           {index + 1} / {count}
           {image.caption ? ` · ${image.caption}` : ""}
@@ -59,13 +77,16 @@ export function Lightbox(
         <button type="button" className="lightbox-close" aria-label="Close" onClick={onClose}>✕</button>
       </div>
       {count > 1 && (
-        <div className="lightbox-strip" ref={strip} onClick={(event) => event.stopPropagation()}>
+        <div className="lightbox-strip" ref={strip}>
           {images.map((img, i) => (
             <button
               type="button"
               key={img.src}
               className={i === index ? "lightbox-thumb on" : "lightbox-thumb"}
-              onClick={() => setIndex(i)}
+              onClick={(event) => {
+                keep(event);
+                setIndex(i);
+              }}
             >
               <img src={img.thumb ?? img.src} alt="" loading="lazy" />
             </button>

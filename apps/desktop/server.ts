@@ -4017,8 +4017,8 @@ async function installNativeLoader(
         gameVersion: loader.gameVersion ?? "",
         core: loader.core ?? "",
         singleExe: loader.singleExe,
-        // Battle.net is reachable only for a mod with a custom realm; the loader enforces it (window.ts
-        // / native patch, pending). Off means the main-menu Battle.net button is greyed and blocked.
+        // Battle.net is reachable only for a mod with a custom realm. Off: exordium-game greys the
+        // main-menu Battle.net button and blocks every way onto it (lock_battlenet in main.cpp).
         battlenetAllowed: loader.battlenetAllowed,
         registryOnlyHook: false,
         game: GAME_EXE,

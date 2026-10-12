@@ -1640,7 +1640,7 @@ async function followCopy(job: CopyJob, onTick: (job: CopyJob) => void): Promise
   return current;
 }
 
-function CopyProgress({ job, label }: { job: CopyJob; label?: string }) {
+function CopyProgress({ job, label }: { job: CopyJob; label?: string | undefined }) {
   const percent = job.total > 0 ? Math.min(100, Math.round((job.copied / job.total) * 100)) : 0;
   return (
     <div className="setup-progress">
@@ -2415,6 +2415,28 @@ function D2SEConverter(
             ))}
           </aside>
           <section className="converter-editor">
+            <div className="converter-source">
+              <p className="muted small">
+                {from
+                  ? `${move ? "Moves" : "Copies"} ${from}${
+                    size ? ` (${formatSize(size)})` : ""
+                  } into the library and writes this exordium.mod.json there. ${
+                    move ? "It is removed from your Diablo II install." : "Your install is not changed."
+                  }`
+                  : "Choose a mod to import."}
+                {exists ? " It is already in the library." : ""}
+                {dirty ? " Edited." : ""}
+              </p>
+              <label className="confirm-check">
+                <input
+                  type="checkbox"
+                  checked={move}
+                  disabled={busy}
+                  onChange={(event) => setMove(event.currentTarget.checked)}
+                />
+                Move instead of copy — removes {folder || "the mod"} from your Diablo II install to save space
+              </label>
+            </div>
             <div className="converter-grid">
               {field("title")}
               {field("name")}
@@ -2445,29 +2467,13 @@ function D2SEConverter(
             {!manifest && text.trim() !== "" && (
               <p className="warn-text small">The JSON is not valid yet — fix it to edit the fields or import.</p>
             )}
-            <p className="muted small">
-              {from
-                ? `Copies ${from}${
-                  size ? ` (${formatSize(size)})` : ""
-                } into the library and writes this exordium.mod.json there. Your install is not changed.`
-                : "Choose a mod to import."}
-              {exists ? " It is already in the library." : ""}
-              {dirty ? " Edited." : ""}
-            </p>
-            <label className="confirm-check">
-              <input
-                type="checkbox"
-                checked={move}
-                disabled={busy}
-                onChange={(event) => setMove(event.currentTarget.checked)}
-              />
-              Move instead of copy — removes {folder || "the mod"} from your Diablo II install to save space
-            </label>
-            {copy && <CopyProgress job={copy} />}
             {problem && <p className="bad-text small">{problem}</p>}
           </section>
         </div>
         <footer>
+          <div className="converter-copy">
+            {copy && <CopyProgress job={copy} label={move ? "Moving" : undefined} />}
+          </div>
           <button type="button" className="ghost" disabled={busy} onClick={close}>Close</button>
           <button
             type="button"

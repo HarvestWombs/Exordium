@@ -3,6 +3,8 @@
   --chrome: #0a0b0e;
   --sidebar: #14171c;
   --card: #181b21;
+  /* Behind pictures and the card footer bar: darker than any card. */
+  --well: #07080a;
   --raised: #262b34;
   --line: #22262e;
   --line-strong: #2a2f38;
@@ -129,6 +131,7 @@ button:disabled {
   --chrome: #c7bdac;
   --sidebar: #ccc4b8;
   --card: #e2daca;
+  --well: #c9bfae;
   --raised: #b8ad9c;
   --line: #b8ad9f;
   --line-strong: #9f927f;
@@ -1954,7 +1957,7 @@ fieldset legend {
 
 .mod-cover {
   position: relative;
-  background: #07080a;
+  background: var(--well);
 }
 
 .mod-cover img {
@@ -2076,7 +2079,7 @@ fieldset legend {
   aspect-ratio: 16 / 9;
   object-fit: cover;
   border-radius: 4px;
-  background: #07080a;
+  background: var(--well);
 }
 
 .shot-strip {
@@ -2090,7 +2093,7 @@ fieldset legend {
   border: 2px solid transparent;
   border-radius: 4px;
   overflow: hidden;
-  background: #07080a;
+  background: var(--well);
 }
 
 .shot.on {
@@ -2118,7 +2121,7 @@ fieldset legend {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  background: #07080a;
+  background: var(--well);
 }
 
 .source-badge {
@@ -2335,7 +2338,7 @@ fieldset legend {
   width: 100%;
   height: 150px;
   border-radius: 4px;
-  background: #07080a;
+  background: var(--well);
 }
 
 .dl-graph .grid {
@@ -2696,6 +2699,29 @@ fieldset legend {
   font-size: 12px;
 }
 
+/* What the import does, and the move toggle, above the fields. */
+.converter-source {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.converter-source p {
+  margin: 0;
+}
+
+/* The copy's progress, left of the footer's buttons. */
+.converter-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.converter-copy .setup-progress {
+  margin: 0;
+}
+
 .converter-editor {
   min-width: 0;
   overflow: auto;
@@ -2816,6 +2842,11 @@ fieldset legend {
   gap: 10px;
   padding: 40px 24px 16px;
   background: rgba(4, 4, 6, 0.92);
+  /* A photo viewer stays dark in either theme, so its text and buttons use the dark palette. */
+  --text-strong: #f4efe6;
+  --text-mute: #a9b0ba;
+  --line-strong: rgba(255, 255, 255, 0.28);
+  color: #e8e3da;
 }
 
 .lightbox-stage {

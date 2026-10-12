@@ -48,6 +48,9 @@ struct Plan {
     std::vector<std::string> probeFiles;
     // Diagnostic: log where the main thread is every N seconds, three times (0 = off).
     int watchdogSeconds = 0;
+    // Official Battle.net is reachable only for a mod with a custom realm (lock_battlenet). Missing
+    // from the config means locked.
+    bool battlenetAllowed = false;
     std::vector<ArchiveLoad> archives;
     std::vector<std::string> gameDlls;
     std::vector<PluginLoad> plugins;
@@ -316,6 +319,7 @@ Plan read_plan(Log& log) {
     plan.probeMpqs = json_string_array(text, "probeMpqs");
     plan.probeFiles = json_string_array(text, "probeFiles");
     plan.watchdogSeconds = json_int(text, "watchdogSeconds", 0);
+    plan.battlenetAllowed = json_bool(text, "battlenetAllowed", false);
     const std::string version = json_string(text, "gameVersion");
     if (!version.empty()) plan.gameVersion = version;
     plan.core = json_string(text, "core");
@@ -372,6 +376,19 @@ D2ConfigStrc build_config(const Plan& plan) {
     config.bAmazon = 1;
     config.nLaunchType = LAUNCHTYPE_NONE;
     config.pAllowExpansionCallback = allow_expansion;
+    // The config is laid out as 1.10f's, but older D2Launch builds read their Battle.net interface
+    // pointer (1.10f's pComInterface) from an earlier offset, found by where each copies it into its
+    // global: 0x1FA in 1.00 and 1.01, 0x212 in 1.02 to 1.05b, 0x216 in 1.06 and 1.06b, 0x21D in 1.07
+    // to 1.09d. The pointer must start null; 1.00 and 1.01 read dwAct's 1 there, and their "Disconnect
+    // from BNET" step on entering the menu jumped through it.
+    static const struct { const char* core; size_t offset; } kComInterface[] = {
+        {"1.00", 0x1FA}, {"1.01", 0x1FA}, {"1.02", 0x212}, {"1.03", 0x212}, {"1.04b", 0x212},
+        {"1.04c", 0x212}, {"1.05", 0x212}, {"1.05b", 0x212}, {"1.06", 0x216}, {"1.06b", 0x216},
+        {"1.07", 0x21D}, {"1.08", 0x21D}, {"1.09", 0x21D}, {"1.09b", 0x21D}, {"1.09d", 0x21D},
+    };
+    for (const auto& entry : kComInterface) {
+        if (plan.core == entry.core) std::memset(reinterpret_cast<uint8_t*>(&config) + entry.offset, 0, sizeof(void*));
+    }
     return config;
 }
 
@@ -408,6 +425,68 @@ HMODULE load_library(Log& log, const std::string& path) {
         log.line(buffer);
     }
     return module;
+}
+
+// The offsets in `module`'s code section where `pattern` matches (-1 matches any byte).
+std::vector<size_t> find_code(HMODULE module, const std::vector<int>& pattern) {
+    std::vector<size_t> hits;
+    const auto* base = reinterpret_cast<const uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        const size_t start = section->VirtualAddress;
+        const size_t size = section->Misc.VirtualSize;
+        for (size_t at = start; at + pattern.size() <= start + size; ++at) {
+            size_t k = 0;
+            while (k < pattern.size() && (pattern[k] < 0 || base[at + k] == static_cast<uint8_t>(pattern[k]))) ++k;
+            if (k == pattern.size()) hits.push_back(at);
+        }
+    }
+    return hits;
+}
+
+bool write_code(HMODULE module, size_t offset, const std::vector<uint8_t>& bytes) {
+    auto* at = reinterpret_cast<uint8_t*>(module) + offset;
+    DWORD old = 0;
+    if (!VirtualProtect(at, bytes.size(), PAGE_EXECUTE_READWRITE, &old)) return false;
+    std::memcpy(at, bytes.data(), bytes.size());
+    VirtualProtect(at, bytes.size(), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, bytes.size());
+    return true;
+}
+
+// Closes official Battle.net for a mod without a custom realm (vault: Shared/Diablo-II/Main Menu
+// Battle.net Button). Both sites are found by signature in D2Launch's code; each matched exactly once
+// in every core from 1.00 to 1.13d (checked 2026-10-11), so no per-core table is kept.
+//
+// - Grey: the main menu's own "no d2char.mpq" block, `call check; test eax,eax; je skip`, then
+//   CONTROL_ToggleFirstFlag(edi = Battle.net, 0), (esi = Other Multiplayer, 0) and, from 1.04, the
+//   gateway button. With the je gone the block always runs; with the esi call gone Other Multiplayer
+//   (TCP/IP) stays enabled. A control without its first flag draws at 50% and ignores input.
+// - Block: the routine every way onto Battle.net calls (the button, Open Battle.net, the retry
+//   dialogs), `mov eax,[x]; sub esp,0x400`. The sub becomes `ret`, so it returns before connecting:
+//   PlugY's DisableBattleNet without its hook.
+//
+// Returns false only when the block cannot be applied; the caller refuses to start then.
+bool lock_battlenet(Log& log, HMODULE launch) {
+    const std::vector<size_t> grey = find_code(launch, {
+        0x85, 0xC0, 0x74, -1, 0x33, 0xD2, 0x8B, 0xCF, 0xE8, -1, -1, -1, -1, 0x33, 0xD2, 0x8B, 0xCE, 0xE8, -1, -1, -1, -1,
+    });
+    if (grey.size() == 1 && write_code(launch, grey[0] + 2, {0x90, 0x90}) &&
+        write_code(launch, grey[0] + 17, {0x90, 0x90, 0x90, 0x90, 0x90})) {
+        log.line("Battle.net: main-menu button greyed.");
+    } else {
+        log.line("Battle.net: main-menu grey site not found (" + std::to_string(grey.size()) + " matches); button left as is.");
+    }
+    const std::vector<size_t> entry = find_code(launch, {0xA1, -1, -1, -1, -1, 0x81, 0xEC, 0x00, 0x04, 0x00, 0x00});
+    if (entry.size() != 1 || !write_code(launch, entry[0] + 5, {0xC3, 0x90, 0x90, 0x90, 0x90, 0x90})) {
+        log.line("Battle.net: connect routine not found (" + std::to_string(entry.size()) + " matches).");
+        return false;
+    }
+    log.line("Battle.net: connect blocked (no custom realm).");
+    return true;
 }
 
 FARPROC proc_by_ordinal(HMODULE module, WORD ordinal) {
@@ -1944,6 +2023,10 @@ int run_loader() {
         return shutdown(3);
     }
     log.line("D2Launch.dll!QueryInterface resolved.");
+    if (!plan.battlenetAllowed && !lock_battlenet(log, launch)) {
+        log.line("Cannot continue: Battle.net could not be closed for this core.");
+        return shutdown(4);
+    }
 
     if (!plan.handoff) {
         log.line("Module handoff is disabled in exordium-loader.json.");
