@@ -4,9 +4,11 @@ Windows picks a size per context: 16px for the title bar and Alt+Tab, 24-32px fo
 in Explorer, 256px for large tiles and the Start menu. Each entry is stored as a PNG, which Vista and
 later accept at any size, and which keeps the alpha channel.
 
-The artwork is the book alone on transparency (no tile). It is mostly near-black, so the sizes up
-to 32px are lifted with contrast and brightness and sharpened: shrunk as drawn, the cover vanishes
-into a dark taskbar and only the cyan edges remain. 48px and up are the artwork as drawn.
+The artwork is the sealed cube alone on transparency (no tile; 2026-10-14, replacing the book). Its
+stone is dark grey, so the sizes up to 32px are lifted a little with contrast and brightness and
+sharpened, which keeps the stone from sinking into a dark taskbar while the orange seams carry the
+shape. 48px and up are the artwork as drawn. The source is `icon ideas/box 2.png`, cropped to the
+cube and padded square.
 
 The .ico is committed; run this again when the artwork changes (needs Pillow):
 
@@ -35,10 +37,9 @@ def render(size: int) -> Image.Image:
     if size <= 32:
         alpha = out.split()[3]
         rgb = out.convert("RGB")
-        rgb = ImageEnhance.Contrast(rgb).enhance(1.3)
-        rgb = ImageEnhance.Brightness(rgb).enhance(1.45)
-        rgb = ImageEnhance.Color(rgb).enhance(1.3)
-        out = sharpen(Image.merge("RGBA", (*rgb.split(), alpha)), 0.6, 110)
+        rgb = ImageEnhance.Contrast(rgb).enhance(1.15)
+        rgb = ImageEnhance.Brightness(rgb).enhance(1.25)
+        out = sharpen(Image.merge("RGBA", (*rgb.split(), alpha)), 0.6, 100)
     elif size <= 48:
         out = sharpen(out, 0.8, 90)
     return out

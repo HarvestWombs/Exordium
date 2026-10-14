@@ -36,9 +36,6 @@
     "startAct": 1
   },
   "loads": {
-    "d2se": false,
-    "d2seDll": null,
-    "d2seUtility": false,
     "nefex": false,
     "d2mod": true,
     "d2extra": false,

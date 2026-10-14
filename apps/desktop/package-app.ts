@@ -28,6 +28,7 @@ const isWindows = Deno.build.os === "windows";
 const exe = isWindows ? ".exe" : "";
 const here = import.meta.dirname ?? Deno.cwd();
 const nativeSidecars = ["exordium-window.dll"] as const;
+const SEVEN_ZIP_FILES = ["7z.exe", "7z.dll", "License.txt"] as const;
 
 function candidatePaths(): string[] {
   const paths: string[] = [];
@@ -85,7 +86,12 @@ try {
   for (const name of nativeSidecars) {
     await Deno.copyFile(`../../native/window/build/${name}`, `${here}/Exordium/native/${name}`);
   }
-  console.log(`Copied ${nativeSidecars.length} native sidecars into Exordium/native.`);
+  // The 7-Zip Exordium unpacks every archive with (install.ts): run as a program, so a file on disk.
+  await Deno.mkdir(`${here}/Exordium/native/7zip`, { recursive: true });
+  for (const name of SEVEN_ZIP_FILES) {
+    await Deno.copyFile(`../../native/7zip/${name}`, `${here}/Exordium/native/7zip/${name}`);
+  }
+  console.log(`Copied ${nativeSidecars.length} native sidecars and 7-Zip into Exordium/native.`);
 } catch (error) {
   console.error(`Could not copy native sidecars: ${error instanceof Error ? error.message : String(error)}`);
   Deno.exit(1);

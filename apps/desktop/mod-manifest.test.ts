@@ -54,9 +54,6 @@ endoffile=4711
     startAct: null,
   });
   assertEquals(manifest.loads, {
-    d2se: false,
-    d2seDll: null,
-    d2seUtility: false,
     nefex: false,
     d2mod: true,
     d2extra: false,

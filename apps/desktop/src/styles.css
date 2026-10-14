@@ -730,18 +730,71 @@ button:disabled {
   border-right: 1px solid var(--line);
 }
 
-.app.compact-sidebar .sidebar {
-  width: 248px;
+/* Folded to an icon rail: each title's icon, its name on hover; sections become thin rules. */
+.sidebar.rail {
+  width: 64px;
 }
 
-.app.compact-sidebar .title-row {
-  min-height: 34px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+.sidebar.rail .sidebar-head {
+  padding: 12px 10px 4px;
+  align-items: center;
 }
 
-.app.compact-sidebar .sidebar-head {
-  padding: 12px 12px 8px;
+.sidebar.rail .row {
+  justify-content: center;
+  height: 44px;
+  padding: 0;
+}
+
+.sidebar.rail .row .icon {
+  width: 32px;
+  height: 32px;
+}
+
+.sidebar.rail .row-title,
+.sidebar.rail .row-star,
+.sidebar.rail .row-live,
+.sidebar.rail .row .dot,
+.sidebar.rail .list-section .pad {
+  display: none;
+}
+
+.sidebar.rail .row.live {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sidebar.rail .list-label {
+  height: 13px;
+  padding: 6px 14px;
+  font-size: 0;
+}
+
+.sidebar.rail .list-label::after {
+  content: "";
+  display: block;
+  width: 100%;
+  border-top: 1px solid var(--line);
+}
+
+.sidebar.rail .list-label .chevron {
+  display: none;
+}
+
+.sidebar-top {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-top .search {
+  flex: 1;
+  min-width: 0;
+}
+
+.rail-toggle {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  font-size: 16px;
 }
 
 .sidebar-head {
@@ -840,11 +893,38 @@ button:disabled {
 }
 
 .list-label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 14px 16px 6px;
+  border: 0;
+  background: transparent;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--text-mute);
+  text-align: left;
+}
+
+.list-label:hover {
+  color: var(--text-dim);
+}
+
+/* A collection's header while something dragged is over it. */
+.list-label.drop {
+  color: var(--accent-hover);
+  background: var(--accent-wash);
+}
+
+.chevron {
+  display: inline-block;
+  width: 10px;
+  transition: transform 0.12s;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
 }
 
 .row {
@@ -1714,25 +1794,6 @@ fieldset legend {
   border-right: 1px solid var(--line);
 }
 
-.import-local {
-  width: 100%;
-  min-height: 36px;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--raised);
-  color: var(--text-strong);
-  font-weight: 700;
-}
-
-.import-local span {
-  font-size: 18px;
-}
-
 .filters-title {
   margin: 0 0 8px;
   font-family: var(--display);
@@ -1957,6 +2018,11 @@ fieldset legend {
 
 .mod-cover {
   position: relative;
+  /* A button: it opens the entry's page, as its Page link does. */
+  display: block;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
   background: var(--well);
 }
 
@@ -2513,8 +2579,274 @@ fieldset legend {
   position: relative;
 }
 
-.menu-arrow {
+.menu-arrow,
+.menu-check {
   color: var(--text-mute);
+}
+
+.menu-check {
+  color: var(--accent);
+}
+
+.name-input {
+  width: 100%;
+  height: 38px;
+  margin: 4px 0 14px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--ground);
+}
+
+/* ---- Library home: Latest uploads ---- */
+
+.uploads {
+  margin-bottom: 28px;
+}
+
+.uploads-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.uploads-head h2 {
+  margin: 0;
+}
+
+.uploads-arrow {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.uploads-arrow:hover {
+  color: var(--text-strong);
+  background: var(--raised);
+}
+
+.uploads-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+
+.uploads-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.upload {
+  /* Every card the same size: a long title is cut, it never widens its card. */
+  flex: 0 0 220px;
+  width: 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  scroll-snap-align: start;
+}
+
+.upload-when {
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+.upload-art {
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--well);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+/* The same lift and outline as a library capsule. */
+.upload:hover .upload-art,
+.upload:focus-visible .upload-art {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.5), 0 0 0 2px var(--line-strong);
+}
+
+.upload:focus-visible .upload-art {
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.5), 0 0 0 2px var(--accent);
+}
+
+.upload:focus-visible {
+  outline: none;
+}
+
+.upload-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* An update for a title with no banner: its name on the well. */
+.upload-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 10px;
+  font-family: var(--display);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.upload.update .upload-when {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* View only: which section the sidebar is showing alone. */
+.solo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--accent-wash);
+  font-size: 12px;
+  color: var(--accent-hover);
+}
+
+.sidebar.rail .solo-bar {
+  display: none;
+}
+
+/* ---- Help ---- */
+
+.help-page {
+  max-width: 760px;
+}
+
+.help-page p,
+.help-page li {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-page h2.eyebrow {
+  margin: 22px 0 6px;
+}
+
+.help-page ul,
+.help-page ol {
+  padding-left: 20px;
+}
+
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.about-head img {
+  width: 84px;
+  height: 84px;
+}
+
+.about-head h1 {
+  margin: 0;
+  font-family: var(--display);
+  color: var(--text-strong);
+}
+
+.about-head p {
+  margin: 2px 0;
+}
+
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.about-links + .about-links {
+  border-top: 1px solid var(--line);
+}
+
+.about-links > span {
+  min-width: 110px;
+  color: var(--text-strong);
+}
+
+.upload-title {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-source {
+  display: block;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Library: Import ---- */
+
+.import-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.import-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0 14px;
+}
+
+.import-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--ground);
+  color: var(--text);
+  text-align: left;
+}
+
+.import-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.import-choice strong {
+  color: var(--text-strong);
+}
+
+.import-choice span {
+  font-size: 12px;
+  color: var(--text-dim);
 }
 
 .submenu {
@@ -3343,25 +3675,6 @@ fieldset legend {
 .settings-row > input[type="number"] {
   margin-top: 2px;
   flex-shrink: 0;
-}
-
-/* Compact sidebar: smaller rows, so more titles fit. */
-.compact-sidebar .list .row {
-  padding: 4px 8px;
-  gap: 8px;
-}
-
-.compact-sidebar .list .row .icon {
-  width: 22px;
-  height: 22px;
-}
-
-.compact-sidebar .list .row-title {
-  font-size: 12px;
-}
-
-.compact-sidebar .list-label {
-  margin-top: 8px;
 }
 
 /* Realms section in mod properties. */

@@ -15,8 +15,6 @@ const PRE_114_PLUGINS: Partial<Record<PluginLoad["kind"], string>> = {
   d2mod: "D2Mod",
   nefex: "Nefex",
   d2extra: "D2Extra",
-  d2seUtility: "D2SE Utility",
-  d2seMod: "A D2SE mod DLL",
 };
 
 export interface BuildLoaderPlanOptions {
@@ -84,10 +82,16 @@ export function buildLoaderPlan(
   const settings = launchSettings(setup);
   const plugins: PluginLoad[] = [];
   if (settings.plugY) {
-    // D2SE's order: a PlugY.dll the mod or core carries (the layers already put the mod's first), else
-    // the install's PlugY folder.
+    // The mod's own PlugY: Exordium ships none and takes none from the install. At the mod's root, or
+    // in its PlugY folder (D2SE's layout); without either, PlugY on is reported below as a problem.
     const path = !has("PlugY.dll") && has("PlugY/PlugY.dll") ? "PlugY/PlugY.dll" : "PlugY.dll";
-    plugins.push({ kind: "plugy", path, required: true, init: "_Init@4", release: "_Release@0" });
+    if (has(path)) plugins.push({ kind: "plugy", path, required: true, init: "_Init@4", release: "_Release@0" });
+    else {
+      problems.push({
+        level: "error",
+        message: "PlugY is turned on, but the mod does not ship PlugY.dll. Mods bring their own PlugY.",
+      });
+    }
   }
   if (setup.loads.d2mod) {
     plugins.push({ kind: "d2mod", path: "D2Mod.dll", required: true, init: 10000, release: 10001 });
@@ -98,12 +102,6 @@ export function buildLoaderPlan(
   }
   for (const dll of setup.loads.dlls) {
     plugins.push({ kind: "custom", path: dll, required: true, init: null, release: null });
-  }
-  if (setup.loads.d2seUtility) {
-    plugins.push({ kind: "d2seUtility", path: "D2SE_Utility.dll", required: true, init: 10000, release: 10001 });
-  }
-  if (setup.loads.d2se && setup.loads.d2seDll) {
-    plugins.push({ kind: "d2seMod", path: setup.loads.d2seDll, required: true, init: 2, release: "ModRelease" });
   }
 
   if (singleExe) {

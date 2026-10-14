@@ -4,7 +4,8 @@
  *
  *   <Exordium>/library/
  *     exordium-library.json      the marker; the D2SE reader reads a folder with it (findD2SE)
- *     game/                      the install's game layer: its MPQs, D2.LNG, video DLLs, wrappers
+ *     game/                      the install's game layer: its MPQs, D2.LNG, video DLLs and graphics
+ *                                wrappers (PlugY comes with each mod that uses it)
  *     cores/<version>/           cores, copied from the install's D2SE or installed from the Cores tab
  *     mods/<folder>/             mods, imported from the install (with their exordium.mod.json) or
  *                                installed from Browse
@@ -14,14 +15,7 @@
  * copied, never linked, so the two are fully independent.
  */
 
-import {
-  GAME_ARCHIVES,
-  INSTALL_FILES,
-  LIBRARY_FOLDERS,
-  LIBRARY_MARKER,
-  PLUGY_FOLDER,
-  RENDERER_WRAPPERS,
-} from "@exordium/d2se";
+import { GAME_ARCHIVES, INSTALL_FILES, LIBRARY_FOLDERS, LIBRARY_MARKER, RENDERER_WRAPPERS } from "@exordium/d2se";
 
 /** Without these the game cannot start at all: Diablo II's data and Lord of Destruction's. */
 const REQUIRED = ["d2data.mpq", "d2exp.mpq"];
@@ -96,8 +90,6 @@ export async function checkInstall(install: string): Promise<InstallCheck> {
     const actual = files.get(name);
     if (actual) gameFiles.push({ name: actual, size: await sizeOf(`${root}/${actual}`) });
   }
-  const plugy = (await namesIn(root, true)).find((name) => name.toLowerCase() === PLUGY_FOLDER.toLowerCase());
-  if (plugy) gameFiles.push({ name: plugy, size: await sizeOf(`${root}/${plugy}`) });
   const missing = GAME_ARCHIVES.filter((name) => !files.has(name));
   const lacking = REQUIRED.filter((name) => !files.has(name));
   const d2se = files.has("d2se.exe");

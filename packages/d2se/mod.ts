@@ -38,7 +38,6 @@ export {
   LIBRARY_MARKER,
   type ModImport,
   modProblems,
-  PLUGY_FOLDER,
   type Problem,
   type ProblemLevel,
   readD2SE,

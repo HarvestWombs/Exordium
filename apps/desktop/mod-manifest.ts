@@ -40,9 +40,6 @@ export function exordiumManifestFromD2SE(setup: ModSetup): Record<string, unknow
       startAct: launch.startAct,
     },
     loads: {
-      d2se: setup.loads.d2se,
-      d2seDll: setup.loads.d2seDll,
-      d2seUtility: setup.loads.d2seUtility,
       nefex: setup.loads.nefex,
       d2mod: setup.loads.d2mod,
       d2extra: setup.loads.d2extra,

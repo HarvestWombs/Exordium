@@ -164,14 +164,7 @@
           "description": "Other plugin DLLs to load, in order. D2SE imports map from ModDll1, ModDll2, …, but Exordium does not cap the list at three."
         },
         "nefex": { "type": ["boolean", "null"], "default": false },
-        "d2extra": { "type": ["boolean", "null"], "default": false },
-        "d2seUtility": { "type": ["boolean", "null"], "default": false },
-        "d2se": {
-          "type": ["boolean", "null"],
-          "default": false,
-          "description": "Load a D2SE mod system DLL, named by d2seDll."
-        },
-        "d2seDll": { "type": ["string", "null"] }
+        "d2extra": { "type": ["boolean", "null"], "default": false }
       },
       "additionalProperties": false
     },

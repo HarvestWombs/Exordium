@@ -1,10 +1,11 @@
 /**
  * Unpacking a downloaded mod into the install's `MODS` folder.
  *
- * Archives are extracted with 7-Zip when it is installed, which reads everything, and otherwise with
- * Windows' own `tar.exe` (bsdtar/libarchive, in System32 since Windows 10 1803). Windows builds that
- * tar without LZMA ("LZMA codec is unsupported"), and nearly every real `.7z` is LZMA/LZMA2, so a 7z
- * needs 7-Zip; zip and rar do not. Both run without a console window (native.ts). A mod is a folder
+ * Archives are extracted with 7-Zip, which reads everything: the copy Exordium ships
+ * (`native/7zip`, 7z.exe and 7z.dll; decided 2026-10-14 so every machine unpacks the same way), else
+ * an installed 7-Zip, else Windows' own `tar.exe` (bsdtar/libarchive, in System32 since Windows 10
+ * 1803). Windows builds that tar without LZMA ("LZMA codec is unsupported"), and nearly every real
+ * `.7z` is LZMA/LZMA2, so only the last resort cannot read a 7z. Both run without a console window (native.ts). A mod is a folder
  * holding `D2SE_SETUP.ini` or `exordium.mod.json`, however deep the archive put it. An archive that
  * only holds another archive is unpacked once more. Installing never overwrites: a mod folder that
  * already exists in `MODS` is reported and left alone.
@@ -29,9 +30,20 @@ function tarPath(): string {
   return `${Deno.env.get("SystemRoot") ?? "C:\\Windows"}\\System32\\tar.exe`;
 }
 
-/** 7-Zip's console program, from its own registry key or the usual folders; null when not installed. */
+/**
+ * 7-Zip's console program: Exordium's own copy first (beside the packaged exe in `native/7zip`, or
+ * the repository's `native/7zip` in development), then an installed 7-Zip from its registry key or
+ * the usual folders; null when there is none.
+ */
 export async function sevenZipPath(): Promise<string | null> {
   const candidates: string[] = [];
+  const exe = Deno.execPath().replaceAll("\\", "/");
+  const packaged = !/(^|\/)deno(\.exe)?$/i.test(exe);
+  candidates.push(
+    packaged
+      ? `${exe.replace(/\/[^/]*$/, "")}/native/7zip/7z.exe`
+      : decodeURIComponent(new URL("../../native/7zip/7z.exe", import.meta.url).pathname).replace(/^\/([a-z]:)/i, "$1"),
+  );
   try {
     for (const key of ["HKLM\\SOFTWARE\\7-Zip", "HKCU\\Software\\7-Zip"]) {
       for (const entry of (await machineSnapshot([key])).entries) {

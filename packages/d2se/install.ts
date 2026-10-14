@@ -34,6 +34,9 @@ export const RENDERER_WRAPPERS = [
  * Other install files the game opens by name from its own folder. `D2.LNG` is a resource-only DLL of
  * language strings: D2Client loads it with `LoadLibraryExA("D2.LNG", NULL, LOAD_LIBRARY_AS_DATAFILE)`
  * when a game starts (1.10f D2Client+0x1260), and without it stops with "Unable to start LNG manager".
+ * The video and image DLLs (`SmackW32.dll`, `binkw32.dll`, `ijl11.dll`) come too: D2Win imports
+ * them, and cores taken from D2SE do not carry them (D2SE leaves them in the install's root), so
+ * without these D2Win fails to load. A core that ships its own (every catalog core does) wins.
  */
 export const INSTALL_FILES = ["d2.lng", "ijl11.dll", "binkw32.dll", "smackw32.dll"] as const;
 
@@ -60,9 +63,6 @@ export const LIBRARY_FOLDERS: LayoutFolders = { game: "game", cores: "cores", mo
 export function layoutPath(root: string, folder: string, name?: string): string {
   return [root.replace(/[\\/]+$/, ""), folder, name].filter((part) => part).join("/");
 }
-
-/** The install's PlugY folder, which D2SE falls back to for PlugY.dll; see `readD2SE`. */
-export const PLUGY_FOLDER = "PlugY";
 
 /** The archives a Diablo II install ships, shared by every version: the `game` layer. */
 export const GAME_ARCHIVES = [
@@ -169,10 +169,10 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
     layout.folders.game ? files.map((f) => ({ ...f, source: `${layout.folders.game}/${f.source}` })) : files;
   const archives = fromRoot(await scanNamed(gameDir, GAME_ARCHIVES, options));
   const present = new Set(archives.map((f) => f.path.toLowerCase()));
-  // D2SE's "PlugY folder for a proper installed PlugY.dll": the PlugY a core without its own copy
-  // loads, and the folder PlugY reads its images from. It belongs with the install, so to the game layer.
+  // No PlugY from the install (D2SE's "PlugY folder" fallback): a mod that wants PlugY ships it, and
+  // Exordium loads the mod's copy (2026-10-14).
   const wrappers = fromRoot(await scanNamed(gameDir, [...RENDERER_WRAPPERS, ...INSTALL_FILES], options));
-  const game = [...archives, ...wrappers, ...fromRoot(await scanTree(gameDir, PLUGY_FOLDER, options))];
+  const game = [...archives, ...wrappers];
 
   const cores: CoreImport[] = [];
   for (const version of pick(layout.cores, options.cores)) {
@@ -245,7 +245,6 @@ export function modProblems(
   setup.loads.mpqs.forEach((mpq, i) => need(mpq, `ModMPQ${i + 1}`));
   setup.loads.dlls.forEach((dll, i) => need(dll, `ModDll${i + 1}`));
   if (setup.loads.d2mod) need("D2Mod.dll", "ModUseD2Mod");
-  if (setup.loads.d2se && setup.loads.d2seDll) need(setup.loads.d2seDll, "ModUseD2SE");
 
   // `Language=MOD` means the mod's own files, with no language folder applied.
   const language = setup.player.language?.toUpperCase();
@@ -259,7 +258,7 @@ export function modProblems(
       });
     }
   }
-  for (const system of ["nefex", "d2extra", "d2seUtility"] as const) {
+  for (const system of ["nefex", "d2extra"] as const) {
     if (setup.loads[system]) {
       problems.push({ level: "warning", message: `Uses ${system}, which Exordium's loader does not load yet.` });
     }

@@ -7,8 +7,9 @@
  * the app, so the app is also what knows a game is running. A launcher-owned run (a session file)
  * would still show its own and the app would step aside.
  *
- * The application is Discord's own Diablo II entry: its name and icon are what friends see. Only the
- * entry's owner can add images, so there is no per-mod art (decided 2026-10-05).
+ * The application is HarvestLabs' own (DISCORD_CLIENT_ID): its name and icon are what friends see,
+ * and its one art asset (PRESENCE_ART) is the picture every activity shows. Per-mod art would need an
+ * asset uploaded per mod, so there is none.
  *
  * The protocol: frames of [int32 opcode][int32 length][JSON] over \\.\pipe\discord-ipc-N; opcode 0
  * handshakes, 1 carries commands. Each command is written and its reply read before the next, never
@@ -33,6 +34,14 @@ export function runActivity(title: { kind: "mod" | "core"; name: string; core: s
   return { details: title.name, state: title.core ? `Mod · ${title.core}` : "Mod" };
 }
 
+/**
+ * The second line once the character being played is known (see playingCharacter in server.ts):
+ * class and level, as the save had them last; no name, which is the player's own.
+ */
+export function characterLine(character: { className: string; level: number; hardcore: boolean }): string {
+  return `Lv ${character.level} ${character.className}${character.hardcore ? " · Hardcore" : ""}`;
+}
+
 export const IDLE_ACTIVITY: Activity = { details: "Choosing a mod", state: "in Exordium" };
 
 /** Discord's limits: 2 to 128 characters per text field. */
@@ -45,8 +54,18 @@ function clean(activity: Activity): Activity {
   return out;
 }
 
+/**
+ * The Rich Presence art key, uploaded in the developer portal's Rich Presence → Art Assets as
+ * "ExordiumMain" (2026-10-14). The portal keeps asset names in lowercase, and activities name them
+ * that way. One picture for every activity: per-mod art would need an asset per mod.
+ */
+export const PRESENCE_ART = "exordiummain";
+
 export function activityJson(activity: Activity): string {
-  const out: Record<string, unknown> = { ...clean(activity) };
+  const out: Record<string, unknown> = {
+    ...clean(activity),
+    assets: { large_image: PRESENCE_ART, large_text: "Exordium" },
+  };
   if (activity.startedAt && Number.isFinite(activity.startedAt)) {
     out.timestamps = { start: Math.floor(activity.startedAt / 1000) };
   }

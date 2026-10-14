@@ -64,9 +64,6 @@ export interface ModSetup {
 
   /** What D2SE loads into the game on the mod's behalf. */
   loads: {
-    d2se: boolean;
-    d2seDll: string | null;
-    d2seUtility: boolean;
     nefex: boolean;
     d2mod: boolean;
     d2extra: boolean;
@@ -167,9 +164,6 @@ export function readModSetup(ini: Ini): ModSetup {
       allowPlugY: iniFlag(ini, P, "ModAllowPlugY", false),
     },
     loads: {
-      d2se: iniFlag(ini, P, "ModUseD2SE", false),
-      d2seDll: iniText(ini, P, "D2SEDllName"),
-      d2seUtility: iniFlag(ini, P, "ModUseD2SEUtility", false),
       nefex: iniFlag(ini, P, "ModUseNefex", false),
       d2mod: iniFlag(ini, P, "ModUseD2Mod", false),
       d2extra: iniFlag(ini, P, "ModUseD2Extra", false),

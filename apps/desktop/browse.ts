@@ -410,15 +410,20 @@ export async function modDbList(cacheDir: string, refresh = false): Promise<{ it
 
 /**
  * A ModDB image at one of the sizes its cache serves for every picture: `crop_120x90` (what listings
- * show) for strips, `thumb_620x2000` (what entry pages show) for a full view. The same picture is at
- * `media.moddb.com/cache/images/<path>/<size>/<name>` (originals drop `cache/` and the size). Other
- * sizes exist only where ModDB's own pages used them (measured 2026-10-10).
+ * show) for strips, `thumb_620x2000` (what entry pages show) for cards, or `original`, the upload as
+ * posted, for screenshots seen large (an 800x600 shot is 620x465 as a thumb). The same picture is at
+ * `media.moddb.com/cache/images/<path>/<size>/<name>`; the original drops `cache/` and the size
+ * (`media.moddb.com/images/<path>/<name>`). Other sizes exist only where ModDB's own pages used them
+ * (measured 2026-10-10; originals 2026-10-14).
  */
-export function modDbImage(url: string, size: "crop_120x90" | "thumb_620x2000"): string {
+export function modDbImage(url: string, size: "crop_120x90" | "thumb_620x2000" | "original"): string {
   const match =
     /^https:\/\/media\.moddb\.com\/(?:cache\/)?images\/([a-z]+\/\d+\/\d+\/\d+)\/(?:(?:crop|thumb|resize)_\d+x\d+\/)?([^/?#]+)$/i
       .exec(url.trim());
-  return match ? `https://media.moddb.com/cache/images/${match[1]}/${size}/${match[2]}` : url;
+  if (!match) return url;
+  return size === "original"
+    ? `https://media.moddb.com/images/${match[1]}/${match[2]}`
+    : `https://media.moddb.com/cache/images/${match[1]}/${size}/${match[2]}`;
 }
 
 export interface ModDbFile {
@@ -497,7 +502,7 @@ export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
   const shots: ModDbDetails["screenshots"] = [];
   const seen = new Set<string>();
   const addShot = (url: string) => {
-    const full = modDbImage(url, "thumb_620x2000");
+    const full = modDbImage(url, "original");
     if (seen.has(full) || !full.startsWith("https://media.moddb.com/")) return;
     seen.add(full);
     shots.push({ full, thumb: modDbImage(url, "crop_120x90") });
@@ -506,7 +511,7 @@ export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
   // A file's or addon's own picture; a mod's og:image is its logo, kept last.
   const og = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)?.[1];
   if (og && /\/images\/downloads\//i.test(og)) {
-    shots.unshift({ full: modDbImage(og, "thumb_620x2000"), thumb: modDbImage(og, "crop_120x90") });
+    shots.unshift({ full: modDbImage(og, "original"), thumb: modDbImage(og, "crop_120x90") });
   } else if (og && shots.length === 0) addShot(og);
 
   // The side profile is the entry's mod's, or the game's for a game-level addon: its files and
@@ -575,7 +580,11 @@ export async function modDbDetails(cacheDir: string, page: string, refresh = fal
   if (!refresh) {
     try {
       const cached = JSON.parse(await Deno.readTextFile(file)) as { at: string; details: ModDbDetails };
-      if (Date.now() - Date.parse(cached.at) < MODDB_DETAILS_TTL_MS) return cached.details;
+      if (Date.now() - Date.parse(cached.at) < MODDB_DETAILS_TTL_MS) {
+        // Cached before the originals were used: the same shots, full size.
+        for (const shot of cached.details.screenshots) shot.full = modDbImage(shot.full, "original");
+        return cached.details;
+      }
     } catch {
       // Missing or unreadable: fetch.
     }

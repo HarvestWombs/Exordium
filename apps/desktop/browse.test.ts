@@ -181,6 +181,10 @@ Deno.test("ModDB pictures are asked for at sizes its cache always has", () => {
     modDbImage("https://media.moddb.com/images/downloads/1/252/251341/Andariel.jpg", "crop_120x90"),
     "https://media.moddb.com/cache/images/downloads/1/252/251341/crop_120x90/Andariel.jpg",
   );
+  assertEquals(
+    modDbImage(crop, "original"),
+    "https://media.moddb.com/images/mods/1/43/42940/005_-_Start.jpg",
+  );
   assertEquals(modDbImage("https://example.com/a.jpg", "crop_120x90"), "https://example.com/a.jpg");
 });
 
@@ -216,7 +220,7 @@ Deno.test("a ModDB file page gives its facts, description, picture and its mod's
   assertEquals(details.description, "# Diablo II by Dreamaker\nQuality of Life");
   assertEquals(details.parentMod, "https://www.moddb.com/mods/dreamaker-mod");
   assertEquals(details.screenshots, [{
-    full: "https://media.moddb.com/cache/images/downloads/1/252/251341/thumb_620x2000/Andariel.jpg",
+    full: "https://media.moddb.com/images/downloads/1/252/251341/Andariel.jpg",
     thumb: "https://media.moddb.com/cache/images/downloads/1/252/251341/crop_120x90/Andariel.jpg",
   }]);
   // The game's own downloads in the sidebar are not this mod's files.

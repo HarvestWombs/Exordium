@@ -125,9 +125,8 @@ D2SEDllName=ModSystem.dll
     ["plugy", "PlugY.dll", "_Init@4", "_Release@0"],
     ["d2mod", "D2Mod.dll", 10000, 10001],
     ["custom", "Extra.dll", null, null],
-    ["d2seUtility", "D2SE_Utility.dll", 10000, 10001],
-    ["d2seMod", "ModSystem.dll", 2, "ModRelease"],
   ]);
+  // D2SE's own plugin systems (ModUseD2SEUtility, ModUseD2SE) are not loaded, even when the mod ships them.
   assertEquals(load.problems, []);
 });
 
@@ -234,14 +233,18 @@ Deno.test("optional game command switches are appended after the core launch fla
   assertEquals(command, "-w -ns -direct -skiptobnet -act5 -seed 123456");
 });
 
-Deno.test("PlugY comes from the mod or core first, else from the install's PlugY folder, as D2SE does", () => {
+Deno.test("PlugY is the mod's own: at its root, else in its PlugY folder; none shipped is a problem", () => {
   const text = "[USERSETTINGS]\nEnablePlugY=1\n[Protected]\nD2Core=1.10f\nModAllowPlugY=1\n";
-  const plugy = (paths: string[]) =>
-    buildLoaderPlan(resolve({ files: [layer("game", "game", paths)], registry: [] }), setup(text)).plugins
-      .find((p) => p.kind === "plugy")?.path;
+  const load = (paths: string[]) =>
+    buildLoaderPlan(resolve({ files: [layer("mod", "mod", paths)], registry: [] }), setup(text));
+  const plugy = (paths: string[]) => load(paths).plugins.find((p) => p.kind === "plugy")?.path;
   assertEquals(plugy(["PlugY/PlugY.dll", "PlugY/EmptyPage.dc6"]), "PlugY/PlugY.dll");
   assertEquals(plugy(["PlugY.dll", "PlugY/PlugY.dll"]), "PlugY.dll");
-  assertEquals(plugy([]), "PlugY.dll"); // and the missing file is reported as a problem
+  assertEquals(plugy([]), undefined);
+  assertEquals(
+    load([]).problems.some((p) => p.message.startsWith("PlugY is turned on, but the mod does not ship PlugY.dll.")),
+    true,
+  );
 });
 
 Deno.test("a 1.14 core runs Blizzard's Game.exe: no DLL handoff, and no plugins built for the old DLLs", () => {

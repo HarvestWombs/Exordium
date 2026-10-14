@@ -19,7 +19,7 @@ export interface ArchiveLoad {
   required: boolean;
 }
 
-export type PluginKind = "plugy" | "d2mod" | "d2extra" | "nefex" | "d2seUtility" | "d2seMod" | "custom";
+export type PluginKind = "plugy" | "d2mod" | "d2extra" | "nefex" | "custom";
 
 export interface PluginLoad {
   kind: PluginKind;

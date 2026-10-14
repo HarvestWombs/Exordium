@@ -24,9 +24,6 @@ Deno.test("The Black Soul's real D2SE_SETUP.ini reads as the mod it describes", 
   });
   // What D2SE loads on the mod's behalf — the part plain Game.exe would miss.
   assertEquals(setup.loads, {
-    d2se: false,
-    d2seDll: null,
-    d2seUtility: false,
     nefex: false,
     d2mod: true,
     d2extra: false,

@@ -71,6 +71,7 @@ import {
 import {
   type Activity,
   activityJson,
+  characterLine,
   DISCORD_CLIENT_ID,
   DiscordPresence,
   IDLE_ACTIVITY,
@@ -87,6 +88,7 @@ import {
   copyJob,
   copyJobs,
   createLibrary,
+  folderSize,
   installModFolders,
   isLibrary,
   libraryFolder,
@@ -151,6 +153,7 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/import-d2se-metadata") return await importD2SEMetadata(request);
   if (url.pathname === "/api/d2se-converter/preview") return await d2seConverterPreview(request);
   if (url.pathname === "/api/d2se-converter/write") return await d2seConverterWrite(request);
+  if (url.pathname === "/api/d2se-converter/size") return await d2seConverterSize(request);
   if (url.pathname === "/api/build-box") return await buildBox(request);
   if (url.pathname === "/api/play") return await play(request);
   if (url.pathname === "/api/status") return Response.json(await status());
@@ -193,6 +196,7 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/restart-admin") return await restartAdmin(request);
   if (url.pathname === "/api/install-local-archive") return await installLocalArchive(request);
   if (url.pathname.startsWith("/api/library/")) return await libraryRoute(request, url);
+  if (url.pathname === "/api/collections") return await collectionsRoute(request);
   if (url.pathname.startsWith("/api/docs/")) return await serveDoc(url);
   if (url.pathname === "/api/browse" || url.pathname.startsWith("/api/browse/")) {
     return await browseRoute(request, url);
@@ -399,9 +403,6 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
     d2mod: boolValue(loads.d2mod, false),
     nefex: boolValue(loads.nefex, false),
     d2extra: boolValue(loads.d2extra, false),
-    d2seUtility: boolValue(loads.d2seUtility, false),
-    d2se: boolValue(loads.d2se, false),
-    d2seDll: textValue(loads.d2seDll),
     mpqs: textList(loads.mpqs ?? manifest.mpqs, "mpqs", problems),
     dlls: textList(loads.dlls ?? manifest.dlls, "dlls", problems),
     realm: realmValue(manifest.realm, problems),
@@ -438,9 +439,6 @@ function nativeSetup(input: {
   d2mod?: boolean;
   nefex?: boolean;
   d2extra?: boolean;
-  d2seUtility?: boolean;
-  d2se?: boolean;
-  d2seDll?: string | null;
   mpqs?: string[];
   dlls?: string[];
   realm?: ModSetup["realm"];
@@ -483,9 +481,6 @@ function nativeSetup(input: {
       allowPlugY: true,
     },
     loads: {
-      d2se: input.d2se ?? false,
-      d2seDll: input.d2seDll ?? null,
-      d2seUtility: input.d2seUtility ?? false,
       nefex: input.nefex ?? false,
       d2mod: input.d2mod ?? false,
       d2extra: input.d2extra ?? false,
@@ -772,16 +767,23 @@ async function importD2SEMetadataForFolders(root: string, wanted?: string[]) {
 
 async function d2seConverterPreview(request: Request): Promise<Response> {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  const body = await request.json().catch(() => null) as { root?: unknown; folder?: unknown } | null;
+  const body = await request.json().catch(() => null) as
+    | { root?: unknown; folder?: unknown; path?: unknown }
+    | null;
   const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
-  const source = await installMod(folder);
+  const path = typeof body?.path === "string" ? body.path.trim() : "";
+  const source = path ? await folderMod(path) : await installMod(folder);
   if (source instanceof Response) return source;
-  // The mod's own exordium.mod.json when it has one; a draft from its D2SE_SETUP.ini otherwise.
+  // The mod's own exordium.mod.json when it has one; a draft from its D2SE_SETUP.ini otherwise; for a
+  // plain folder (an old mod already unpacked), a draft from what is in it, to review and complete.
   const own = await Deno.readTextFile(`${source.dir}/${EXORDIUM_MOD_FILE}`).then((t) => JSON.parse(t)).catch(() =>
     null
   );
-  const manifest = isRecord(own) ? own : source.setup ? exordiumManifestFromD2SE(source.setup) : null;
-  if (!manifest) return Response.json({ error: "That mod has no D2SE_SETUP.ini to convert." }, { status: 404 });
+  const manifest = isRecord(own)
+    ? own
+    : source.setup
+    ? exordiumManifestFromD2SE(source.setup)
+    : await folderManifestDraft(source.dir, source.folder);
   return Response.json({
     folder: source.folder,
     from: winPath(source.dir),
@@ -795,13 +797,14 @@ async function d2seConverterPreview(request: Request): Promise<Response> {
 async function d2seConverterWrite(request: Request): Promise<Response> {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await request.json().catch(() => null) as
-    | { root?: unknown; folder?: unknown; text?: unknown; overwrite?: unknown; move?: unknown }
+    | { root?: unknown; folder?: unknown; path?: unknown; text?: unknown; overwrite?: unknown; move?: unknown }
     | null;
   const root = typeof body?.root === "string" ? body.root.trim() : "";
   const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
+  const path = typeof body?.path === "string" ? body.path.trim() : "";
   const text = typeof body?.text === "string" ? body.text : "";
   const move = body?.move === true;
-  if (!root || !folder || !text.trim()) {
+  if (!root || (!folder && !path) || !text.trim()) {
     return Response.json({ error: "Missing root, folder, or JSON." }, {
       status: 400,
     });
@@ -813,7 +816,7 @@ async function d2seConverterWrite(request: Request): Promise<Response> {
     return Response.json({ error: `Invalid JSON: ${(error as Error).message}` }, { status: 400 });
   }
   if (!isRecord(parsed)) return Response.json({ error: "The manifest must be a JSON object." }, { status: 400 });
-  const source = await installMod(folder);
+  const source = path ? await folderMod(path) : await installMod(folder);
   if (source instanceof Response) return source;
   const dest = `${libraryRoot}/${LIBRARY_FOLDERS.mods}/${source.folder}`;
   if (await Deno.stat(dest).then(() => true, () => false)) {
@@ -828,7 +831,21 @@ async function d2seConverterWrite(request: Request): Promise<Response> {
   return Response.json({ ok: true, folder: source.folder, job, path: winPath(`${dest}/${EXORDIUM_MOD_FILE}`) });
 }
 
-/** A mod folder of the player's install, for the import: its path, its D2SE setup and its size. */
+/**
+ * POST `{ folder | path }`: the size of the mod folder the converter is about to import. Asked for on
+ * its own, after the preview, since walking a multi-GB mod takes a while.
+ */
+async function d2seConverterSize(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as { folder?: unknown; path?: unknown } | null;
+  const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
+  const path = typeof body?.path === "string" ? body.path.trim() : "";
+  const source = path ? await folderMod(path) : await installMod(folder);
+  if (source instanceof Response) return source;
+  return Response.json({ size: await folderSize(source.dir) });
+}
+
+/** A mod folder of the player's install, for the import: its path, its D2SE setup. */
 async function installMod(folder: string) {
   const state = await readState();
   if (!state.install) return Response.json({ error: "No Diablo II install is linked." }, { status: 409 });
@@ -842,6 +859,58 @@ async function installMod(folder: string) {
   // No folder size here: walking a multi-GB mod on every preview was the converter's lag. The
   // import's copy job still reports bytes as it runs.
   return { folder: name, dir, setup: text === null ? null : readModSetup(parseIni(text)) };
+}
+
+/**
+ * A mod folder anywhere on disk (Library → Import folder): an old mod already unpacked, say. Never
+ * the library itself, which would copy a folder into itself.
+ */
+async function folderMod(path: string) {
+  const dir = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!(await Deno.stat(dir).catch(() => null))?.isDirectory) {
+    return Response.json({ error: `${winPath(dir)} is not a folder.` }, { status: 404 });
+  }
+  const library = libraryRoot.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const lower = dir.toLowerCase();
+  if (lower === library || lower.startsWith(`${library}/`)) {
+    return Response.json({ error: "That folder is already inside Exordium's library." }, { status: 400 });
+  }
+  const name = dir.split("/").pop() ?? "";
+  if (!name || /^[a-z]:$/i.test(name)) {
+    return Response.json({ error: "Choose a mod's folder, not a drive." }, { status: 400 });
+  }
+  const text = await Deno.readTextFile(`${dir}/D2SE_SETUP.ini`).catch(() => null);
+  return { folder: name, dir, setup: text === null ? null : readModSetup(parseIni(text)) };
+}
+
+/**
+ * A first exordium.mod.json for a folder with neither its own nor a D2SE_SETUP.ini: the folder's name
+ * as the title, and the MPQs and DLLs at its top level as what it loads (D2Mod.dll and PlugY.dll by
+ * what they are). The core is left blank for the player to choose; the converter shows the draft to
+ * review before anything is copied.
+ */
+async function folderManifestDraft(dir: string, name: string): Promise<Record<string, unknown>> {
+  const files = await Array.fromAsync(Deno.readDir(dir)).catch(() => [] as Deno.DirEntry[]);
+  const top = files.filter((entry) => entry.isFile).map((entry) => entry.name).sort((a, b) => a.localeCompare(b));
+  const mpqs = top.filter((file) => /\.mpq$/i.test(file));
+  const dlls = top.filter((file) => /\.dll$/i.test(file));
+  const d2mod = dlls.some((file) => file.toLowerCase() === "d2mod.dll");
+  const plugY = dlls.some((file) => file.toLowerCase() === "plugy.dll");
+  const known = new Set(["d2mod.dll", "plugy.dll"]);
+  const draft = exordiumManifestFromD2SE(readModSetup(parseIni("")));
+  return {
+    ...draft,
+    title: name,
+    name,
+    core: "",
+    launch: { ...(isRecord(draft.launch) ? draft.launch : {}), plugY },
+    loads: {
+      ...(isRecord(draft.loads) ? draft.loads : {}),
+      d2mod,
+      mpqs,
+      dlls: dlls.filter((file) => !known.has(file.toLowerCase())),
+    },
+  };
 }
 
 /** The install's mods not yet in the library: what the converter offers to import. */
@@ -1090,6 +1159,12 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     throw new HttpError(422, loader.problems.map((problem) => problem.message).join("\n"));
   }
   const id = boxIdFor(imported.layout.root, target);
+  // Before 1.14 the box's Game.exe is exordium-game.exe, stamped in after the box is built
+  // (installLoaderAsGame), so the core's own Game.exe is left out of the box. Linked in and then
+  // replaced, it made every box look changed, and a second copy was refused while the first ran.
+  const boxPlan = loader.singleExe || loader.nativeGameExe
+    ? plan
+    : { ...plan, files: plan.files.filter((file) => file.path.toLowerCase() !== GAME_EXE.toLowerCase()) };
   return {
     imported,
     state,
@@ -1103,7 +1178,7 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     boxes: await Boxes.open(exordiumRoot),
     spec: {
       id,
-      plan,
+      plan: boxPlan,
       saves,
       folders: mod?.scan.data
         ? [{
@@ -1263,6 +1338,8 @@ interface AppState {
   favorites: string[];
   /** Title keys hidden from the list; their files are untouched. */
   hidden: string[];
+  /** The player's own sidebar groups, in sidebar order; each lists its title keys in order. */
+  collections?: Collection[];
   /** Character backups (backups.ts); each field falls back to its default. */
   backups?: { auto?: boolean; folder?: string | null; keep?: number };
   /** Discord Rich Presence and account linking (discord.ts); on unless turned off. */
@@ -1275,11 +1352,18 @@ interface AppState {
   app?: Partial<AppSettings>;
 }
 
+interface Collection {
+  id: string;
+  name: string;
+  keys: string[];
+}
+
 interface AppSettings {
   library: {
     autoScanOnStartup: boolean;
     hideUnsupported: boolean;
-    defaultView: "list" | "grid";
+    /** The Latest uploads row on the library home (it reads the browse sources). */
+    showLatestUploads: boolean;
     extraFolders: string[];
   };
   launch: {
@@ -1314,7 +1398,6 @@ interface AppSettings {
   };
   appearance: {
     theme: "dark" | "light" | "system";
-    compactSidebar: boolean;
     reduceMotion: boolean;
   };
 }
@@ -1350,7 +1433,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   library: {
     autoScanOnStartup: true,
     hideUnsupported: false,
-    defaultView: "grid",
+    showLatestUploads: true,
     extraFolders: [],
   },
   launch: {
@@ -1381,7 +1464,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "dark",
-    compactSidebar: false,
     reduceMotion: false,
   },
 };
@@ -1537,10 +1619,50 @@ async function updatePresence(): Promise<void> {
     if (!newest) want = showIdle ? IDLE_ACTIVITY : null;
     else if (newest.presence && showGames) {
       want = { ...JSON.parse(newest.presence) as Activity, startedAt: Date.parse(newest.startedAt) };
+      const character = await playingCharacter(newest, state);
+      if (character) want.state = characterLine(character);
     }
   }
   await discordPresence.set(want).catch(() => {});
 }
+
+/**
+ * The character a run is playing, from its title's save folder. D2 writes a character's `.key`,
+ * `.ma*`, `.map` and `.d2s` while it is in a game (seen on real saves, 2026-10-14), so the newest of
+ * those changed since the run started names it, and its `.d2s` header gives class and level. Null in
+ * the menus before the first game, and on a realm, whose characters live on the server.
+ */
+async function playingCharacter(run: Running, state: AppState): Promise<Character | null> {
+  const target = parseEntryKey(run.key);
+  if (!state.root || !target) return null;
+  const folder = `${titleFolder(state.root.replaceAll("\\", "/"), target)}/save`;
+  const since = Date.parse(run.startedAt) - 2000;
+  try {
+    let newest: { base: string; at: number } | null = null;
+    for await (const entry of Deno.readDir(folder)) {
+      const match = /^(.+)[.](d2s|key|map|ma[0-9])$/i.exec(entry.name);
+      if (!entry.isFile || !match) continue;
+      const at = (await Deno.stat(`${folder}/${entry.name}`)).mtime?.getTime() ?? 0;
+      if (at >= since && (!newest || at > newest.at)) newest = { base: match[1]!, at };
+    }
+    if (!newest) return null;
+    const file = await Deno.open(`${folder}/${newest.base}.d2s`, { read: true });
+    try {
+      const header = new Uint8Array(0x34);
+      return (await file.read(header)) === 0x34 ? readCharacter(header) : null;
+    } finally {
+      file.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+// While a run Exordium follows is going, look again for the character every 20 s: the files change
+// as the player enters a game. An unchanged activity is not sent again (DiscordPresence.set).
+setInterval(() => {
+  if (legacyRunning.some((run) => run.presence && !endedRuns.has(`${run.key}#${run.copy}`))) void updatePresence();
+}, 20_000);
 
 /**
  * GET: whether presence is on and Discord is connected.
@@ -2132,6 +2254,7 @@ async function status() {
     playedAt: state.playedAt,
     favorites: state.favorites,
     hidden: state.hidden,
+    collections: state.collections ?? [],
     // A run whose game has exited is still settling (registry, box, backup) for ~10 s; it is not shown
     // as running any more. copiesRunning still counts it, so nothing rebuilds the box meanwhile.
     running: [...sessionRunning, ...legacyRunning].filter((run) => !endedRuns.has(`${run.key}#${run.copy}`)),
@@ -2205,7 +2328,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   mergeObject(next.library, record.library, {
     autoScanOnStartup: "boolean",
     hideUnsupported: "boolean",
-    defaultView: ["list", "grid"],
+    showLatestUploads: "boolean",
     extraFolders: "string[]",
   });
   mergeObject(next.launch, record.launch, {
@@ -2237,7 +2360,6 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   });
   mergeObject(next.appearance, record.appearance, {
     theme: ["dark", "light", "system"],
-    compactSidebar: "boolean",
     reduceMotion: "boolean",
   });
   return next;
@@ -3350,6 +3472,73 @@ async function serveDoc(url: URL): Promise<Response> {
   });
 }
 
+// ---- Collections: the player's own sidebar groups ------------------------------------------------
+
+/**
+ * POST `{ action, ... }`; answers with every collection, in order.
+ *
+ * - `create` `{ name, key? }`: a new collection at the end, holding `key` when given.
+ * - `rename` `{ id, name }`, `delete` `{ id }`: a deleted collection's titles stay in the library.
+ * - `add` / `remove` `{ id, key }`: a title is in as many collections as the player puts it in.
+ * - `order` `{ ids }`: the collections in this order. `items` `{ id, keys }`: one collection's titles
+ *   in this order. Ids or keys the collection does not hold are ignored; ones left out keep their
+ *   place at the end, so a stale page cannot drop anything.
+ */
+async function collectionsRoute(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const action = typeof body?.action === "string" ? body.action : "";
+  const id = typeof body?.id === "string" ? body.id : "";
+  const key = typeof body?.key === "string" && parseEntryKey(body.key) ? body.key : "";
+  const name = typeof body?.name === "string" ? body.name.trim().slice(0, 60) : "";
+  const strings = (value: unknown) =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  const reorder = <T>(items: T[], order: string[], idOf: (item: T) => string): T[] => {
+    const byId = new Map(items.map((item) => [idOf(item), item]));
+    const first = order.flatMap((wanted) => {
+      const item = byId.get(wanted);
+      byId.delete(wanted);
+      return item === undefined ? [] : [item];
+    });
+    return [...first, ...byId.values()];
+  };
+  let problem: string | null = null;
+  const state = await writeState((state) => {
+    const collections = state.collections ??= [];
+    const target = collections.find((c) => c.id === id);
+    switch (action) {
+      case "create":
+        if (!name) problem = "A collection needs a name.";
+        else collections.push({ id: crypto.randomUUID(), name, keys: key ? [key] : [] });
+        break;
+      case "rename":
+        if (!target || !name) problem = "No such collection, or no name.";
+        else target.name = name;
+        break;
+      case "delete":
+        state.collections = collections.filter((c) => c.id !== id);
+        break;
+      case "add":
+        if (!target || !key) problem = "No such collection or title.";
+        else if (!target.keys.includes(key)) target.keys.push(key);
+        break;
+      case "remove":
+        if (target) target.keys = target.keys.filter((k) => k !== key);
+        break;
+      case "order":
+        state.collections = reorder(collections, strings(body?.ids), (c) => c.id);
+        break;
+      case "items":
+        if (target) target.keys = reorder(target.keys, strings(body?.keys), (k) => k);
+        break;
+      default:
+        problem = "Unknown collection action.";
+    }
+  });
+  if (problem) return Response.json({ error: problem }, { status: 400 });
+  return Response.json({ collections: state.collections ?? [] });
+}
+
 // ---- Library actions: favorites, hiding, desktop shortcuts, uninstalling ---------------------------
 
 function isPackaged(): boolean {
@@ -3518,6 +3707,7 @@ async function uninstall(root: string, key: string, target: BoxTarget, keepSaves
   await writeState((state) => {
     state.favorites = state.favorites.filter((k) => k !== key);
     state.hidden = state.hidden.filter((k) => k !== key);
+    for (const collection of state.collections ?? []) collection.keys = collection.keys.filter((k) => k !== key);
     if (state.lastPlayed === key) state.lastPlayed = null;
   });
   return Response.json({ ok: true, savesBackup });

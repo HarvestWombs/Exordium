@@ -84,7 +84,8 @@ Deno.test("reading an install finds its cores, mods, archives and problems", asy
     assertEquals(found.layout.mods, ["Broken", "Core Fallback", "Own Language", "Test Mod"]);
     assertEquals(found.launcher?.activeFolder, "Test Mod");
     // Only the shared archives: Game.exe at the root is 1.14's and is no layer.
-    // The archives, the root's renderer wrappers and its PlugY folder; never the root's game DLLs.
+    // The archives, D2.LNG, the video DLLs and the root's renderer wrappers. Never the root's game DLLs
+    // or its PlugY folder (a mod brings its own PlugY).
     assertEquals(found.game.map((f) => f.path), [
       "d2data.mpq",
       "D2EXP.MPQ",
@@ -93,8 +94,6 @@ Deno.test("reading an install finds its cores, mods, archives and problems", asy
       "glide3x.dll",
       "ijl11.dll",
       "SmackW32.dll",
-      "PlugY/EmptyPage.dc6",
-      "PlugY/PlugY.dll",
     ]);
     assert(found.missingGameArchives.includes("d2char.mpq"));
 
@@ -148,8 +147,6 @@ Deno.test("a hashed import stacks into a box: game, core, mod, saves", async () 
       ["glide3x.dll", "game"],
       ["ijl11.dll", "game"],
       ["Patch_D2.mpq", "core-1.10f"],
-      ["PlugY/EmptyPage.dc6", "game"],
-      ["PlugY/PlugY.dll", "game"],
       ["save/Hero.d2s", "saves"],
       ["SmackW32.dll", "game"],
       ["Test.mpq", "test-mod"],
@@ -211,11 +208,9 @@ Deno.test("Exordium's library reads with its own folders: game, cores, mods", as
     const imported = (await readD2SE(root, { hash: false }))!;
     assertEquals(imported.layout.library, true);
     assertEquals(imported.layout.folders, { game: "game", cores: "cores", mods: "mods" });
-    // In the box the game files sit at the root; they are read from the library's game folder.
-    assertEquals(
-      imported.game.map((f) => [f.path, f.source]).sort(),
-      [["PlugY/PlugY.dll", "game/PlugY/PlugY.dll"], ["d2data.mpq", "game/d2data.mpq"]],
-    );
+    // In the box the game files sit at the root; they are read from the library's game folder. A PlugY
+    // left there by an older setup is not part of it.
+    assertEquals(imported.game.map((f) => [f.path, f.source]), [["d2data.mpq", "game/d2data.mpq"]]);
     assertEquals(imported.cores.map((c) => [c.version, c.folder]), [["1.10f", "cores/1.10f"]]);
     assertEquals(imported.mods.map((m) => m.folder), ["Some Mod"]);
   } finally {
