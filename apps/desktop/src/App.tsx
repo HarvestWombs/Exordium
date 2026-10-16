@@ -3,6 +3,7 @@ import { Browse } from "./pages/browse/Browse.tsx";
 import { titleKey } from "./pages/browse/browse-util.ts";
 import { Banners } from "./components/Banners.tsx";
 import { ConfirmDialog, NameDialog } from "./components/dialogs.tsx";
+import { followCopy } from "./components/progress.tsx";
 import { TitleMenu } from "./components/menus.tsx";
 import { SectionMenu } from "./components/SectionMenu.tsx";
 import { TitleRow } from "./components/sidebar.tsx";
@@ -13,10 +14,11 @@ import { useCollections } from "./hooks/useCollections.ts";
 import { useImports } from "./hooks/useImports.ts";
 import { useSidebarLayout } from "./hooks/useSidebarLayout.ts";
 import { useTitleActions } from "./hooks/useTitleActions.ts";
+import { loadUploads } from "./lib/latest-uploads.ts";
 import { libraryView } from "./lib/library-view.ts";
 import { runningSummary } from "./lib/util.ts";
 import { D2SEConverter } from "./pages/D2SEConverter.tsx";
-import { HelpPage } from "./pages/Help.tsx";
+import { HelpPage } from "./pages/help/Help.tsx";
 import { ImportDialog } from "./pages/ImportDialog.tsx";
 import { LatestUploads, pendingUpdates } from "./pages/library/LatestUploads.tsx";
 import { LibraryGrid } from "./pages/library/LibraryGrid.tsx";
@@ -29,6 +31,7 @@ import { applyUpdate } from "./pages/Updates.tsx";
 import type {
   Collection,
   ConfirmRequest,
+  CopyJob,
   DialogPage,
   Filter,
   NameRequest,
@@ -125,6 +128,9 @@ export function App() {
   React.useEffect(() => {
     void (async () => {
       const first = await refreshStatus();
+      // Latest uploads, asked for now rather than when the home screen first draws, so they are ready.
+      const settings = first.appSettings.settings;
+      if (settings.library.showLatestUploads !== false && !settings.privacy.localOnly) void loadUploads();
       setRoot(first.root);
       if (first.lastPlayed) setSelectedKey(first.lastPlayed);
       // "Scan on startup" off: the library waits for Read library (or a change that reads it).
@@ -265,6 +271,18 @@ export function App() {
     if (root) await load(root);
     say(message);
   };
+  // Imports still copying when the converter closes: followed here, and the library read again as each
+  // one lands, as the converter would have.
+  function followImports(running: CopyJob[]) {
+    for (const job of running) {
+      void followCopy(job, () => {}).then((done) => {
+        if (done.state === "done") void onConverted(`Imported ${done.label} into Exordium's library.`);
+        else if (done.state === "failed") {
+          setError(`${done.label} was not imported: ${done.error ?? "the copy stopped"}.`);
+        }
+      });
+    }
+  }
 
   const appearance = status?.appSettings.settings.appearance;
   const resolvedTheme = appearance?.theme === "system" ? (systemLight ? "light" : "dark") : appearance?.theme ?? "dark";
@@ -310,7 +328,10 @@ export function App() {
         <D2SEConverter
           root={root}
           mods={scan.importableMods}
-          onClose={() => setConverterOpen(false)}
+          onClose={(running) => {
+            setConverterOpen(false);
+            followImports(running);
+          }}
           onSaved={onConverted}
         />
       )}
@@ -318,7 +339,10 @@ export function App() {
         <D2SEConverter
           root={root}
           mods={folderImport}
-          onClose={() => setFolderImport(null)}
+          onClose={(running) => {
+            setFolderImport(null);
+            followImports(running);
+          }}
           onSaved={onConverted}
         />
       )}
@@ -456,7 +480,11 @@ export function App() {
           {gridHome && scan
             ? (
               <LibraryGrid
-                shelves={shownSections.map((section) => ({ label: section.label, titles: section.titles }))}
+                shelves={shownSections.map((section) => ({
+                  id: section.id,
+                  label: section.label,
+                  titles: section.titles,
+                }))}
                 before={sectionsOn && !soloSection && status?.appSettings.settings.library.showLatestUploads !== false
                   ? (
                     <LatestUploads

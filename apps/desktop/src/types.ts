@@ -72,7 +72,7 @@ export interface DocEntry {
   kind: "html" | "text" | "rtf";
 }
 
-/** A mod, or a D2SE core played on its own. */
+/** A mod, or a core played on its own. */
 export interface Title {
   kind: "mod" | "core";
   /** `mod:<folder>` or `core:<version>`. */
@@ -95,7 +95,6 @@ export interface Title {
     selected: string | null;
     port: string | null;
   } | null;
-  update: { file: string | null; mirrors: string[] } | null;
   updateSettings: TitleUpdateSettings;
   updateCheck: TitleUpdateCheck | null;
   options: TitleOptions;
@@ -236,6 +235,8 @@ export interface AppPreferences {
     hideUnsupported: boolean;
     /** The Latest uploads row on the library home. */
     showLatestUploads: boolean;
+    /** The Recent section in the sidebar and on the library home. */
+    showRecent: boolean;
     extraFolders: string[];
   };
   launch: {
@@ -312,7 +313,8 @@ export interface CopyJob {
   id: string;
   kind: "game" | "core" | "mod";
   label: string;
-  state: "copying" | "done" | "failed";
+  /** `queued`: waiting for the imports ahead of it. */
+  state: "queued" | "copying" | "done" | "failed";
   copied: number;
   total: number;
   error: string | null;

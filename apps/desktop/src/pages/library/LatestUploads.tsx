@@ -1,5 +1,6 @@
 import * as React from "react";
 import { artUrl } from "../../lib/art.ts";
+import { keptUploads, loadUploads } from "../../lib/latest-uploads.ts";
 import type { Title, Upload } from "../../types.ts";
 
 /** How long ago, in calendar days and the buckets Steam's What's New uses. */
@@ -16,72 +17,17 @@ export function uploadedWhen(iso: string): string {
 
 /**
  * The library home's Latest uploads row, as Steam's What's New: the newest uploads from the browse
- * sources (Internet Archive and ModDB, merged by date), a card each; a card opens Browse on it.
- * Nothing shows when the sources cannot be read (offline, or Local only).
+ * sources (Internet Archive and ModDB, merged by date on the server, browse.ts latestUploads), a card
+ * each; a card opens Browse on it. Nothing shows when the sources cannot be read (offline, or Local
+ * only).
  */
 export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: (upload: Upload) => void }) {
-  const [items, setItems] = React.useState<Upload[] | null>(null);
+  // What the app fetched at startup shows at once; a fresh copy replaces it quietly.
+  const [items, setItems] = React.useState<Upload[] | null>(keptUploads);
   const strip = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     let cancelled = false;
-    const get = async (url: string) => {
-      try {
-        const response = await fetch(url);
-        return response.ok ? await response.json() : null;
-      } catch {
-        return null;
-      }
-    };
-    void (async () => {
-      const [archive, moddb] = await Promise.all([get("/api/browse"), get("/api/browse/moddb")]);
-      const list: Upload[] = [];
-      for (
-        const item of (archive?.items ?? []) as { id: string; title: string; addedAt: string | null; cover: string }[]
-      ) {
-        if (item.addedAt) {
-          list.push({
-            key: `archive:${item.id}`,
-            source: "archive",
-            title: item.title,
-            addedAt: item.addedAt,
-            cover: item.cover,
-            sourceLabel: "Internet Archive",
-          });
-        }
-      }
-      for (
-        const item of (moddb?.items ?? []) as {
-          id: string;
-          title: string;
-          addedAt: string | null;
-          cover: string;
-          sourceLabel?: string;
-        }[]
-      ) {
-        if (item.addedAt) {
-          list.push({
-            key: `moddb:${item.id}`,
-            source: "moddb",
-            title: item.title,
-            addedAt: item.addedAt,
-            cover: item.cover,
-            sourceLabel: item.sourceLabel ? `ModDB · ${item.sourceLabel}` : "ModDB",
-          });
-        }
-      }
-      list.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
-      // One card per upload: the same mod posted the same day in several variants ("… (D2GL
-      // Russian)", "… (D2GL English)", "… - pt-BR") is shown once, as its newest.
-      const seen = new Set<string>();
-      const shown = list.filter((upload) => {
-        const base = upload.title.replace(/\s*(\(.*\)|-\s*[a-z]{2}(-[a-z]{2})?)\s*$/i, "").trim().toLowerCase();
-        const id = `${base}|${upload.addedAt.slice(0, 10)}`;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-      if (!cancelled) setItems(shown.slice(0, 16));
-    })();
+    void loadUploads().then((uploads) => !cancelled && setItems(uploads));
     return () => {
       cancelled = true;
     };
@@ -102,7 +48,7 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
         <button type="button" className="uploads-arrow" aria-label="Older" onClick={() => scroll(1)}>›</button>
       </div>
       <div className="uploads-strip" ref={strip}>
-        {cards.map((upload) => (
+        {cards.map((upload, index) => (
           <button
             type="button"
             key={upload.key}
@@ -115,7 +61,7 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
             </span>
             <span className="upload-art">
               {upload.cover
-                ? <img src={upload.cover} alt="" loading="lazy" />
+                ? <img src={upload.cover} alt="" loading={index < 6 ? "eager" : "lazy"} />
                 : <span className="upload-blank">{upload.title}</span>}
             </span>
             <span className="upload-title">{upload.title}</span>

@@ -107,6 +107,9 @@ if (isWindows) {
   } catch (error) {
     console.warn(`Could not embed the icon: ${error instanceof Error ? error.message : String(error)}`);
   }
+  // `deno desktop` also drops AppIcon.ico beside the exe (from deno.json's desktop.app.icons). Nothing
+  // reads it: the exe carries the icon, and the window sets its own (window.ts). Releases never ship it.
+  await Deno.remove(`${here}/Exordium/AppIcon.ico`).catch(() => {});
 }
 
 try {

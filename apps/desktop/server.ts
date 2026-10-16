@@ -49,6 +49,7 @@ import {
   type InstallTarget,
   jobList,
   KEYWORD_GROUPS,
+  latestUploads,
   MODDB_URL,
   modDbDetails,
   modDbList,
@@ -336,7 +337,6 @@ interface ExordiumModManifest {
   realm?: Record<string, unknown> | null;
   update?: unknown;
   updates?: unknown;
-  d2seUpdate?: unknown;
 }
 
 /**
@@ -406,7 +406,6 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
     mpqs: textList(loads.mpqs ?? manifest.mpqs, "mpqs", problems),
     dlls: textList(loads.dlls ?? manifest.dlls, "dlls", problems),
     realm: realmValue(manifest.realm, problems),
-    legacyUpdate: d2seUpdateValue(manifest.d2seUpdate, problems),
   });
   const result: TitleSetup = {
     setup,
@@ -442,7 +441,6 @@ function nativeSetup(input: {
   mpqs?: string[];
   dlls?: string[];
   realm?: ModSetup["realm"];
-  legacyUpdate?: ModSetup["update"];
 }): ModSetup {
   const renderer = input.renderer ?? "glide";
   const rendererCode = { ddraw: 0, d3d: 1, opengl: 2, glide: 3 }[renderer];
@@ -490,7 +488,6 @@ function nativeSetup(input: {
       mpqs: input.mpqs ?? [],
     },
     realm: input.realm ?? null,
-    update: input.legacyUpdate ?? null,
   };
 }
 
@@ -575,17 +572,6 @@ function realmValue(value: unknown, problems: TitleSetup["problems"]): ModSetup[
   return Object.values(realm).some((entry) => entry !== null) ? realm : null;
 }
 
-function d2seUpdateValue(value: unknown, problems: TitleSetup["problems"]): ModSetup["update"] {
-  if (value === undefined || value === null) return null;
-  if (!isRecord(value)) {
-    problems.push({ level: "warning", message: `${EXORDIUM_MOD_FILE} "d2seUpdate" should be an object.` });
-    return null;
-  }
-  const mirrors = textList(value.mirrors, "d2seUpdate.mirrors", problems);
-  const file = textValue(value.file);
-  return file || mirrors.length > 0 ? { file, mirrors } : null;
-}
-
 async function writeExordiumModDraft(folder: string, setup: ModSetup): Promise<"created" | "exists"> {
   const file = `${folder}/${EXORDIUM_MOD_FILE}`;
   try {
@@ -639,8 +625,7 @@ async function scanD2SE(url: URL): Promise<Response> {
       core: setup?.mod.core ?? null,
       version: setup?.mod.version ?? null,
       language: setup?.player.language ?? null,
-      update: setup?.update ?? null,
-      updateSettings: titleUpdateSettings(state, key, native?.update, setup?.update),
+      updateSettings: titleUpdateSettings(state, key, native?.update),
       updateCheck: state.updateChecks[key] ?? null,
       options,
       files: mod.scan.layer.length,
@@ -687,8 +672,7 @@ async function scanD2SE(url: URL): Promise<Response> {
       core: core.version,
       version: setup?.mod.version ?? null,
       language: setup?.player.language ?? null,
-      update: setup?.update ?? null,
-      updateSettings: titleUpdateSettings(state, key, undefined, setup?.update),
+      updateSettings: titleUpdateSettings(state, key, undefined),
       updateCheck: state.updateChecks[key] ?? null,
       options,
       files: core.scan.layer.length,
@@ -826,6 +810,7 @@ async function d2seConverterWrite(request: Request): Promise<Response> {
   // library's copy. A copy leaves the install untouched; a move removes the folder from the install.
   const job = startCopy("mod", source.folder, [{ from: source.dir, to: dest }], {
     move,
+    queue: true,
     then: () => Deno.writeTextFile(`${dest}/${EXORDIUM_MOD_FILE}`, JSON.stringify(parsed, null, 2) + "\n"),
   });
   return Response.json({ ok: true, folder: source.folder, job, path: winPath(`${dest}/${EXORDIUM_MOD_FILE}`) });
@@ -988,7 +973,7 @@ async function setupRoute(request: Request): Promise<Response> {
   return Response.json({ error: "Unknown action" }, { status: 400 });
 }
 
-/** What a box runs: a mod folder, or a D2SE core on its own (vanilla, with the core's own setup). */
+/** What a box runs: a mod folder, or a core on its own (vanilla, with the core's own setup). */
 type BoxTarget = { kind: "mod"; folder: string } | { kind: "core"; version: string };
 
 /** A library core's folder: `cores/<version>`; for a 1.14 install, the install root itself. */
@@ -1138,7 +1123,7 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     }
     saves = `${layoutPath(imported.layout.root, imported.layout.folders.mods, mod.folder)}/save`;
   } else {
-    if (!core) throw new HttpError(404, `No D2SE core named "${target.version}".`);
+    if (!core) throw new HttpError(404, `No core named "${target.version}".`);
     const coreSetup = await readCoreSetup(imported.layout.root, core.version);
     if (!coreSetup) throw new HttpError(422, `Core ${core.version} has no D2SE_SETUP.ini.`);
     setup = coreSetup;
@@ -1364,6 +1349,8 @@ interface AppSettings {
     hideUnsupported: boolean;
     /** The Latest uploads row on the library home (it reads the browse sources). */
     showLatestUploads: boolean;
+    /** The Recent section (the titles played last) in the sidebar and on the library home. */
+    showRecent: boolean;
     extraFolders: string[];
   };
   launch: {
@@ -1434,6 +1421,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     autoScanOnStartup: true,
     hideUnsupported: false,
     showLatestUploads: true,
+    showRecent: true,
     extraFolders: [],
   },
   launch: {
@@ -2036,6 +2024,7 @@ function localOnlyGuarded(path: string): boolean {
       "/api/browse/item",
       "/api/browse/image",
       "/api/browse/moddb",
+      "/api/browse/latest",
       "/api/browse/moddb-item",
       "/api/browse/download",
       "/api/browse/url-download",
@@ -2329,6 +2318,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     autoScanOnStartup: "boolean",
     hideUnsupported: "boolean",
     showLatestUploads: "boolean",
+    showRecent: "boolean",
     extraFolders: "string[]",
   });
   mergeObject(next.launch, record.launch, {
@@ -2472,16 +2462,12 @@ function cleanUpdateSettings(input: unknown): TitleUpdateSettings {
   };
 }
 
-function mergeTitleUpdateSettings(
-  base?: Partial<TitleUpdateSettings>,
-  d2se?: { file: string | null; mirrors: string[] } | null,
-): TitleUpdateSettings {
-  const endpoint = base?.endpoint ?? d2seEndpoint(d2se);
+function mergeTitleUpdateSettings(base?: Partial<TitleUpdateSettings>): TitleUpdateSettings {
   return {
     automatic: base?.automatic ?? false,
     background: base?.background ?? true,
     channel: base?.channel ?? "stable",
-    endpoint,
+    endpoint: base?.endpoint ?? null,
   };
 }
 
@@ -2489,21 +2475,11 @@ function titleUpdateSettings(
   state: AppState,
   key: string,
   manifest?: Partial<TitleUpdateSettings>,
-  d2se?: { file: string | null; mirrors: string[] } | null,
 ): TitleUpdateSettings {
   return {
-    ...mergeTitleUpdateSettings(manifest, d2se),
+    ...mergeTitleUpdateSettings(manifest),
     ...(state.updateSettings?.[key] ?? {}),
   };
-}
-
-function d2seEndpoint(update: { file: string | null; mirrors: string[] } | null | undefined): string | null {
-  if (!update) return null;
-  const candidates = [update.file, ...update.mirrors].filter((value): value is string => !!value?.trim());
-  return candidates.find((value) =>
-    /^https?:\/\//i.test(value) || /^[a-z]:[\\/]/i.test(value) || value.startsWith(".")
-  ) ??
-    null;
 }
 
 async function titleUpdates(request: Request): Promise<Response> {
@@ -3212,6 +3188,9 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           jobs: await jobList(downloadsFolder),
           ...throughput(),
         });
+      case "/api/browse/latest":
+        // The library home's Latest uploads row: a few cards, from the caches at once (browse.ts).
+        return Response.json({ uploads: await latestUploads(browseCache) });
       case "/api/browse/moddb":
         return Response.json(await modDbList(browseCache, url.searchParams.get("refresh") === "1"));
       case "/api/browse/moddb-item": {

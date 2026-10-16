@@ -2,6 +2,7 @@ import * as React from "react";
 import type { ReactNode } from "react";
 import { HeartIcon, PlayIcon, TitleIcon } from "../../components/icons.tsx";
 import { artUrl } from "../../lib/art.ts";
+import { readStored, writeStored } from "../../lib/util.ts";
 import type { Title } from "../../types.ts";
 
 export const CAPSULE_SIZES = { small: 132, medium: 170, large: 220 } as const;
@@ -25,7 +26,8 @@ export function savedCapsuleSize(): CapsuleSize {
  */
 export function LibraryGrid(
   { shelves, before, onImport, root, art, running, favorites, starting, onOpen, onPlay, onMenu }: {
-    shelves: { label: string; titles: Title[] }[];
+    /** One per sidebar section, by the section's id; a shelf folds on its own, apart from the sidebar. */
+    shelves: { id: string; label: string; titles: Title[] }[];
     /** Shown above the shelves: the Latest uploads row. */
     before: ReactNode;
     onImport: () => void;
@@ -49,6 +51,18 @@ export function LibraryGrid(
     }
   }
   const total = shelves.reduce((n, s) => n + s.titles.length, 0);
+  const [folded, setFolded] = React.useState<Set<string>>(() =>
+    new Set(readStored<string[]>("exordium.homeCollapsed", []))
+  );
+  function toggleShelf(id: string) {
+    setFolded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeStored("exordium.homeCollapsed", [...next]);
+      return next;
+    });
+  }
 
   return (
     <div className="library-grid" style={{ "--capsule": `${CAPSULE_SIZES[size]}px` } as React.CSSProperties}>
@@ -75,11 +89,19 @@ export function LibraryGrid(
       {before}
       {total === 0 && <p className="muted">Nothing matches these filters.</p>}
       {shelves.filter((shelf) => shelf.titles.length > 0).map((shelf) => (
-        <section key={shelf.label} className="shelf">
+        <section key={shelf.id} className="shelf">
           <h2 className="eyebrow">
-            {shelf.label} <span className="muted">({shelf.titles.length})</span>
+            <button
+              type="button"
+              className="shelf-head"
+              aria-expanded={!folded.has(shelf.id)}
+              onClick={() => toggleShelf(shelf.id)}
+            >
+              <span className={folded.has(shelf.id) ? "chevron" : "chevron open"} aria-hidden="true">›</span>
+              {shelf.label} <span className="muted">({shelf.titles.length})</span>
+            </button>
           </h2>
-          <div className="capsules">
+          <div className="capsules" hidden={folded.has(shelf.id)}>
             {shelf.titles.map((t) => {
               const live = running.has(t.key);
               const errors = t.problems.some((p) => p.level === "error");

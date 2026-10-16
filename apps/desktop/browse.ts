@@ -229,6 +229,90 @@ export async function archiveList(
   return result;
 }
 
+// ---- Latest uploads (the library home's row) ----------------------------------------------------
+
+export interface LatestUpload {
+  key: string;
+  source: "archive" | "moddb";
+  title: string;
+  addedAt: string;
+  cover: string;
+  sourceLabel: string;
+}
+
+/** Lists being fetched again in the background, by name: one refresh at a time each. */
+const refreshing = new Map<string, Promise<unknown>>();
+
+/**
+ * A list's items from its cache file at once, however old: a stale one is refreshed in the background
+ * for next time instead of keeping the caller waiting on archive.org or ModDB. Only a list never
+ * fetched waits for the network.
+ */
+async function staleFirst<T>(
+  name: string,
+  file: string,
+  ttl: number,
+  fetchFresh: () => Promise<{ items: T[] }>,
+): Promise<T[]> {
+  const cached = await Deno.readTextFile(file).then((text) => JSON.parse(text) as { items: T[]; fetchedAt: string })
+    .catch(() => null);
+  if (!cached) return (await fetchFresh().catch(() => ({ items: [] as T[] }))).items;
+  if (Date.now() - Date.parse(cached.fetchedAt) >= ttl && !refreshing.has(name)) {
+    const run = fetchFresh().catch(() => {}).finally(() => refreshing.delete(name));
+    refreshing.set(name, run);
+  }
+  return cached.items;
+}
+
+/**
+ * The newest uploads across the Internet Archive and ModDB, merged by date: what the library home's
+ * Latest uploads row shows, so it needs neither whole list. The same mod posted the same day in
+ * several variants ("… (D2GL Russian)", "… (D2GL English)", "… - pt-BR") is one card, its newest.
+ */
+export async function latestUploads(cacheDir: string, limit = 16): Promise<LatestUpload[]> {
+  const [archive, moddb] = await Promise.all([
+    staleFirst<BrowseItem>("archive", `${cacheDir}/archive.json`, ARCHIVE_TTL_MS, () => archiveList(cacheDir, true)),
+    staleFirst<ModDbItem>("moddb", `${cacheDir}/moddb.json`, MODDB_TTL_MS, () => modDbList(cacheDir, true)),
+  ]);
+  const all: LatestUpload[] = [];
+  for (const item of archive) {
+    if (item.addedAt) {
+      all.push({
+        key: `archive:${item.id}`,
+        source: "archive",
+        title: item.title,
+        addedAt: item.addedAt,
+        cover: item.cover,
+        sourceLabel: "Internet Archive",
+      });
+    }
+  }
+  for (const item of moddb) {
+    if (item.addedAt) {
+      all.push({
+        key: `moddb:${item.id}`,
+        source: "moddb",
+        title: item.title,
+        addedAt: item.addedAt,
+        cover: modDbImage(item.cover, "thumb_620x2000"),
+        sourceLabel: item.sourceLabel ? `ModDB · ${item.sourceLabel}` : "ModDB",
+      });
+    }
+  }
+  all.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+  const seen = new Set<string>();
+  const shown: LatestUpload[] = [];
+  for (const upload of all) {
+    const base = upload.title.replace(/\s*(\(.*\)|-\s*[a-z]{2}(-[a-z]{2})?)\s*$/i, "").trim().toLowerCase();
+    const id = `${base}|${upload.addedAt.slice(0, 10)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    shown.push(upload);
+    if (shown.length >= limit) break;
+  }
+  return shown;
+}
+
 // ---- ModDB --------------------------------------------------------------------------------------
 
 function rssText(item: string, tag: string): string {

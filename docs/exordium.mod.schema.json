@@ -180,15 +180,6 @@
       },
       "additionalProperties": false
     },
-    "d2seUpdate": {
-      "type": ["object", "null"],
-      "description": "Legacy D2SE update file/mirrors preserved from D2SE_SETUP.ini. Exordium's own update object above is preferred.",
-      "properties": {
-        "file": { "type": ["string", "null"] },
-        "mirrors": { "type": ["array", "null"], "items": { "type": "string" } }
-      },
-      "additionalProperties": false
-    },
     "renderer": {
       "$ref": "#/properties/launch/properties/renderer",
       "description": "Flat form of launch.renderer; launch wins."

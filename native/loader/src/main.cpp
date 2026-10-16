@@ -355,6 +355,37 @@ bool has_flag(const std::string& commandLine, const char* flag) {
     return false;
 }
 
+// The number a switch carries, as Game.exe takes them: `-act3` or `-act 3`, `-seed 12345`. 0 when the
+// switch is absent or has no number.
+uint32_t flag_number(const std::string& commandLine, const char* flag) {
+    const size_t flagLen = std::strlen(flag);
+    for (size_t at = commandLine.find('-'); at != std::string::npos; at = commandLine.find('-', at + 1)) {
+        size_t start = at + 1;
+        if (start + flagLen > commandLine.size()) break;
+        bool match = true;
+        for (size_t i = 0; i < flagLen && match; ++i) {
+            const char got = static_cast<char>(std::tolower(static_cast<unsigned char>(commandLine[start + i])));
+            match = got == static_cast<char>(std::tolower(static_cast<unsigned char>(flag[i])));
+        }
+        if (!match) continue;
+        size_t value = start + flagLen;
+        if (value < commandLine.size() && !std::isdigit(static_cast<unsigned char>(commandLine[value]))) {
+            if (commandLine[value] != ' ' && commandLine[value] != '\t') continue; // a longer switch, such as -actx
+            while (value < commandLine.size() && (commandLine[value] == ' ' || commandLine[value] == '\t')) ++value;
+        }
+        uint64_t number = 0;
+        bool any = false;
+        while (value < commandLine.size() && std::isdigit(static_cast<unsigned char>(commandLine[value]))) {
+            number = number * 10 + static_cast<uint64_t>(commandLine[value] - '0');
+            if (number > 0xFFFFFFFFull) return 0;
+            ++value;
+            any = true;
+        }
+        return any ? static_cast<uint32_t>(number) : 0;
+    }
+    return 0;
+}
+
 BOOL __stdcall allow_expansion() {
     return TRUE;
 }
@@ -372,23 +403,60 @@ D2ConfigStrc build_config(const Plan& plan) {
     config.bDirect = has_flag(plan.commandLine, "direct") ? 1 : 0;
     config.bTxt = has_flag(plan.commandLine, "txt") ? 1 : 0;
     config.bNoSound = has_flag(plan.commandLine, "ns") || has_flag(plan.commandLine, "nosound") ? 1 : 0;
-    config.dwAct = 1;
     config.bAmazon = 1;
     config.nLaunchType = LAUNCHTYPE_NONE;
     config.pAllowExpansionCallback = allow_expansion;
-    // The config is laid out as 1.10f's, but older D2Launch builds read their Battle.net interface
-    // pointer (1.10f's pComInterface) from an earlier offset, found by where each copies it into its
-    // global: 0x1FA in 1.00 and 1.01, 0x212 in 1.02 to 1.05b, 0x216 in 1.06 and 1.06b, 0x21D in 1.07
-    // to 1.09d. The pointer must start null; 1.00 and 1.01 read dwAct's 1 there, and their "Disconnect
-    // from BNET" step on entering the menu jumped through it.
-    static const struct { const char* core; size_t offset; } kComInterface[] = {
-        {"1.00", 0x1FA}, {"1.01", 0x1FA}, {"1.02", 0x212}, {"1.03", 0x212}, {"1.04b", 0x212},
-        {"1.04c", 0x212}, {"1.05", 0x212}, {"1.05b", 0x212}, {"1.06", 0x216}, {"1.06b", 0x216},
-        {"1.07", 0x21D}, {"1.08", 0x21D}, {"1.09", 0x21D}, {"1.09b", 0x21D}, {"1.09d", 0x21D},
+    // The config is laid out as 1.10f's, but each core reads some fields at its own offset (the
+    // struct grew between patches). Found per core by what reads them (2026-10-14):
+    // - The Battle.net interface pointer (1.10f's pComInterface), by where each D2Launch copies it
+    //   into its global. It must start null; 1.00 and 1.01 read a stray 1 there, and their
+    //   "Disconnect from BNET" step on entering the menu jumped through it.
+    // - bSkipToBNet (-skiptobnet), by the main menu's test of it: read, then cleared, and in 1.01 and
+    //   later the last gateway read from the registry (Storm #423) in between.
+    // - dwAct (-actN) and dwSeed (-seed N), by D2Client's two accessors: `mov eax,[ecx+X]; test eax,
+    //   eax; je`, the act then checked below 5 (classic, four acts) or 6, the seed handed to D2Game
+    //   #10010. 0 is "not set" for both, which is Game.exe's default.
+    // Until these were found, -skiptobnet, -act and -seed reached the command line but never the
+    // config, so none of them did anything. 0 in the table means the field is where 1.10f has it.
+    struct CoreLayout {
+        const char* core;
+        size_t comInterface;
+        size_t skipToBNet;
+        size_t act;
+        size_t seed;
+        uint32_t acts;
     };
-    for (const auto& entry : kComInterface) {
-        if (plan.core == entry.core) std::memset(reinterpret_cast<uint8_t*>(&config) + entry.offset, 0, sizeof(void*));
+    static const CoreLayout kLayouts[] = {
+        {"1.00", 0x1FA, 0x332, 0x1DC, 0x1F2, 4},  {"1.01", 0x1FA, 0x332, 0x1DC, 0x1F2, 4},
+        {"1.02", 0x212, 0x34A, 0x1F4, 0x20A, 4},  {"1.03", 0x212, 0x34A, 0x1F4, 0x20A, 4},
+        {"1.04b", 0x212, 0x34A, 0x1F4, 0x20A, 4}, {"1.04c", 0x212, 0x34A, 0x1F4, 0x20A, 4},
+        {"1.05", 0x212, 0x34A, 0x1F4, 0x20A, 4},  {"1.05b", 0x212, 0x34A, 0x1F4, 0x20A, 4},
+        {"1.06", 0x216, 0x34E, 0x1F8, 0x20E, 4},  {"1.06b", 0x216, 0x34E, 0x1F8, 0x20E, 4},
+        {"1.07", 0x21D, 0x355, 0, 0, 5},          {"1.08", 0x21D, 0x355, 0, 0, 5},
+        {"1.09", 0x21D, 0x355, 0, 0, 5},          {"1.09b", 0x21D, 0x355, 0, 0, 5},
+        {"1.09d", 0x21D, 0x355, 0, 0, 5},         {"1.13c", 0, 0x359, 0x1FB, 0x216, 5},
+        {"1.13d", 0, 0x359, 0x1FB, 0x216, 5},
+    };
+    auto* bytes = reinterpret_cast<uint8_t*>(&config);
+    size_t skipAt = offsetof(D2ConfigStrc, bSkipToBNet);
+    size_t actAt = offsetof(D2ConfigStrc, dwAct);
+    size_t seedAt = offsetof(D2ConfigStrc, dwSeed);
+    uint32_t acts = 5;
+    for (const auto& layout : kLayouts) {
+        if (plan.core != layout.core) continue;
+        if (layout.comInterface) std::memset(bytes + layout.comInterface, 0, sizeof(void*));
+        if (layout.skipToBNet) skipAt = layout.skipToBNet;
+        if (layout.act) actAt = layout.act;
+        if (layout.seed) seedAt = layout.seed;
+        acts = layout.acts;
     }
+    if (has_flag(plan.commandLine, "skiptobnet")) bytes[skipAt] = 1;
+    // An act the core does not have (Act V before Lord of Destruction) is left unset, as Game.exe would
+    // refuse it; D2Client asserts on it.
+    const uint32_t act = flag_number(plan.commandLine, "act");
+    if (act >= 1 && act <= acts) std::memcpy(bytes + actAt, &act, sizeof(act));
+    const uint32_t seed = flag_number(plan.commandLine, "seed");
+    if (seed) std::memcpy(bytes + seedAt, &seed, sizeof(seed));
     return config;
 }
 
@@ -1957,6 +2025,9 @@ int run_loader() {
 
     D2ConfigStrc config = build_config(plan);
     log_config(log, config, plan);
+    if (has_flag(plan.commandLine, "skiptobnet")) log.line("Skip to Battle.net: on, at this core's config offset.");
+    if (const uint32_t act = flag_number(plan.commandLine, "act")) log.line("Start act: " + std::to_string(act) + ".");
+    if (const uint32_t seed = flag_number(plan.commandLine, "seed")) log.line("Map seed: " + std::to_string(seed) + ".");
     const CoreOrdinals& ordinals = core_ordinals(plan.core, plan.gameVersion);
     log.line(std::string("Core ABI table: ") + ordinals.label + " for " + plan.gameVersion + ".");
     if (!setup_fog(log, config, plan.gameVersion, ordinals, plan.asyncData, fog)) {

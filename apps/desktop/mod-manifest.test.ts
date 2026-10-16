@@ -79,5 +79,6 @@ endoffile=4711
     selected: null,
     port: null,
   });
-  assertEquals(manifest.d2seUpdate, { file: "updates.ini", mirrors: ["https://mirror.example.test"] });
+  // D2SE's own update file and mirrors are not carried over: Exordium reads only its own feed.
+  assertEquals("d2seUpdate" in manifest, false);
 });

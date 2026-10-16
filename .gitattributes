@@ -1,0 +1,3 @@
+# Line endings: LF in the repository and in every checkout, whatever core.autocrlf says.
+# deno fmt checks for LF; a CRLF checkout made the whole tree look unformatted.
+* text=auto eol=lf

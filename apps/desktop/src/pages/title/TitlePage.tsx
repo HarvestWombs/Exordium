@@ -105,7 +105,7 @@ export function TitlePage(
           </div>
           <h1>{t.title}</h1>
           <div className="hero-sub">
-            {t.kind === "core" ? `D2SE CORE · VANILLA ${t.core}` : `MOD · CORE ${t.core ?? "?"}`}
+            {t.kind === "core" ? `VANILLA · CORE ${t.core}` : `MOD · CORE ${t.core ?? "?"}`}
             {t.version ? ` · V${t.version}` : ""}
           </div>
         </div>

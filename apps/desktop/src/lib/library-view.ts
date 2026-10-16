@@ -34,8 +34,10 @@ export function libraryView(
     return true;
   });
   const pinned = titles.filter((t) => favorites.has(t.key) && !hidden.has(t.key));
+  // Off in Settings, Library: no Recent section at all.
+  const showRecent = status?.appSettings.settings.library.showRecent !== false;
   const recent = titles
-    .filter((t) => status?.playedAt[t.key] && !hidden.has(t.key))
+    .filter((t) => showRecent && status?.playedAt[t.key] && !hidden.has(t.key))
     .sort((a, b) => status!.playedAt[b.key]!.localeCompare(status!.playedAt[a.key]!))
     .slice(0, 3);
   const sectionsOn = filter === "all" && !search;

@@ -144,6 +144,13 @@ export function SettingsSectionView(
             disabled={busy}
             onChange={(value) => onPatch({ library: { showLatestUploads: value } })}
           />
+          <ToggleRow
+            label="Show recently played"
+            hint="The Recent section, with the last three titles you played, in the sidebar and on the library home."
+            checked={s.library.showRecent}
+            disabled={busy}
+            onChange={(value) => onPatch({ library: { showRecent: value } })}
+          />
         </SettingsGroup>
         <SettingsGroup title="Storage">
           <PathRow label="Exordium folder" value={app.paths.data} openKey="data" />

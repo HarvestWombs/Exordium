@@ -1,10 +1,11 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   archiveItemFromDoc,
   cleanDescription,
   contentKeywords,
   executableInstallWarning,
   keywordsFor,
+  latestUploads,
   modDbBytes,
   modDbDetailsFromHtml,
   modDbDownloadLinks,
@@ -236,4 +237,50 @@ Deno.test("a game-level ModDB addon takes nothing from the game's own profile", 
   assertEquals(details.files, []);
   assertEquals(details.links, []);
   assertEquals(details.parentMod, null);
+});
+
+Deno.test("latest uploads come from the caches, newest first, one card per same-day upload", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    // Fresh caches, so nothing is fetched: a stale one would answer just the same, and refresh itself
+    // from archive.org and ModDB in the background, which a test must not reach for.
+    const old = new Date().toISOString();
+    await Deno.writeTextFile(
+      `${dir}/archive.json`,
+      JSON.stringify({
+        fetchedAt: old,
+        items: [{ id: "a1", title: "Archive Mod", addedAt: "2026-10-01T00:00:00Z", cover: "https://archive.org/c" }],
+      }),
+    );
+    await Deno.writeTextFile(
+      `${dir}/moddb.json`,
+      JSON.stringify({
+        fetchedAt: old,
+        items: [
+          {
+            id: "m1",
+            title: "LO Mod (D2GL English)",
+            addedAt: "2026-10-13T16:42:00Z",
+            cover: "x",
+            sourceLabel: "Files",
+          },
+          {
+            id: "m2",
+            title: "LO Mod (D2GL Russian)",
+            addedAt: "2026-10-13T16:41:00Z",
+            cover: "x",
+            sourceLabel: "Files",
+          },
+          { id: "m3", title: "No Date", addedAt: null, cover: "x" },
+        ],
+      }),
+    );
+    const started = Date.now();
+    const uploads = await latestUploads(dir);
+    assert(Date.now() - started < 1000);
+    assertEquals(uploads.map((u) => u.key), ["moddb:m1", "archive:a1"]);
+    assertEquals(uploads[0]!.sourceLabel, "ModDB · Files");
+  } finally {
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
 });

@@ -5,7 +5,7 @@ import { checkInstall, copyJob, createLibrary, isLibrary, startCopy } from "./li
 async function until(id: string) {
   for (let i = 0; i < 200; i++) {
     const job = copyJob(id)!;
-    if (job.state !== "copying") return job;
+    if (job.state !== "copying" && job.state !== "queued") return job;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("the copy did not finish");
@@ -113,6 +113,28 @@ Deno.test("startCopy move puts the folder in place and removes the source", asyn
     assertEquals(await Deno.readTextFile(`${to}/exordium.mod.json`), "{}");
     // The source is gone (moved, not copied).
     assertEquals(await Deno.stat(from).then(() => true, () => false), false);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("queued copies wait their turn and all finish", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  try {
+    for (const mod of ["One", "Two", "Three"]) {
+      await Deno.mkdir(`${dir}/src/${mod}`, { recursive: true });
+      await Deno.writeTextFile(`${dir}/src/${mod}/data.txt`, mod.repeat(1000));
+    }
+    const jobs = ["One", "Two", "Three"].map((mod) =>
+      startCopy("mod", `queue-${mod}`, [{ from: `${dir}/src/${mod}`, to: `${dir}/library/${mod}` }], { queue: true })
+    );
+    // Only the first can be copying; the rest wait.
+    assertEquals(jobs.slice(1).map((job) => job.state), ["queued", "queued"]);
+    const done = await Promise.all(jobs.map((job) => until(job.id)));
+    assertEquals(done.map((job) => job.state), ["done", "done", "done"]);
+    for (const mod of ["One", "Two", "Three"]) {
+      assertEquals(await Deno.readTextFile(`${dir}/library/${mod}/data.txt`), mod.repeat(1000));
+    }
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

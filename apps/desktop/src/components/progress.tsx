@@ -13,7 +13,7 @@ export function setupPost(body: unknown) {
 export async function followCopy(job: CopyJob, onTick: (job: CopyJob) => void): Promise<CopyJob> {
   let current = job;
   onTick(current);
-  while (current.state === "copying") {
+  while (current.state === "copying" || current.state === "queued") {
     await new Promise((resolve) => setTimeout(resolve, 400));
     const { body } = await setupPost({ action: "job", job: current.id });
     if (!body.job) break;

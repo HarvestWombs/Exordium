@@ -73,7 +73,7 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
         <section className="option-section">
           <div className="section-head">
             <h2 className="eyebrow">ENDPOINT</h2>
-            <span className="muted small">{t.update ? "D2SE metadata found" : "Exordium manifest"}</span>
+            <span className="muted small">An Exordium update feed (see exordium.update.example.json)</span>
           </div>
           <label className="field compact-field">
             Manifest URL or file
@@ -97,12 +97,6 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
               <option value="local">Local files only</option>
             </select>
           </label>
-          <dl className="kv wide">
-            <dt>D2SE file</dt>
-            <dd>{t.update?.file || "—"}</dd>
-            <dt>D2SE mirrors</dt>
-            <dd>{t.update?.mirrors.length ? t.update.mirrors.join(", ") : "—"}</dd>
-          </dl>
         </section>
         <section className="option-section">
           <div className="section-head">

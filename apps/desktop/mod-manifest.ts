@@ -53,9 +53,5 @@ export function exordiumManifestFromD2SE(setup: ModSetup): Record<string, unknow
       selected: null,
       port: null,
     },
-    d2seUpdate: setup.update ?? {
-      file: null,
-      mirrors: [],
-    },
   };
 }

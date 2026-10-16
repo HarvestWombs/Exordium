@@ -83,8 +83,6 @@ export interface ModSetup {
     selected: string | null;
     port: string | null;
   } | null;
-
-  update: { file: string | null; mirrors: string[] } | null;
 }
 
 const U = "USERSETTINGS";
@@ -121,13 +119,6 @@ export function readModSetup(ini: Ini): ModSetup {
     selected: iniText(ini, P, "RealmSelected"),
     port: iniText(ini, P, "RealmPort"),
   };
-  const mirrors: string[] = [];
-  for (let i = 1; i < 100; i++) {
-    const mirror = iniText(ini, P, `UpdateMirror${i}`);
-    if (mirror === null) break;
-    mirrors.push(mirror);
-  }
-  const updateFile = iniText(ini, P, "UpdateFile");
 
   return {
     createdFor: iniText(ini, "D2SE", "CreatedFor"),
@@ -172,7 +163,6 @@ export function readModSetup(ini: Ini): ModSetup {
       mpqs,
     },
     realm: Object.values(realm).some((v) => v !== null) ? realm : null,
-    update: updateFile !== null || mirrors.length > 0 ? { file: updateFile, mirrors } : null,
   };
 }
 

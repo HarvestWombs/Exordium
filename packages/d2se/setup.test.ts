@@ -33,7 +33,6 @@ Deno.test("The Black Soul's real D2SE_SETUP.ini reads as the mod it describes", 
   });
   // Every realm field is empty, and `#ModMPQ2=` is a comment, not an empty value.
   assertEquals(setup.realm, null);
-  assertEquals(setup.update, null);
 });
 
 Deno.test("launch settings apply the modder's permissions to the player's choices", async () => {
@@ -113,7 +112,6 @@ UpdateMirror1=https://mirror.example/one
   assertEquals(setup.loads.mpqs, ["a.mpq", "c.mpq"]);
   assertEquals(setup.realm?.gateway, "realm.example.net");
   assertEquals(setup.realm?.port, "6112");
-  assertEquals(setup.update, { file: "update.txt", mirrors: ["https://mirror.example/one"] });
 });
 
 Deno.test("the ini reader ignores case, comments and CRLF, and keeps the last of a repeated key", () => {

@@ -1,42 +1,89 @@
 import * as React from "react";
-import { CopyProgress, followCopy } from "../components/progress.tsx";
+import { CopyProgress, setupPost } from "../components/progress.tsx";
 import { formatSize } from "../lib/util.ts";
 import type { CopyJob, Scan } from "../types.ts";
 
+type Mod = Scan["importableMods"][number];
+
+/** An import queued from this converter: its copy job, and whether it moves the mod. */
+interface Queued {
+  job: CopyJob;
+  move: boolean;
+}
+
+/** A mod's identity here: a folder chosen with Import folder by its path, the install's by name. */
+const modKey = (mod: Mod) => mod.path ?? mod.folder;
+const active = (job: CopyJob) => job.state === "queued" || job.state === "copying";
+
+function percent(job: CopyJob): number {
+  return job.total > 0 ? Math.min(100, Math.round((job.copied / job.total) * 100)) : 0;
+}
+
+/** A mod's place in the queue, as its row in the list shows it. */
+function badge(job: CopyJob | undefined): string | null {
+  if (!job) return null;
+  switch (job.state) {
+    case "queued":
+      return "Queued";
+    case "copying":
+      return `${percent(job)}%`;
+    case "done":
+      return "Imported";
+    case "failed":
+      return "Failed";
+  }
+}
+
+/**
+ * The D2SE importer: each mod's exordium.mod.json reviewed before it goes into the library. Import
+ * queues the mod's copy and moves on to the next one, so the player keeps editing while earlier mods
+ * copy, one at a time (startCopy's queue). Each row shows its mod's place in the queue; closing hands
+ * the copies still running to the app, which refreshes the library as they finish.
+ */
 export function D2SEConverter(
   { root, mods, onClose, onSaved }: {
     root: string;
     mods: Scan["importableMods"];
-    onClose: () => void;
+    /** With the copies still queued or running, for the app to follow. */
+    onClose: (running: CopyJob[]) => void;
+    /** A copy finished: read the library again and say so. */
     onSaved: (message: string) => Promise<void>;
   },
 ) {
   const [folder, setFolder] = React.useState(mods[0]?.folder ?? "");
-  // A folder chosen with Import folder is addressed by its path; the install's mods by name.
-  const path = mods.find((mod) => mod.folder === folder)?.path ?? null;
+  const current = mods.find((mod) => mod.folder === folder) ?? null;
+  const path = current?.path ?? null;
   const [text, setText] = React.useState("");
   const [exists, setExists] = React.useState(false);
   const [from, setFrom] = React.useState("");
   const [size, setSize] = React.useState(0);
-  const [copy, setCopy] = React.useState<CopyJob | null>(null);
   const [problem, setProblem] = React.useState<string | null>(null);
+  // Reading a preview or sending an import; the queue's copies never block the editor.
   const [busy, setBusy] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [filter, setFilter] = React.useState("");
-  const [saved, setSaved] = React.useState(0);
   // Off by default: a copy leaves the install intact. Move removes the folder from the install.
   const [move, setMove] = React.useState(false);
+  // Every import queued from here, by mod; kept after the mod leaves the list so the footer can say so.
+  const [queued, setQueued] = React.useState<Record<string, Queued>>({});
   const shownMods = React.useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return needle ? mods.filter((mod) => `${mod.title} ${mod.folder}`.toLowerCase().includes(needle)) : mods;
   }, [mods, filter]);
+  const entries = Object.values(queued);
+  const running = entries.filter((entry) => active(entry.job));
+  const imported = entries.filter((entry) => entry.job.state === "done").length;
+  const failed = entries.filter((entry) => entry.job.state === "failed");
+  const mine = current ? queued[modKey(current)] : undefined;
+
   const discardOk = React.useCallback(
     () => !dirty || confirm("Discard your unsaved changes to this exordium.mod.json?"),
     [dirty],
   );
   const close = React.useCallback(() => {
-    if (!busy && discardOk()) onClose();
-  }, [busy, discardOk, onClose]);
+    if (busy || !discardOk()) return;
+    onClose(Object.values(queued).filter((entry) => active(entry.job)).map((entry) => entry.job));
+  }, [busy, discardOk, onClose, queued]);
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
     globalThis.addEventListener("keydown", onKey);
@@ -77,7 +124,6 @@ export function D2SEConverter(
         setExists(body.exists === true);
         setFrom(body.from ?? "");
         setSize(typeof body.size === "number" ? body.size : 0);
-        setCopy(null);
         setDirty(false);
       })
       .catch((error) => !cancelled && setProblem((error as Error).message))
@@ -107,13 +153,42 @@ export function D2SEConverter(
     };
   }, [folder, from, path]);
 
+  // Follow the queue while anything in it is waiting or copying. A finished copy reads the library
+  // again (its mod then leaves the list) and says so.
+  const anyActive = running.length > 0;
+  // The app's callback changes on every render of the app; the timer reads the latest without restarting.
+  const saved = React.useRef(onSaved);
+  saved.current = onSaved;
+  React.useEffect(() => {
+    if (!anyActive) return;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      const now = Object.entries(queued).filter(([, entry]) => active(entry.job));
+      for (const [key, entry] of now) {
+        const { body } = await setupPost({ action: "job", job: entry.job.id }).catch(() => ({ body: {} }));
+        const job = (body as { job?: CopyJob }).job;
+        if (stopped || !job) continue;
+        setQueued((all) => ({ ...all, [key]: { ...entry, job } }));
+        if (job.state === "done") {
+          void saved.current(`${entry.move ? "Moved" : "Imported"} ${job.label} into Exordium's library.`);
+        }
+      }
+    }, 600);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [anyActive, queued]);
+
   function patchManifest(key: string, value: string) {
     const base = manifest ?? shown ?? {};
     setText(JSON.stringify({ ...base, [key]: value }, null, 2));
     setDirty(true);
   }
 
+  /** Queues this mod's copy and moves straight on to the next mod that is not queued yet. */
   async function save() {
+    if (!current) return;
     setBusy(true);
     setProblem(null);
     try {
@@ -124,17 +199,14 @@ export function D2SEConverter(
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Could not import the mod.");
-      // The folder is copied in the background; the mod is in the library once that ends.
-      const done = body.job ? await followCopy(body.job, setCopy) : null;
-      if (done && done.state !== "done") throw new Error(done.error ?? "Copying stopped.");
-      // The imported mod leaves the list once the library is read again: move on to the next one.
-      const at = mods.findIndex((mod) => mod.folder === folder);
-      const next = mods[at + 1] ?? mods[at - 1] ?? null;
+      const key = modKey(current);
+      const next = { ...queued, [key]: { job: body.job as CopyJob, move } };
+      setQueued(next);
       setDirty(false);
-      setSaved((n) => n + 1);
-      await onSaved(`${move ? "Moved" : "Imported"} ${folder} into Exordium's library.`);
-      if (next) setFolder(next.folder);
-      else onClose();
+      const at = mods.findIndex((mod) => mod.folder === folder);
+      const waiting = (mod: Mod) => !next[modKey(mod)];
+      const following = mods.slice(at + 1).find(waiting) ?? mods.slice(0, at).find(waiting) ?? null;
+      if (following) setFolder(following.folder);
     } catch (error) {
       setProblem((error as Error).message);
     } finally {
@@ -142,16 +214,19 @@ export function D2SEConverter(
     }
   }
 
+  const locked = busy || mine !== undefined;
   const field = (key: "title" | "name" | "author" | "version" | "core") => (
     <label>
       <span>{key}</span>
       <input
         value={String(shown?.[key] ?? "")}
-        disabled={busy || !manifest}
+        disabled={locked || !manifest}
         onChange={(event) => patchManifest(key, event.currentTarget.value)}
       />
     </label>
   );
+  const copying = running.find((entry) => entry.job.state === "copying") ?? null;
+  const waitingCount = running.filter((entry) => entry.job.state === "queued").length;
 
   return (
     <div className="scrim" onClick={(event) => event.target === event.currentTarget && close()}>
@@ -162,7 +237,7 @@ export function D2SEConverter(
             <h2>Import into the library</h2>
           </div>
           <span className="muted small converter-progress">
-            {mods.length} to review{saved > 0 ? ` · ${saved} saved` : ""}
+            {mods.length} to review{imported > 0 ? ` · ${imported} imported` : ""}
           </span>
           <button type="button" className="window-button" aria-label="Close" disabled={busy} onClick={close}>
             ×
@@ -179,37 +254,50 @@ export function D2SEConverter(
                 aria-label="Filter mods"
               />
             )}
-            {shownMods.map((mod) => (
-              <button
-                type="button"
-                key={mod.folder}
-                className={mod.folder === folder ? "on" : ""}
-                disabled={busy}
-                onClick={() => mod.folder !== folder && discardOk() && setFolder(mod.folder)}
-              >
-                <strong>{mod.title}</strong>
-                <span>{mod.folder}{mod.core ? ` · ${mod.core}` : ""}</span>
-              </button>
-            ))}
+            {shownMods.map((mod) => {
+              const job = queued[modKey(mod)]?.job;
+              const label = badge(job);
+              return (
+                <button
+                  type="button"
+                  key={mod.folder}
+                  className={mod.folder === folder ? "on" : ""}
+                  disabled={busy}
+                  onClick={() => mod.folder !== folder && discardOk() && setFolder(mod.folder)}
+                >
+                  <strong>
+                    {mod.title}
+                    {label && <span className={`converter-badge ${job!.state}`}>{label}</span>}
+                  </strong>
+                  <span>{mod.folder}{mod.core ? ` · ${mod.core}` : ""}</span>
+                </button>
+              );
+            })}
           </aside>
           <section className="converter-editor">
             <div className="converter-source">
               <p className="muted small">
-                {from
+                {mine
+                  ? mine.job.state === "failed"
+                    ? `This import failed: ${mine.job.error ?? "the copy stopped"}.`
+                    : `Queued for import${
+                      mine.move ? " (moving)" : ""
+                    }. Its exordium.mod.json is written once the copy ends.`
+                  : from
                   ? `${move ? "Moves" : "Copies"} ${from} (${
                     size ? formatSize(size) : "measuring…"
                   }) into the library and writes this exordium.mod.json there. ${
                     move ? "It is removed from your Diablo II install." : "Your install is not changed."
                   }`
                   : "Choose a mod to import."}
-                {exists ? " It is already in the library." : ""}
-                {dirty ? " Edited." : ""}
+                {!mine && exists ? " It is already in the library." : ""}
+                {!mine && dirty ? " Edited." : ""}
               </p>
               <label className="confirm-check">
                 <input
                   type="checkbox"
                   checked={move}
-                  disabled={busy}
+                  disabled={locked}
                   onChange={(event) => setMove(event.currentTarget.checked)}
                 />
                 Move instead of copy — removes {folder || "the mod"} from your Diablo II install to save space
@@ -226,7 +314,7 @@ export function D2SEConverter(
               <span>description</span>
               <textarea
                 value={String(shown?.description ?? "")}
-                disabled={busy || !manifest}
+                disabled={locked || !manifest}
                 onChange={(event) => patchManifest("description", event.currentTarget.value)}
               />
             </label>
@@ -234,7 +322,7 @@ export function D2SEConverter(
               <span>JSON preview</span>
               <textarea
                 value={text}
-                disabled={busy}
+                disabled={locked}
                 spellCheck={false}
                 onChange={(event) => {
                   setText(event.currentTarget.value);
@@ -250,16 +338,31 @@ export function D2SEConverter(
         </div>
         <footer>
           <div className="converter-copy">
-            {copy && <CopyProgress job={copy} label={move ? "Moving" : undefined} />}
+            {copying && (
+              <CopyProgress
+                job={copying.job}
+                label={`${copying.move ? "Moving" : "Copying"} ${copying.job.label}${
+                  waitingCount ? ` (${waitingCount} more queued)` : ""
+                }`}
+              />
+            )}
+            {!copying && waitingCount > 0 && <p className="muted small">{waitingCount} queued…</p>}
+            {failed.length > 0 && (
+              <p className="bad-text small">
+                Not imported: {failed.map((entry) => `${entry.job.label} (${entry.job.error ?? "failed"})`).join("; ")}
+              </p>
+            )}
           </div>
-          <button type="button" className="ghost" disabled={busy} onClick={close}>Close</button>
+          <button type="button" className="ghost" disabled={busy} onClick={close}>
+            {running.length ? "Close (copies continue)" : "Close"}
+          </button>
           <button
             type="button"
             className="ghost primary"
-            disabled={busy || !manifest || exists}
+            disabled={locked || !manifest || exists}
             onClick={() => void save()}
           >
-            {busy ? (copy ? "Importing…" : "Working…") : "Import"}
+            {busy ? "Working…" : mine ? badge(mine.job) : "Import"}
           </button>
         </footer>
       </div>

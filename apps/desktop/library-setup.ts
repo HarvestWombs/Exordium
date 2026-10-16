@@ -136,7 +136,8 @@ export interface CopyJob {
   kind: CopyKind;
   /** What is copied: "Game files", a core's version, a mod's folder. */
   label: string;
-  state: "copying" | "done" | "failed";
+  /** `queued`: waiting for the copies ahead of it (startCopy's `queue`). */
+  state: "queued" | "copying" | "done" | "failed";
   copied: number;
   total: number;
   error: string | null;
@@ -144,6 +145,8 @@ export interface CopyJob {
 }
 
 const jobs = new Map<string, CopyJob>();
+/** Queued copies run one after another, so several large mods do not fight over the disk. */
+let queue: Promise<void> = Promise.resolve();
 
 export function copyJobs(): CopyJob[] {
   return [...jobs.values()].map((job) => ({ ...job }));
@@ -177,27 +180,33 @@ async function copyTree(from: string, to: string, job: CopyJob): Promise<void> {
  * rename (no second copy, so it saves the space immediately); across drives it falls back to copy
  * then delete, which frees the source's drive once done. The caller is removing files from wherever
  * `from` is, so only use it where that is the user's choice.
+ *
+ * With `queue`, the copy waits (`queued`) until every queued copy before it has finished: the
+ * converter queues each mod it imports and moves on, so the player keeps working while they copy.
  */
 export function startCopy(
   kind: CopyKind,
   label: string,
   pairs: { from: string; to: string }[],
-  options: { skipExisting?: boolean; move?: boolean; then?: () => Promise<void> } = {},
+  options: { skipExisting?: boolean; move?: boolean; queue?: boolean; then?: () => Promise<void> } = {},
 ): CopyJob {
-  const running = [...jobs.values()].find((j) => j.kind === kind && j.label === label && j.state === "copying");
+  const running = [...jobs.values()].find((j) =>
+    j.kind === kind && j.label === label && (j.state === "copying" || j.state === "queued")
+  );
   if (running) return { ...running };
   const job: CopyJob = {
     id: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
     kind,
     label,
-    state: "copying",
+    state: options.queue ? "queued" : "copying",
     copied: 0,
     total: 0,
     error: null,
     startedAt: new Date().toISOString(),
   };
   jobs.set(job.id, job);
-  void (async () => {
+  const run = async () => {
+    job.state = "copying";
     const todo: { from: string; to: string; bytes: number }[] = [];
     try {
       for (const pair of pairs) {
@@ -232,6 +241,8 @@ export function startCopy(
       job.state = "failed";
       job.error = (error as Error).message;
     }
-  })();
+  };
+  if (options.queue) queue = queue.then(run);
+  else void run();
   return { ...job };
 }
