@@ -92,6 +92,9 @@ try {
     await Deno.copyFile(`../../native/7zip/${name}`, `${here}/Exordium/native/7zip/${name}`);
   }
   console.log(`Copied ${nativeSidecars.length} native sidecars and 7-Zip into Exordium/native.`);
+  // GPL-3.0 has every copy carry the licence, and NOTICE holds the attribution terms beside it.
+  await Deno.copyFile("../../LICENSE", `${here}/Exordium/LICENSE.txt`);
+  await Deno.copyFile("../../NOTICE", `${here}/Exordium/NOTICE.txt`);
 } catch (error) {
   console.error(`Could not copy native sidecars: ${error instanceof Error ? error.message : String(error)}`);
   Deno.exit(1);

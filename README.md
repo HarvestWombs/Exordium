@@ -427,13 +427,6 @@ The updater only accepts releases signed with a key in `RELEASE_PUBLIC_KEYS` (`a
 | `packages/launch` | The loader plan that `exordium-game.exe` consumes: archives, language, plugins, settings and the Battle.net decision. |
 | `docs` | The `exordium.mod.json` and update-feed schemas and examples. |
 
-The architecture, and the reverse engineering behind the loader, are written up in the HarvestLabs vault (`ExcelsiorDeno/docs/vault`):
-
-- `Projects/Exordium/Current State.md`: where the project is.
-- `Projects/Exordium/Architecture/`: Layers, Launcher, Registry, Library, Application, ModDB Source.
-- `Projects/Exordium/Decisions/`: why a profile is a box of layers, and other choices.
-- `Shared/Diablo-II/`: engine findings, such as how the Battle.net button is greyed in each core and where each core keeps its launch settings.
-
 ## Credits
 
 By Harvest ([GitHub](https://github.com/HarvestWombs), [donate](https://streamelements.com/cfs_harvest/tip)).
@@ -450,4 +443,6 @@ Archives are unpacked with [7-Zip](https://www.7-zip.org) by Igor Pavlov (GNU LG
 
 ## License
 
-[MIT](LICENSE). Diablo II is a trademark of Blizzard Entertainment. Exordium is not affiliated with or endorsed by Blizzard.
+Exordium is free software under the [GNU General Public License, version 3 or later](LICENSE), with additional terms under section 7(b) in [NOTICE](NOTICE): every copy, modified or not, keeps the author attribution and the credits above, in the source and on the app's Help, About page. A modified version can add its own authors beside them, but cannot remove them.
+
+Diablo II is a trademark of Blizzard Entertainment. Exordium is not affiliated with or endorsed by Blizzard.

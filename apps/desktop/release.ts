@@ -30,7 +30,7 @@ import {
 } from "./updater.ts";
 
 /** What packaging makes (package-app.ts): files at the top, and whole folders. */
-const APP_FILES = ["Exordium.exe", "Exordium.dll", ".downloaded", ".deno-desktop-app"];
+const APP_FILES = ["Exordium.exe", "Exordium.dll", "LICENSE.txt", "NOTICE.txt", ".downloaded", ".deno-desktop-app"];
 const APP_FOLDERS = ["native", "bin"];
 
 const here = (import.meta.dirname ?? Deno.cwd()).replace(/\\/g, "/");

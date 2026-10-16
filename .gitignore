@@ -17,3 +17,10 @@ Cores/
 
 # Release zips made by apps/desktop/release.ts.
 apps/desktop/release/
+
+# Compiler leftovers, and the loader's Defender probe builds.
+*.obj
+native/loader/probes/
+
+# Icon drafts and their Affinity sources: kept locally, not published.
+/icon ideas/

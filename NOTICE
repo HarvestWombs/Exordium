@@ -1,0 +1,46 @@
+Exordium, a launcher for Legacy Diablo II and its mods.
+Copyright (C) 2026 Harvest (HarvestLabs)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program, in the file LICENSE. If not, see <https://www.gnu.org/licenses/>.
+
+
+ADDITIONAL TERMS UNDER SECTION 7(b) OF THE GNU GENERAL PUBLIC LICENSE
+
+As permitted by section 7(b) of the GNU General Public License version 3, the
+following author attributions must be preserved in every copy of this program
+and of any work based on it, modified or not:
+
+  1. In the source code: this NOTICE file, unaltered except for additions under
+     point 3, and the Credits section of README.md.
+
+  2. In the program's user interface, among its Appropriate Legal Notices: the
+     attribution "Exordium by Harvest (HarvestLabs)", with a link to
+     https://github.com/HarvestWombs/Exordium, and the credits the original
+     shows on its Help, About page. A modified version that removes or
+     replaces that page must show the same attribution and credits in another
+     place the user can reach from the program's main interface.
+
+  3. A modified version may add its own authors' names beside these
+     attributions, but may not remove them.
+
+
+CREDITS
+
+Exordium stands on the work of Lectem and the contributors to D2MOO, Necrolis,
+Meanski, Szumigajowy, and The Phrozen Keep.
+
+Archives are unpacked with 7-Zip by Igor Pavlov, distributed with Exordium under
+its own licence (GNU LGPL with the unRAR restriction), in native/7zip.
+
+Diablo II is a trademark of Blizzard Entertainment. Exordium is not affiliated
+with or endorsed by Blizzard.
