@@ -528,6 +528,38 @@ bool write_code(HMODULE module, size_t offset, const std::vector<uint8_t>& bytes
     return true;
 }
 
+// Where the connect routine (`mov eax,[x]; sub esp,0x400`) is in D2Launch, found in the DLL's file on
+// disk, which no plugin has touched: its offset in memory, or 0 when the file does not have it exactly
+// once. PlugY's DisableBattleNet hooks the same routine before we get to it, replacing the sub with
+// `call PlugY; nop`, so in memory the signature is gone (seen 2026-10-28 on 1.09d and 1.10f).
+size_t connect_routine_on_disk(HMODULE launch) {
+    char path[MAX_PATH]{};
+    if (!GetModuleFileNameA(launch, path, MAX_PATH)) return 0;
+    const std::string file = read_file(path);
+    const auto* bytes = reinterpret_cast<const uint8_t*>(file.data());
+    size_t found = 0;
+    int count = 0;
+    for (size_t off = 0; off + 11 <= file.size(); ++off) {
+        const uint8_t* f = bytes + off;
+        if (f[0] == 0xA1 && f[5] == 0x81 && f[6] == 0xEC && f[7] == 0x00 && f[8] == 0x04 && f[9] == 0x00 && f[10] == 0x00) {
+            found = off;
+            ++count;
+        }
+    }
+    if (count != 1) return 0;
+    const auto* base = reinterpret_cast<const uint8_t*>(launch);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        if (found < section->PointerToRawData || found >= section->PointerToRawData + section->SizeOfRawData) continue;
+        const size_t rva = section->VirtualAddress + found - section->PointerToRawData;
+        // The routine's first instruction must still be the file's: only the sub may have been hooked.
+        return std::memcmp(base + rva, bytes + found, 5) == 0 ? rva : 0;
+    }
+    return 0;
+}
+
 // Closes official Battle.net for a mod without a custom realm (vault: Shared/Diablo-II/Main Menu
 // Battle.net Button). Both sites are found by signature in D2Launch's code; each matched exactly once
 // in every core from 1.00 to 1.13d (checked 2026-10-11), so no per-core table is kept.
@@ -538,7 +570,8 @@ bool write_code(HMODULE module, size_t offset, const std::vector<uint8_t>& bytes
 //   (TCP/IP) stays enabled. A control without its first flag draws at 50% and ignores input.
 // - Block: the routine every way onto Battle.net calls (the button, Open Battle.net, the retry
 //   dialogs), `mov eax,[x]; sub esp,0x400`. The sub becomes `ret`, so it returns before connecting:
-//   PlugY's DisableBattleNet without its hook.
+//   PlugY's DisableBattleNet without its hook. When PlugY has already hooked it, the routine is found
+//   on disk instead, and the `ret` goes over PlugY's call.
 //
 // Returns false only when the block cannot be applied; the caller refuses to start then.
 bool lock_battlenet(Log& log, HMODULE launch) {
@@ -551,12 +584,16 @@ bool lock_battlenet(Log& log, HMODULE launch) {
     } else {
         log.line("Battle.net: main-menu grey site not found (" + std::to_string(grey.size()) + " matches); button left as is.");
     }
-    const std::vector<size_t> entry = find_code(launch, {0xA1, -1, -1, -1, -1, 0x81, 0xEC, 0x00, 0x04, 0x00, 0x00});
-    if (entry.size() != 1 || !write_code(launch, entry[0] + 5, {0xC3, 0x90, 0x90, 0x90, 0x90, 0x90})) {
-        log.line("Battle.net: connect routine not found (" + std::to_string(entry.size()) + " matches).");
+    const std::vector<int> routine = {0xA1, -1, -1, -1, -1, 0x81, 0xEC, 0x00, 0x04, 0x00, 0x00};
+    const std::vector<size_t> entry = find_code(launch, routine);
+    const bool hooked = entry.empty();
+    const size_t at = entry.size() == 1 ? entry[0] : hooked ? connect_routine_on_disk(launch) : 0;
+    if (!at || !write_code(launch, at + 5, {0xC3, 0x90, 0x90, 0x90, 0x90, 0x90})) {
+        log.line("Battle.net: connect routine not found (" + std::to_string(entry.size()) + " matches in memory).");
         return false;
     }
-    log.line("Battle.net: connect blocked (no custom realm).");
+    log.line(hooked ? "Battle.net: connect blocked (no custom realm), over a plugin's hook."
+                    : "Battle.net: connect blocked (no custom realm).");
     return true;
 }
 
