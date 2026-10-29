@@ -371,7 +371,7 @@ You need [Deno](https://deno.com) 2 and, for the native parts, Visual Studio 202
 
 ```
 deno task verify        # fmt check, lint, type check, tests
-deno task build:loader  # native/loader/build/exordium-game.exe
+deno task build:loader  # native/loader/build/exordium-game.exe, and a copy per core as game/<core>/Game.exe
 deno task build:window  # native/window/build/exordium-window.dll, the desktop window hook
 ```
 

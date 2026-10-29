@@ -13,6 +13,7 @@ import {
   readSetupFile,
   type Renderer,
   rootCoreName,
+  scanNamed,
   type ScannedFile,
   toLayer,
 } from "@exordium/d2se";
@@ -116,9 +117,6 @@ const distDir = new URL("./dist/", import.meta.url);
 /** The name the loader has inside a box; see installNativeLoader. */
 const GAME_EXE = "Game.exe";
 /** Old injector-sidecar names. Release boxes delete these if an earlier build left them behind. */
-const LAUNCH_EXE = "exordium-launch.exe";
-const PRESENCE_EXE = "exordium-presence.exe";
-const HOOK_DLL = "exordium-hook.dll";
 const EXORDIUM_MOD_FILE = "exordium.mod.json";
 const EXPANSION_ARCHIVES = new Set(["d2exp.mpq", "d2xmusic.mpq", "d2xtalk.mpq", "d2xvideo.mpq"]);
 
@@ -1077,6 +1075,34 @@ async function buildBox(request: Request): Promise<Response> {
   }
 }
 
+/** The loader's per-core Game.exe copies (stamp-game.ts): beside the packaged app, or the native build. */
+function stampedGamesFolder(): string {
+  const exe = Deno.execPath().replaceAll("\\", "/");
+  return /(^|\/)deno(\.exe)?$/i.test(exe)
+    ? fileUrlPath(new URL("../../native/loader/build/game", import.meta.url))
+    : `${exe.replace(/\/[^/]*$/, "")}/native/game`;
+}
+
+/** The box's Game.exe before 1.14: the loader copy stamped with the core's own Game.exe version. */
+async function stampedGameExe(
+  core: string | null,
+  cache: Map<string, KnownFile>,
+): Promise<{ file: ResolvedFile; source: string }> {
+  const name = core?.trim().toLowerCase() ?? "";
+  const folder = `${stampedGamesFolder()}/${name}`;
+  const [found] = name ? await scanNamed(folder, [GAME_EXE], { hash: true, cache }).catch(() => []) : [];
+  if (!found?.hash) {
+    throw new HttpError(
+      500,
+      `No loader Game.exe for core ${core ?? "?"} in ${folder}. Run \`deno task build:loader\`.`,
+    );
+  }
+  return {
+    file: { path: GAME_EXE, hash: found.hash, size: found.size, layer: "loader", role: "core" },
+    source: `${folder}/${found.source}`,
+  };
+}
+
 async function boxSpecFor(root: string, target: BoxTarget) {
   const state = await readState();
   const coreVersion = target.kind === "core"
@@ -1144,12 +1170,20 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     throw new HttpError(422, loader.problems.map((problem) => problem.message).join("\n"));
   }
   const id = boxIdFor(imported.layout.root, target);
-  // Before 1.14 the box's Game.exe is exordium-game.exe, stamped in after the box is built
-  // (installLoaderAsGame), so the core's own Game.exe is left out of the box. Linked in and then
-  // replaced, it made every box look changed, and a second copy was refused while the first ran.
-  const boxPlan = loader.singleExe || loader.nativeGameExe
-    ? plan
-    : { ...plan, files: plan.files.filter((file) => file.path.toLowerCase() !== GAME_EXE.toLowerCase()) };
+  // Before 1.14 the box's Game.exe is the loader: the copy stamped for this core at build time,
+  // linked in like any other file in place of the core's (or a mod's) own Game.exe. It is added
+  // after the loader plan is made, which reads the game's own files.
+  let boxPlan = plan;
+  if (!loader.singleExe && !loader.nativeGameExe) {
+    const game = await stampedGameExe(setup.mod.core, cache);
+    await saveHashCache(cache);
+    sources.set(sourceKey(game.file.layer, game.file.path), game.source);
+    boxPlan = {
+      ...plan,
+      files: [...plan.files.filter((file) => file.path.toLowerCase() !== GAME_EXE.toLowerCase()), game.file]
+        .sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase())),
+    };
+  }
   return {
     imported,
     state,
@@ -4162,15 +4196,10 @@ async function installNativeLoader(
   othersRunning = false,
 ): Promise<{ config: string; log: string; launcher: string }> {
   // 1.14 keeps Blizzard's own Game.exe and is launched directly with registry/argument support only.
-  // Every pre-1.14 core gets exordium-game.exe stamped as Game.exe. Release builds intentionally do
-  // not ship or call the old remote-DLL-injection launcher.
+  // Every pre-1.14 core's Game.exe is the loader, linked in by the box (stampedGameExe).
   if (!othersRunning) {
-    await Deno.remove(`${folder}/${LAUNCH_EXE}`).catch(() => {});
-    await Deno.remove(`${folder}/${PRESENCE_EXE}`).catch(() => {});
-    await Deno.remove(`${folder}/${HOOK_DLL}`).catch(() => {});
-  }
-  if (!loader.singleExe && !loader.nativeGameExe) {
-    await installLoaderAsGame(folder, await nativeBuild("exordium-game.exe"), loader, identity, othersRunning);
+    // From when each box's Game.exe was a stamped copy.
+    await Deno.remove(`${folder.slice(0, folder.lastIndexOf("/"))}/loader-stamp.json`).catch(() => {});
   }
   await Deno.mkdir(sessions.folder, { recursive: true });
   // Copy 1 keeps the plain names, so running Game.exe by hand in the box still finds its config.
@@ -4189,8 +4218,9 @@ async function installNativeLoader(
         // Battle.net is reachable only for a mod with a custom realm. Off: exordium-game greys the
         // main-menu Battle.net button and blocks every way onto it (lock_battlenet in main.cpp).
         battlenetAllowed: loader.battlenetAllowed,
-        registryOnlyHook: false,
         game: GAME_EXE,
+        // The title's icon, which the loader puts on the game window (the taskbar's icon).
+        icon: identity.icon ?? "",
         // Run identity for future shortcut/session work. exordium-game currently ignores these.
         key: run.key,
         title: identity.title,
@@ -4233,93 +4263,6 @@ async function installNativeLoader(
     log,
     launcher: GAME_EXE,
   };
-}
-
-function nativeBuildPath(name: string): string {
-  return fileUrlPath(new URL(`../../native/loader/build/${name}`, import.meta.url));
-}
-
-/** One of the native builds (native/loader/build), which the packaged app carries. */
-async function nativeBuild(name: string): Promise<Uint8Array> {
-  const source = nativeBuildPath(name);
-  try {
-    return await Deno.readFile(source);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      throw new HttpError(500, `${name} is not built at ${source}. Run \`deno task build:loader\`.`);
-    }
-    throw error;
-  }
-}
-
-/** Pre-1.14: the loader becomes the box's Game.exe, stamped as the core's own. */
-async function installLoaderAsGame(
-  folder: string,
-  exe: Uint8Array,
-  loader: ReturnType<typeof buildLoaderPlan>,
-  identity: { title: string; icon: string | null },
-  othersRunning: boolean,
-): Promise<void> {
-  // The loader is the box's Game.exe. Anything already at that path is a link into a mod or the
-  // store, so it is unlinked first; writing would go through it.
-  const gameExe = `${folder}/${GAME_EXE}`;
-  const stamped = `${folder}/Game.stamp.exe`;
-  const version = (loader.gameExeVersion ?? [0, 0, 0, 0]).join(".");
-  // Copying and stamping cost ~200 ms, so they are skipped when the box's Game.exe was already made
-  // from this loader build with this version, title and icon. Kept beside the game folder, not in it,
-  // and gone with it when the box is rebuilt (the new folder has no Game.exe yet).
-  const iconInfo = identity.icon ? await Deno.stat(identity.icon).catch(() => null) : null;
-  const want = JSON.stringify({
-    loader: await sha256Hex(exe),
-    version,
-    title: identity.title,
-    icon: identity.icon ? `${identity.icon}|${iconInfo?.size}|${iconInfo?.mtime?.getTime()}` : null,
-  });
-  const markerFile = `${folder.slice(0, folder.lastIndexOf("/"))}/loader-stamp.json`;
-  const current = await Deno.stat(gameExe).catch(() => null);
-  const marker = await Deno.readTextFile(markerFile).then((text) => JSON.parse(text)).catch(() => null);
-  const upToDate = current?.isFile && marker?.identity === want && marker?.size === current.size;
-  // A running copy holds Game.exe open; a new title name or icon applies once every copy has closed.
-  if (!upToDate && !othersRunning) {
-    await stampLoader(exe, gameExe, stamped, folder, version, identity, markerFile, want);
-  }
-}
-
-async function stampLoader(
-  exe: Uint8Array,
-  gameExe: string,
-  stamped: string,
-  folder: string,
-  version: string,
-  identity: { title: string; icon: string | null },
-  markerFile: string,
-  want: string,
-): Promise<void> {
-  for (const path of [gameExe, stamped]) {
-    await Deno.remove(path).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-    });
-  }
-  await Deno.writeFile(gameExe, exe);
-  await Deno.writeFile(stamped, exe);
-  // Its resources carry the core's Game.exe version (plugins such as D2GL identify the game by
-  // GetFileVersionInfo("game.exe")), the title as its name (what Task Manager shows) and the title's
-  // icon (the taskbar). The box's copy stamps a second copy: the loader imports Storm.dll at load
-  // time, so it runs only beside the core's DLLs, and a running exe cannot rewrite itself.
-  const stamp = await new Deno.Command(gameExe, {
-    args: ["--stamp", winPath(stamped), version, identity.title, ...(identity.icon ? [identity.icon] : [])],
-    cwd: folder,
-  }).output();
-  if (!stamp.success) throw new HttpError(500, `Could not stamp Game.exe (exit ${stamp.code}).`);
-  await Deno.remove(gameExe);
-  await Deno.rename(stamped, gameExe);
-  const size = (await Deno.stat(gameExe)).size;
-  await Deno.writeTextFile(markerFile, JSON.stringify({ identity: want, size }) + "\n");
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes.slice());
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function sourceKey(layer: string, path: string): string {

@@ -17,7 +17,7 @@
   "tasks": {
     "test": "deno test -A packages apps/desktop",
     "check": "deno check packages apps/desktop/server.ts apps/desktop/src/main.tsx",
-    "build:loader": "powershell -NoProfile -ExecutionPolicy Bypass -File native/loader/build.ps1",
+    "build:loader": "powershell -NoProfile -ExecutionPolicy Bypass -File native/loader/build.ps1 && deno run -A apps/desktop/stamp-game.ts",
     "build:window": "powershell -NoProfile -ExecutionPolicy Bypass -File native/window/build.ps1",
     "verify": "deno fmt --check && deno lint && deno task check && deno task test",
     "cores:catalog": "deno run --allow-read=Cores --allow-write=Cores apps/desktop/cores.ts Cores"

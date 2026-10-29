@@ -1,60 +1,53 @@
 # Exordium native loader
 
-`exordium-game.exe` is the 32-bit process that runs inside a realised box.
+`exordium-game.exe` is the 32-bit process a box's game runs in, on every core from 1.00 to 1.13d. Exordium is 64-bit and
+Diablo II's DLLs are 32-bit, so each game needs a process of its own; this is it. It:
 
-This first version is a diagnostic loader. It proves the process architecture and DLL loading boundary before the D2SE
-MPQ and `D2Launch` game-loop handoff are filled in:
+- reads `exordium-loader.json` from the box's `game` folder;
+- installs the box's private registry (`RegOverridePredefKey` on a hive of its own);
+- follows `Game.exe`'s startup order: `FOG_SetLogPrefix`, `FOG_InitErrorMgr`, MPQ config and async data, the archive
+  stack, then the real D2Win startup exports, sound, plugin init, and `D2Launch`'s module loop;
+- loads D2Mod, PlugY and the mod's own DLLs in plan order, calling each plugin's init only once its signature has been
+  checked against the binary;
+- patches the game in memory: the Battle.net lockdown (D2Launch), Cactus's MPQ fix (Storm, so every core reads the 1.14
+  installer's archives), and the per-core config offsets for `-skiptobnet`, `-act` and `-seed`;
+- puts the title's icon on the game window.
 
-- starts as a 32-bit Windows executable;
-- runs from the box's `game` directory;
-- reads `exordium-loader.json`;
-- attempts the private registry hive override when a hive is provided;
-- loads game DLLs and plugin DLLs in plan order;
-- calls plugin init exports when configured;
-- resolves `D2Launch.dll!QueryInterface` and logs whether the handoff surface is present.
+The startup exports are versioned. D2SE's `FUN_00401a40` resolves them from tables indexed as
+`functionIndex * 0x28 + coreIndex * 4`; for example 1.10f uses D2Win `#10000` / `#10001`, while 1.13c uses `#10142` /
+`#10052`. Exordium keeps a table per core (`core_ordinals` in `src/main.cpp`).
 
-Startup follows `Game.exe` / D2SE order: `FOG_SetLogPrefix`, `FOG_InitErrorMgr`, MPQ config and async data, the archive
-stack, then D2Win window and sprite startup. Those exports are versioned. D2SE's `FUN_00401a40` resolves them from
-tables indexed as `functionIndex * 0x28 + coreIndex * 4`; for example 1.10f uses D2Win `#10000` / `#10001`, while 1.13c
-uses `#10142` / `#10052`.
+1.14 is not handled here: that runtime folded the classic DLLs into one executable, so a 1.14 box runs Blizzard's own
+`Game.exe`, with no loader and no plugins.
 
-The D2SE core slot order is `1.07`, `1.08`, `1.09b`, `1.09d`, `1.10f`, `1.11b`, `1.12a`, `1.13c`. The last two table
-slots are empty. Exordium currently maps the shared 1.07-1.10f ABI plus the separate 1.11b, 1.12a and 1.13c entries.
-1.14 is not in this table: that runtime folded the classic DLLs into the executable, so it takes a different path. The
-early 1.00-1.06b cores also take a different path because D2SE ships each of them with its own original `Game.exe`.
+## In a box
 
-- For 1.07-1.13d, `exordium-game.exe` is installed as the box's `Game.exe`. The desktop server starts it with
-  `--detach`, and the process relaunches itself with the Windows 7 layer when needed.
-- For 1.00-1.06b, the box keeps the core's original `Game.exe`. `exordium-launch.exe` starts it suspended, loads
-  `exordium-hook.dll`, and the hook only installs the box's private registry before the game runs. Custom MPQs and
-  plugins still need real early-core bootstrap tables before they can work here.
-- For 1.14, the box keeps Blizzard's `Game.exe`. `exordium-launch.exe` starts it suspended, loads `exordium-hook.dll`,
-  runs `ExordiumHookStart`, and resumes the game only if that returns 0. The hook gives the game the box's registry,
-  lets several copies run, and re-points two calls in 1.14d's startup (checked byte for byte first) so the mod's and
-  language MPQs open after the game's own archives, through the game's own `ARCHIVE_LoadMPQFile`, and close before them.
+The box's `Game.exe` is a symlink to `exordium-game.exe` stamped with that core's own `Game.exe` file version, because
+plugins such as D2GL identify the game by `GetFileVersionInfo("game.exe")`. `deno task build:loader` writes one stamped
+copy per core into `build/game/<core>/Game.exe` (`apps/desktop/stamp-game.ts`), packaging ships them in `native/game`,
+and the box links its core's copy like any other file. A symlinked exe still loads its DLLs from the link's folder and
+reports the link as its path, so the game and its plugins see the box.
 
-`exordium-launch.exe` answers `--detach`, `--wait` and `--dump-hive` and keeps session/play-time records for the boxes
-that use it (vault: `Projects/Exordium/Decisions/Sessions Are Kept by the Launcher.md`). When Rich Presence is enabled,
-it starts `exordium-presence.exe`, a small helper that only speaks Discord's local IPC and exits when the game or
-launcher exits. `src/common.hpp` holds what the native pieces share: the log, the config reader, the registry hive,
-import patching, and the commands Exordium runs.
+It is linked like `Game.exe`: no DEP (D2Mod plugins run code from data pages), fixed base, and `Storm.dll` as a
+load-time import (`src/storm.def`). A `LoadLibrary`'d Storm seeds its MPQ crypt table wrongly and can read no archive.
+The game's flags must be real process arguments, because plugins read `GetCommandLineA()`.
 
 It must run with Windows 7 behaviour. On Windows 8+, pre-1.14 Fog validates its critical sections, finds
-`DebugInfo == -1`, and dies of a stack overflow inside `FOG_InitErrorMgr`. The desktop server starts the loader with
-`__COMPAT_LAYER=WIN7RTM`, as D2SE.exe runs; started without it, the loader relaunches itself once under that layer.
-Details: the vault's `Shared/Diablo-II/Process Startup.md`.
+`DebugInfo == -1`, and dies of a stack overflow inside `FOG_InitErrorMgr`. The desktop server starts it with `--detach`,
+and it relaunches itself once under `__COMPAT_LAYER=WIN7RTM`, as D2SE.exe runs. Details: the vault's
+`Shared/Diablo-II/Process Startup.md`.
 
-In a box the loader is named `Game.exe`, with its version resource stamped to the core's `Game.exe` version, because
-D2GL identifies the game by `GetFileVersionInfo("game.exe")`. It is linked like `Game.exe`: no DEP (D2Mod plugins run
-code from data pages), fixed base, and `Storm.dll` as a load-time import (`src/storm.def`). A `LoadLibrary`'d Storm
-seeds its MPQ crypt table wrongly and can read no archive. The game's flags must be real process arguments, because
-plugins read `GetCommandLineA()`.
+Besides running a game it answers `--detach` (start the game and print its process id), `--wait <pid>` and `--dump-hive`
+(read a run's registry back), which the desktop server uses. `src/common.hpp` holds the log, the config reader, the
+registry hive and import patching.
 
 A vectored exception handler logs the first exceptions to `exordium-loader.log`. On a stack overflow it also logs the
 return addresses and the text left on the stack.
 
-Build:
+## Build
 
 ```powershell
 deno task build:loader
 ```
+
+Visual Studio 2022 with the C++ x86 tools. Run it from a normal PowerShell; Git Bash's `PATH` breaks `vcvars32.bat`.

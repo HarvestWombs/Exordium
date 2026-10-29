@@ -29,10 +29,3 @@ if (!(Test-Path $exe)) {
   throw "cl completed but did not create $exe"
 }
 Write-Host "Built $exe"
-
-Remove-Item -Force -ErrorAction SilentlyContinue `
-  (Join-Path $out "exordium-launch.exe"), `
-  (Join-Path $out "exordium-launch-nodiscord.exe"), `
-  (Join-Path $out "exordium-hook.dll"), `
-  (Join-Path $out "exordium-presence.exe")
-Write-Host "Release-safe loader build: launch/hook/presence are not built."

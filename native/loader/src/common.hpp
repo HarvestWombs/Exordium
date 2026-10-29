@@ -1,5 +1,5 @@
-// Shared by the loader (exordium-game.exe), the 1.14 launcher (exordium-launch.exe) and the hook
-// DLL (exordium-hook.dll): the log, the config reader, the box's registry, import patching, and the
+// The loader's (exordium-game.exe) shared pieces: the log, the config reader, the box's registry,
+// import patching, and the
 // commands Exordium runs. Everything here is Windows and the C++ library only: no game code.
 #pragma once
 

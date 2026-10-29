@@ -23,6 +23,8 @@ struct Plan {
     // The box's registry values, one per line (@exordium/registry hive-text); written into `hive`.
     std::string registryFile;
     std::string commandLine;
+    // The title's icon (PNG or .ico), put on the game window once it exists.
+    std::string icon;
     bool handoff = false;
     bool graphics = false;
     bool graphicsInit = false;
@@ -307,6 +309,7 @@ Plan read_plan(Log& log) {
     plan.hive = json_string(text, "hive");
     plan.registryFile = json_string(text, "registryFile");
     plan.commandLine = json_string(text, "commandLine");
+    plan.icon = json_string(text, "icon");
     plan.handoff = json_bool(text, "handoff", false);
     plan.graphics = json_bool(text, "graphics", false);
     plan.graphicsInit = json_bool(text, "graphicsInit", false);
@@ -555,6 +558,46 @@ bool lock_battlenet(Log& log, HMODULE launch) {
     }
     log.line("Battle.net: connect blocked (no custom realm).");
     return true;
+}
+
+// Lets every core's Storm read the MPQs of Blizzard's modern (1.14) installer: Cactus's "MPQ fix",
+// done in memory instead of on disk, and on every core rather than only 1.08 to 1.10 (vault:
+// Shared/Diablo-II/MPQ). Storm treats a sector it cannot decompress, as in the new archives'
+// (attributes), as fatal: `call decompress; test eax,eax; jnz done`, then SErr's fatal report
+// 0x85100083. The jnz becomes jmp, so the read ends quietly. 1.00 to 1.07 never read (attributes)
+// but have the same site; 1.11 on read the new archives already. Each Storm has the site exactly
+// once, in one of three layouts; one already fixed on disk (Cactus's, D2SE's 1.09, the catalog
+// cores) has the jmp, and is left as is.
+void fix_storm_mpq(Log& log) {
+    HMODULE storm = GetModuleHandleA("Storm.dll");
+    if (!storm) return;
+    const std::vector<std::vector<int>> layouts = {
+        // 1.00 to 1.07: push 1; push eax; push eax; mov reg,[esi+0x110]; add reg,8; push -4
+        {0x85, 0xC0, -1, -1, 0x6A, 0x01, 0x50, 0x50, 0x8B, -1, 0x10, 0x01, 0x00, 0x00, 0x83, -1, 0x08, 0x6A, 0xFC, -1,
+         0x68, 0x83, 0x00, 0x10, 0x85},
+        // 1.08 to 1.10: the mov first
+        {0x85, 0xC0, -1, -1, 0x8B, -1, 0x10, 0x01, 0x00, 0x00, 0x6A, 0x01, 0x50, 0x50, 0x83, -1, 0x08, 0x6A, 0xFC, -1,
+         0x68, 0x83, 0x00, 0x10, 0x85},
+        // 1.11 to 1.13d: push -4 before the add
+        {0x85, 0xC0, -1, -1, 0x8B, -1, 0x10, 0x01, 0x00, 0x00, 0x6A, 0x01, 0x50, 0x50, 0x6A, 0xFC, 0x83, -1, 0x08, -1,
+         0x68, 0x83, 0x00, 0x10, 0x85},
+    };
+    std::vector<size_t> hits;
+    for (const std::vector<int>& layout : layouts) {
+        for (size_t hit : find_code(storm, layout)) hits.push_back(hit);
+    }
+    if (hits.size() != 1) {
+        log.line("Storm: modern MPQ fix site not found (" + std::to_string(hits.size()) + " matches); left as is.");
+        return;
+    }
+    const uint8_t branch = reinterpret_cast<const uint8_t*>(storm)[hits[0] + 2];
+    if (branch == 0xEB) {
+        log.line("Storm: modern MPQ fix already in this Storm.dll.");
+    } else if (branch == 0x75 && write_code(storm, hits[0] + 2, {0xEB})) {
+        log.line("Storm: modern MPQ fix applied (1.14 installer archives readable).");
+    } else {
+        log.line("Storm: modern MPQ fix site not as expected; left as is.");
+    }
 }
 
 FARPROC proc_by_ordinal(HMODULE module, WORD ordinal) {
@@ -1838,127 +1881,52 @@ int relaunch(Log& log, const std::string& arguments, bool compatLayer) {
     return static_cast<int>(code);
 }
 
-// One node of a VS_VERSIONINFO tree: WORD length, WORD value length, WORD type, UTF-16 key,
-// padding to 4, value, padding to 4, children.
-struct VersionNode {
-    std::wstring key;
-    std::vector<unsigned char> value;
-    WORD valueLength = 0; // in WORDs for text, bytes for binary
-    WORD type = 0;        // 1 text, 0 binary
-    std::vector<VersionNode> children;
+// The title's icon on the game window. The taskbar button and Alt+Tab show the window's own icon,
+// which D2Gfx takes from Game.exe: a copy shared by every box of the core (stamp-game.ts), so the
+// title's own icon is set here instead. A PNG, as the library's art is, or an .ico; anything else,
+// or no icon, leaves the window as it is. The icons live as long as the process.
+struct WindowIcons {
+    HICON big = nullptr;
+    HICON small = nullptr;
+    int windows = 0;
 };
 
-void pad4(std::vector<unsigned char>& out) {
-    while (out.size() % 4) out.push_back(0);
+BOOL CALLBACK set_window_icons(HWND hwnd, LPARAM param) {
+    auto* icons = reinterpret_cast<WindowIcons*>(param);
+    if (GetWindow(hwnd, GW_OWNER)) return TRUE;
+    SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icons->big));
+    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icons->small));
+    ++icons->windows;
+    return TRUE;
 }
 
-void write_node(std::vector<unsigned char>& out, const VersionNode& node) {
-    const size_t start = out.size();
-    out.resize(start + 6);
-    for (wchar_t c : node.key) {
-        out.push_back(static_cast<unsigned char>(c & 0xFF));
-        out.push_back(static_cast<unsigned char>(c >> 8));
+HICON load_icon(const std::wstring& path, int size) {
+    const size_t dot = path.find_last_of(L'.');
+    if (dot != std::wstring::npos && _wcsicmp(path.c_str() + dot, L".ico") == 0) {
+        return static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, size, size, LR_LOADFROMFILE));
     }
-    out.push_back(0);
-    out.push_back(0);
-    pad4(out);
-    out.insert(out.end(), node.value.begin(), node.value.end());
-    for (const VersionNode& child : node.children) {
-        pad4(out);
-        write_node(out, child);
-    }
-    const WORD length = static_cast<WORD>(out.size() - start);
-    std::memcpy(&out[start], &length, 2);
-    std::memcpy(&out[start + 2], &node.valueLength, 2);
-    std::memcpy(&out[start + 4], &node.type, 2);
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return nullptr;
+    std::vector<BYTE> png(GetFileSize(file, nullptr));
+    DWORD read = 0;
+    const BOOL ok = ReadFile(file, png.data(), static_cast<DWORD>(png.size()), &read, nullptr);
+    CloseHandle(file);
+    if (!ok || read != png.size() || png.size() < 8 || std::memcmp(png.data() + 1, "PNG", 3) != 0) return nullptr;
+    return CreateIconFromResourceEx(png.data(), read, TRUE, 0x00030000, size, size, LR_DEFAULTCOLOR);
 }
 
-VersionNode version_string(const std::wstring& key, const std::wstring& text) {
-    VersionNode node{key, {}, static_cast<WORD>(text.size() + 1), 1, {}};
-    for (wchar_t c : text) {
-        node.value.push_back(static_cast<unsigned char>(c & 0xFF));
-        node.value.push_back(static_cast<unsigned char>(c >> 8));
+void set_title_icon(Log& log, const std::string& icon) {
+    if (icon.empty()) return;
+    const std::wstring path = widen(icon);
+    WindowIcons icons;
+    icons.big = load_icon(path, GetSystemMetrics(SM_CXICON));
+    icons.small = load_icon(path, GetSystemMetrics(SM_CXSMICON));
+    if (!icons.big || !icons.small) {
+        log.line("Window icon: could not read " + icon + " (PNG or .ico expected).");
+        return;
     }
-    node.value.push_back(0);
-    node.value.push_back(0);
-    return node;
-}
-
-std::vector<unsigned char> version_resource(const WORD (&version)[4], const std::wstring& name) {
-    VS_FIXEDFILEINFO fixed{};
-    fixed.dwSignature = VS_FFI_SIGNATURE;
-    fixed.dwStrucVersion = VS_FFI_STRUCVERSION;
-    fixed.dwFileVersionMS = fixed.dwProductVersionMS = static_cast<DWORD>(version[0]) << 16 | version[1];
-    fixed.dwFileVersionLS = fixed.dwProductVersionLS = static_cast<DWORD>(version[2]) << 16 | version[3];
-    fixed.dwFileFlagsMask = VS_FFI_FILEFLAGSMASK;
-    fixed.dwFileOS = VOS__WINDOWS32;
-    fixed.dwFileType = VFT_APP;
-    VersionNode root{L"VS_VERSION_INFO", {}, sizeof(fixed), 0, {}};
-    const auto* bytes = reinterpret_cast<const unsigned char*>(&fixed);
-    root.value.assign(bytes, bytes + sizeof(fixed));
-    const std::wstring dotted = std::to_wstring(version[0]) + L"." + std::to_wstring(version[1]) + L"." +
-                                std::to_wstring(version[2]) + L"." + std::to_wstring(version[3]);
-    VersionNode table{L"040904b0", {}, 0, 1, {}};
-    table.children = {
-        version_string(L"CompanyName", L"Exordium"),
-        version_string(L"FileDescription", name),
-        version_string(L"FileVersion", dotted),
-        version_string(L"InternalName", L"Game"),
-        version_string(L"OriginalFilename", L"Game.exe"),
-        version_string(L"ProductName", name),
-        version_string(L"ProductVersion", dotted),
-    };
-    VersionNode strings{L"StringFileInfo", {}, 0, 1, {table}};
-    VersionNode translation{L"Translation", {0x09, 0x04, 0xB0, 0x04}, 4, 0, {}};
-    VersionNode vars{L"VarFileInfo", {}, 0, 1, {translation}};
-    root.children = {strings, vars};
-    std::vector<unsigned char> out;
-    write_node(out, root);
-    return out;
-}
-
-// `Game.exe --stamp <exe> <a.b.c.d> <name> [icon.png]`: writes into a copy of the loader (not
-// running) the version resource plugins read — the core's Game.exe version, e.g. 1.0.10.39 for
-// 1.10f, since D2GL identifies the game by GetFileVersionInfo("game.exe") — with the mod's name as
-// its description, which Task Manager shows as the process's name; and, given a PNG, the icon the
-// taskbar shows (Windows reads PNG icon images directly, 256×256 best).
-int stamp(const std::wstring& target, const std::wstring& versionText, const std::wstring& name, const std::wstring& iconPath) {
-    WORD version[4]{};
-    if (swscanf_s(versionText.c_str(), L"%hu.%hu.%hu.%hu", &version[0], &version[1], &version[2], &version[3]) != 4) return 40;
-    const std::vector<unsigned char> versionInfo = version_resource(version, name);
-    HANDLE update = BeginUpdateResourceW(target.c_str(), FALSE);
-    if (!update) return 41;
-    const WORD english = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
-    bool ok = UpdateResourceW(update, MAKEINTRESOURCEW(16), MAKEINTRESOURCEW(1), english,
-                              const_cast<unsigned char*>(versionInfo.data()), static_cast<DWORD>(versionInfo.size())) != FALSE;
-    if (ok && !iconPath.empty()) {
-        const std::string png = read_file(narrow(iconPath).c_str());
-        unsigned width = 0, height = 0;
-        if (png.size() > 24 && png.compare(1, 3, "PNG") == 0) {
-            const auto* p = reinterpret_cast<const unsigned char*>(png.data());
-            width = static_cast<unsigned>(p[16] << 24 | p[17] << 16 | p[18] << 8 | p[19]);
-            height = static_cast<unsigned>(p[20] << 24 | p[21] << 16 | p[22] << 8 | p[23]);
-        }
-        ok = width && height && width <= 256 && height <= 256;
-        if (ok) {
-            ok = UpdateResourceW(update, MAKEINTRESOURCEW(3), MAKEINTRESOURCEW(1), english, const_cast<char*>(png.data()),
-                                 static_cast<DWORD>(png.size())) != FALSE;
-            // GRPICONDIR: reserved, type 1 (icon), count 1; one entry (width/height 0 means 256).
-            unsigned char group[20]{};
-            group[2] = 1;
-            group[4] = 1;
-            group[6] = static_cast<unsigned char>(width == 256 ? 0 : width);
-            group[7] = static_cast<unsigned char>(height == 256 ? 0 : height);
-            group[10] = 1;  // planes
-            group[12] = 32; // bits per pixel
-            const DWORD size = static_cast<DWORD>(png.size());
-            std::memcpy(&group[14], &size, 4);
-            group[18] = 1; // icon resource id
-            ok = ok && UpdateResourceW(update, MAKEINTRESOURCEW(14), MAKEINTRESOURCEW(1), english, group, sizeof(group)) != FALSE;
-        }
-    }
-    if (!EndUpdateResourceW(update, ok ? FALSE : TRUE)) return 42;
-    return ok ? 0 : 43;
+    EnumThreadWindows(GetCurrentThreadId(), set_window_icons, reinterpret_cast<LPARAM>(&icons));
+    log.line("Window icon: the title's, on " + std::to_string(icons.windows) + " window(s).");
 }
 
 int run_loader() {
@@ -1969,15 +1937,6 @@ int run_loader() {
         return detach(arguments, kCompatLayer);
     }
     if (__argc == 3 && std::strcmp(__argv[1], "--wait") == 0) return wait_for(__argv[2]);
-    if ((__argc == 5 || __argc == 6) && std::strcmp(__argv[1], "--stamp") == 0) {
-        // Wide arguments: a mod's name need not fit the ANSI code page.
-        int count = 0;
-        LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &count);
-        if (!wide || count < 5) return 44;
-        const int result = stamp(wide[2], wide[3], wide[4], count >= 6 ? wide[5] : L"");
-        LocalFree(wide);
-        return result;
-    }
     // D2SE.exe's manifest declares <dpiAware>true</dpiAware>. Without it Windows virtualises the
     // process's view of the screen, and D2Glide — which builds its font by drawing on the display DC
     // and reading it back with GetPixel, pixel by pixel — takes about 90 s per Glide window.
@@ -2018,6 +1977,7 @@ int run_loader() {
         log.line("Cannot continue: the box's registry is not in place, and the game would use the machine's.");
         return 10;
     }
+    fix_storm_mpq(log); // before anything opens an MPQ
     SFileCloseArchivePointer closeArchive = nullptr;
     std::vector<HANDLE> archives;
     FogBootstrap fog;
@@ -2054,6 +2014,7 @@ int run_loader() {
         teardown_fog(log, fog);
         return 8;
     }
+    set_title_icon(log, plan.icon);
     probe_mpqs(log, plan);
 
     SoundBootstrap sound;

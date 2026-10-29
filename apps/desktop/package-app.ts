@@ -16,8 +16,6 @@ const PACKAGE_ARGS = [
   "--include",
   "dist",
   "--include",
-  "../../native/loader/build/exordium-game.exe",
-  "--include",
   "../../native/window/build/exordium-window.dll",
   "--include",
   "assets/exordium.ico",
@@ -80,9 +78,6 @@ if (code !== 0) {
 
 try {
   await Deno.mkdir(`${here}/Exordium/native`, { recursive: true });
-  for (const stale of ["exordium-launch.exe", "exordium-hook.dll", "exordium-presence.exe"]) {
-    await Deno.remove(`${here}/Exordium/native/${stale}`).catch(() => {});
-  }
   for (const name of nativeSidecars) {
     await Deno.copyFile(`../../native/window/build/${name}`, `${here}/Exordium/native/${name}`);
   }
@@ -91,7 +86,21 @@ try {
   for (const name of SEVEN_ZIP_FILES) {
     await Deno.copyFile(`../../native/7zip/${name}`, `${here}/Exordium/native/7zip/${name}`);
   }
-  console.log(`Copied ${nativeSidecars.length} native sidecars and 7-Zip into Exordium/native.`);
+  // The loader as each core's Game.exe (stamp-game.ts), which boxes symlink: files on disk.
+  await Deno.remove(`${here}/Exordium/native/game`, { recursive: true }).catch(() => {});
+  let games = 0;
+  for await (const core of Deno.readDir("../../native/loader/build/game")) {
+    if (!core.isDirectory) continue;
+    await Deno.mkdir(`${here}/Exordium/native/game/${core.name}`, { recursive: true });
+    await Deno.copyFile(
+      `../../native/loader/build/game/${core.name}/Game.exe`,
+      `${here}/Exordium/native/game/${core.name}/Game.exe`,
+    );
+    games++;
+  }
+  console.log(
+    `Copied ${nativeSidecars.length} native sidecars, 7-Zip and ${games} loader Game.exe copies into Exordium/native.`,
+  );
   // GPL-3.0 has every copy carry the licence, and NOTICE holds the attribution terms beside it.
   await Deno.copyFile("../../LICENSE", `${here}/Exordium/LICENSE.txt`);
   await Deno.copyFile("../../NOTICE", `${here}/Exordium/NOTICE.txt`);
