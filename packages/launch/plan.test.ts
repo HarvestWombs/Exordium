@@ -233,18 +233,24 @@ Deno.test("optional game command switches are appended after the core launch fla
   assertEquals(command, "-w -ns -direct -skiptobnet -act5 -seed 123456");
 });
 
-Deno.test("PlugY is the mod's own: at its root, else in its PlugY folder; none shipped is a problem", () => {
+Deno.test("PlugY is whichever layer has it, at the root or in a PlugY folder; none starts without it", () => {
   const text = "[USERSETTINGS]\nEnablePlugY=1\n[Protected]\nD2Core=1.10f\nModAllowPlugY=1\n";
-  const load = (paths: string[]) =>
-    buildLoaderPlan(resolve({ files: [layer("mod", "mod", paths)], registry: [] }), setup(text));
-  const plugy = (paths: string[]) => load(paths).plugins.find((p) => p.kind === "plugy")?.path;
-  assertEquals(plugy(["PlugY/PlugY.dll", "PlugY/EmptyPage.dc6"]), "PlugY/PlugY.dll");
-  assertEquals(plugy(["PlugY.dll", "PlugY/PlugY.dll"]), "PlugY.dll");
-  assertEquals(plugy([]), undefined);
-  assertEquals(
-    load([]).problems.some((p) => p.message.startsWith("PlugY is turned on, but the mod does not ship PlugY.dll.")),
-    true,
+  const load = (layers: [string, string[]][]) =>
+    buildLoaderPlan(
+      resolve({ files: layers.map(([id, paths]) => layer(id, id === "mod" ? "mod" : "core", paths)), registry: [] }),
+      setup(text),
+    );
+  const plugy = (layers: [string, string[]][]) => load(layers).plugins.find((p) => p.kind === "plugy")?.path;
+  assertEquals(plugy([["mod", ["PlugY/PlugY.dll", "PlugY/EmptyPage.dc6"]]]), "PlugY/PlugY.dll");
+  assertEquals(plugy([["mod", ["PlugY.dll", "PlugY/PlugY.dll"]]]), "PlugY.dll");
+  // One the player put in the core's folder, or the PlugY folder from Settings.
+  assertEquals(plugy([["core", ["PlugY.dll"]], ["mod", []]]), "PlugY.dll");
+  assertEquals(plugy([["plugy", ["PlugY.dll", "PlugY/EmptyPage.dc6"]], ["mod", []]]), "PlugY.dll");
+  assertEquals(plugy([["mod", []]]), undefined);
+  const missing = load([["mod", []]]).problems.find((p) =>
+    p.message.startsWith("PlugY is turned on, but no PlugY.dll")
   );
+  assertEquals(missing?.level, "warning");
 });
 
 Deno.test("a 1.14 core runs Blizzard's Game.exe: no DLL handoff, and no plugins built for the old DLLs", () => {

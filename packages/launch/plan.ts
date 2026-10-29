@@ -82,14 +82,16 @@ export function buildLoaderPlan(
   const settings = launchSettings(setup);
   const plugins: PluginLoad[] = [];
   if (settings.plugY) {
-    // The mod's own PlugY: Exordium ships none and takes none from the install. At the mod's root, or
-    // in its PlugY folder (D2SE's layout); without either, PlugY on is reported below as a problem.
+    // Exordium ships no PlugY. The box's PlugY.dll is the mod's own, else one the player put in the
+    // core's folder, else the PlugY folder set in Settings (layered in that order). At the root, or in
+    // a PlugY folder (D2SE's layout). Without one the game starts without PlugY, with a warning.
     const path = !has("PlugY.dll") && has("PlugY/PlugY.dll") ? "PlugY/PlugY.dll" : "PlugY.dll";
     if (has(path)) plugins.push({ kind: "plugy", path, required: true, init: "_Init@4", release: "_Release@0" });
     else {
       problems.push({
-        level: "error",
-        message: "PlugY is turned on, but the mod does not ship PlugY.dll. Mods bring their own PlugY.",
+        level: "warning",
+        message: "PlugY is turned on, but no PlugY.dll was found in the mod, its core's folder or the PlugY " +
+          "folder in Settings, Launching. It starts without PlugY.",
       });
     }
   }

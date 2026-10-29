@@ -2,6 +2,7 @@ import {
   GAME_ARCHIVES,
   isSingleExeCore,
   type KnownFile,
+  launchSettings,
   layoutPath,
   LIBRARY_FOLDERS,
   type ModImport,
@@ -13,6 +14,7 @@ import {
   readSetupFile,
   type Renderer,
   rootCoreName,
+  scanFolder,
   scanNamed,
   type ScannedFile,
   toLayer,
@@ -587,6 +589,7 @@ async function scanD2SE(url: URL): Promise<Response> {
   const root = url.searchParams.get("root")?.trim();
   if (!root) return Response.json({ error: "Missing root" }, { status: 400 });
   const state = await readState();
+  const settings = appSettingsFromState(state);
   const imported = await readD2SE(root, { hash: false, hashWritable: false, linkData: true });
   if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
   const cores = new Map(imported.cores.map((core) => [core.version.toLowerCase(), core]));
@@ -604,7 +607,13 @@ async function scanD2SE(url: URL): Promise<Response> {
     const language = setup?.player.language?.toUpperCase() ?? null;
     const loader = setup
       ? buildLoaderPlan(
-        previewPlan(gameFilesForCore(imported.game, setup.mod.core), core, mod, language),
+        previewPlan(
+          gameFilesForCore(imported.game, setup.mod.core),
+          core,
+          mod,
+          language,
+          await plugYFolderFor(setup, settings, { hash: false }),
+        ),
         setup,
         loaderPlanOptions(setup),
       )
@@ -651,7 +660,13 @@ async function scanD2SE(url: URL): Promise<Response> {
     const language = setup?.player.language?.toUpperCase() ?? null;
     const loader = setup
       ? buildLoaderPlan(
-        previewPlan(gameFilesForCore(imported.game, setup.mod.core), core, null, language),
+        previewPlan(
+          gameFilesForCore(imported.game, setup.mod.core),
+          core,
+          null,
+          language,
+          await plugYFolderFor(setup, settings, { hash: false }),
+        ),
         setup,
         loaderPlanOptions(setup),
       )
@@ -1103,6 +1118,33 @@ async function stampedGameExe(
   };
 }
 
+/** The PlugY folder from Settings, Launching, as a box layer: its files, scanned. */
+interface PlugYFolder {
+  folder: string;
+  files: ScannedFile[];
+}
+
+/**
+ * The PlugY folder for a title, when it has PlugY on and the setting names a folder that holds
+ * PlugY.dll; null otherwise (a missing PlugY is the loader plan's warning, not an error here).
+ */
+async function plugYFolderFor(
+  setup: ModSetup | null,
+  settings: AppSettings,
+  options: { hash: boolean; cache?: Map<string, KnownFile> },
+): Promise<PlugYFolder | null> {
+  const folder = settings.launch.plugYFolder.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!folder || !setup || !launchSettings(setup).plugY) return null;
+  // Scanned as a mod folder, which keeps subfolders: PlugY's own PlugY folder is part of it.
+  const scan = await scanFolder(folder, "mod", {
+    hash: options.hash,
+    ...(options.cache ? { cache: options.cache } : {}),
+  })
+    .catch(() => null);
+  if (!scan?.layer.some((file) => /^(plugy\/)?plugy\.dll$/i.test(file.path))) return null;
+  return { folder, files: scan.layer };
+}
+
 async function boxSpecFor(root: string, target: BoxTarget) {
   const state = await readState();
   const coreVersion = target.kind === "core"
@@ -1164,6 +1206,7 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     core,
     mod,
     language,
+    await plugYFolderFor(setup, appSettingsFromState(state), { hash: true, cache }),
   );
   const loader = buildLoaderPlan(plan, setup, loaderPlanOptions(setup));
   if (loader.problems.some((problem) => problem.level === "error")) {
@@ -1391,6 +1434,11 @@ interface AppSettings {
     /** Minimize Exordium's window once a game has started. It keeps running: it follows the run. */
     minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
+    /**
+     * A folder holding PlugY.dll (and its PlugY folder): layered into the box of a title with PlugY on,
+     * below its core and mod, so a PlugY of their own wins. Empty: none. Exordium ships no PlugY.
+     */
+    plugYFolder: string;
   };
   boxes: {
     /** On each library read, delete the boxes of this install's titles that are gone. */
@@ -1461,6 +1509,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   launch: {
     minimizeOnLaunch: false,
     showLogsOnFailure: true,
+    plugYFolder: "",
   },
   boxes: {
     autoCleanStale: false,
@@ -2357,6 +2406,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   });
   mergeObject(next.launch, record.launch, {
     minimizeOnLaunch: "boolean",
+    plugYFolder: "string",
     showLogsOnFailure: "boolean",
   });
   mergeObject(next.boxes, record.boxes, {
@@ -2389,7 +2439,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   return next;
 }
 
-type SettingShape = Record<string, "boolean" | "number" | "string[]" | string[]>;
+type SettingShape = Record<string, "boolean" | "number" | "string" | "string[]" | string[]>;
 
 function mergeObject(target: Record<string, unknown>, source: unknown, shape: SettingShape): void {
   if (!isRecord(source)) return;
@@ -2397,6 +2447,7 @@ function mergeObject(target: Record<string, unknown>, source: unknown, shape: Se
     const value = source[key];
     if (spec === "boolean" && typeof value === "boolean") target[key] = value;
     else if (spec === "number" && typeof value === "number" && Number.isFinite(value)) target[key] = value;
+    else if (spec === "string" && typeof value === "string") target[key] = value.trim();
     else if (spec === "string[]" && Array.isArray(value)) {
       target[key] = value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
     } else if (Array.isArray(spec) && typeof value === "string" && spec.includes(value)) {
@@ -4097,6 +4148,7 @@ function buildRealPlan(
   } | null,
   mod: ModImport | null,
   language: string | null,
+  plugY: PlugYFolder | null = null,
 ): { plan: Plan; sources: Map<string, string> } {
   const layers: FileLayer[] = [];
   const sources = new Map<string, string>();
@@ -4106,6 +4158,11 @@ function buildRealPlan(
 
   layers.push(toLayer("game", "game", game));
   addSources("game", root, game);
+
+  if (plugY) {
+    layers.push(toLayer("plugy", "core", plugY.files));
+    addSources("plugy", plugY.folder, plugY.files);
+  }
 
   if (core) {
     const coreBase = coreFolder(root, core.version);
@@ -4276,12 +4333,14 @@ function previewPlan(
   } | null,
   mod: ModImport | null,
   language: string | null,
+  plugY: PlugYFolder | null = null,
 ): Plan {
   const files = new Map<string, ResolvedFile>();
   const add = (path: string, size: number, layer: string, role: ResolvedFile["role"]) => {
     files.set(path.toLowerCase(), { path, hash: "0".repeat(64), size, layer, role });
   };
   for (const file of game) add(file.path, file.size, "game", "game");
+  for (const file of plugY?.files ?? []) add(file.path, file.size, "plugy", "core");
   for (const file of core?.scan.layer ?? []) add(file.path, file.size, "core", "core");
   for (const file of mod?.scan.layer ?? []) add(file.path, file.size, "mod", "mod");
   if (language && language !== "MOD") {

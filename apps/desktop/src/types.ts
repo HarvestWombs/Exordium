@@ -242,6 +242,8 @@ export interface AppPreferences {
   launch: {
     minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
+    /** A folder holding PlugY.dll, used by titles with PlugY on that bring none. Empty: none. */
+    plugYFolder: string;
   };
   boxes: {
     autoCleanStale: boolean;

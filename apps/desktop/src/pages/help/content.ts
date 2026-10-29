@@ -130,7 +130,8 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Plugins and PlugY",
         paragraphs: [
-          "Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY: a mod that uses PlugY brings its own PlugY.dll, and Exordium hooks it up. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
+          "Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll; failing that, one you put in its core's folder (library, cores); failing that, the PlugY folder you set in Settings, Launching. With none of those it starts without PlugY, and its page says so. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
+          "Some D2SE mods turn PlugY on without shipping it, because D2SE supplied one. Give those a PlugY through the core's folder or Settings, or turn PlugY off in the title's Properties.",
         ],
       },
     ],
@@ -297,7 +298,7 @@ export const TOPICS: HelpTopicContent[] = [
         heading: "Common messages",
         list: [
           "**Needs core 1.10f, which this install does not have**: press Install core on the mod's page, or install it from Browse, Cores.",
-          "**PlugY is turned on, but the mod does not ship PlugY.dll**: turn PlugY off in the title's Properties, or add PlugY to the mod's folder.",
+          "**PlugY is turned on, but no PlugY.dll was found**: a warning, not a stop; the game starts without PlugY. To use it, put PlugY in the mod's folder or its core's folder, or set a PlugY folder in Settings, Launching. Or turn PlugY off in the title's Properties.",
           "**The mod changed since the running copy started**: a file in the box changed while a copy was running. Close every copy, then start again.",
           "**Cannot bootstrap gfx: D2Win.dll or D2Gfx.dll did not load**: the game's own DLLs are incomplete. Rebuild the box (Properties, Files); if it persists, the core is damaged, so reinstall it.",
           "**Battle.net could not be closed for this core**: the mod replaces the game's D2Launch.dll with one Exordium does not recognise. Tell the mod's author.",
@@ -361,7 +362,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Plugins and PlugY",
         paragraphs: [
-          "Ship PlugY.dll at the mod's root, or in a PlugY folder as D2SE mods do, if the mod uses PlugY. Exordium does not provide one, and turning PlugY on without it stops the launch with a message saying so. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
+          "Ship PlugY.dll at the mod's root, or in a PlugY folder as D2SE mods do, if the mod uses PlugY. Exordium does not provide one. Without it, a player's own PlugY (in the core's folder, or the PlugY folder in Settings) is used if they have one; otherwise the game starts without PlugY, with a warning. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
         ],
       },
       {
@@ -587,7 +588,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Does it work with PlugY, D2Mod and other plugins?",
     a: [
-      "PlugY and D2Mod, yes, when the mod brings them. Other plugin DLLs load when the mod lists them. D2SE's own plugin systems are not loaded.",
+      "Yes. D2Mod and other plugin DLLs load when the mod brings and lists them. PlugY is the mod's own, else one you put in the core's folder or set in Settings, Launching; Exordium ships none. D2SE's own plugin systems are not loaded.",
     ],
   },
   {

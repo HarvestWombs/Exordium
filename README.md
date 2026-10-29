@@ -89,7 +89,7 @@ Use **Library, Import** or **Browse**: either way, the mod ends up in the librar
 
 **The converter** shows the `exordium.mod.json` it will write: the fields on top, and below them the JSON, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move. Imports queue up and run one at a time in the background, so you can close the converter while they finish.
 
-**Plugins and PlugY.** Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY: a mod that uses PlugY brings its own `PlugY.dll`, and Exordium hooks it up. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
+**Plugins and PlugY.** Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY. A title with PlugY on uses the mod's own `PlugY.dll`; failing that, one you put in its core's folder (`library\cores\<core>`); failing that, the PlugY folder set in Settings, Launching. With none of those it starts without PlugY, with a warning. Some D2SE mods turn PlugY on without shipping it, because D2SE supplied one: give those a PlugY that way, or turn PlugY off in the title's Properties. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
 
 ### Cores
 
@@ -160,7 +160,7 @@ When a game does not start, open the title's **Logs** tab. Exordium opens it for
 | Message | What to do |
 |---|---|
 | Needs core 1.10f, which this install does not have | Press Install core on the mod's page, or install it from Browse, Cores. |
-| PlugY is turned on, but the mod does not ship PlugY.dll | Turn PlugY off in the title's Properties, or add PlugY to the mod's folder. |
+| PlugY is turned on, but no PlugY.dll was found | A warning: the game starts without PlugY. To use it, put PlugY in the mod's or its core's folder, or set a PlugY folder in Settings, Launching. |
 | The mod changed since the running copy started | A file in the box changed while a copy was running. Close every copy, then start again. |
 | Cannot bootstrap gfx: D2Win.dll or D2Gfx.dll did not load | The game's own DLLs are incomplete. Rebuild the box (Properties, Files). If it persists, the core is damaged, so reinstall it. |
 | Battle.net could not be closed for this core | The mod replaces the game's `D2Launch.dll` with one Exordium does not recognise. Tell the mod's author. |
@@ -202,7 +202,7 @@ Yes. Press Play again while a title runs; each copy gets its own registry and lo
 About 2 GB for the game files, a few MB per core, and each mod's own size. Boxes are made of links, so they take almost nothing. When importing from D2SE, *Move instead of copy* avoids keeping a mod twice.
 
 **Does it work with PlugY, D2Mod and other plugins?**
-PlugY and D2Mod do, when the mod brings them. Other plugin DLLs load when the mod lists them. D2SE's own plugin systems are not loaded.
+Yes. D2Mod and other plugin DLLs load when the mod brings and lists them. PlugY is the mod's own, else one you put in the core's folder or set in Settings, Launching; Exordium ships none. D2SE's own plugin systems are not loaded.
 
 **Does it work with D2GL, dgVoodoo and other wrappers?**
 Yes. Setup copies the wrappers in your Diablo II folder, and a mod can bring its own. With Glide, the wrapper's own settings decide the window.
@@ -259,7 +259,7 @@ The full schema is [`docs/exordium.mod.schema.json`](docs/exordium.mod.schema.js
 | `loads` | What is loaded into the game: `d2mod` (D2Mod.dll), `mpqs` (your MPQs, lowest priority first) and `dlls` (other plugin DLLs, in load order). |
 | `realm` | The mod's own server, if it has one ([Realms](#realms)). |
 
-**Plugins and PlugY.** If the mod uses PlugY, ship `PlugY.dll` at the mod's root, or in a `PlugY` folder as D2SE mods do. Exordium does not provide one, and turning PlugY on without it stops the launch with a message saying so. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
+**Plugins and PlugY.** If the mod uses PlugY, ship `PlugY.dll` at the mod's root, or in a `PlugY` folder as D2SE mods do. Exordium does not provide one. Without it, a player's own PlugY (in the core's folder, or the PlugY folder in Settings) is used if they have one; otherwise the game starts without PlugY, with a warning. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
 
 **Languages.** Every core carries the twelve language MPQs. A mod that ships its own texts for a language puts them in a `Language_ENG` (or `DEU`, `FRA` and so on) folder, which is used when the player picks that language. Set `launch.language` to `MOD` to use no language folder at all.
 

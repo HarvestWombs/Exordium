@@ -96,6 +96,45 @@ export function NumberRow(
   );
 }
 
+/** A folder the player chooses (Windows' folder picker), or none. */
+export function FolderRow(
+  { label, hint, value, disabled, onChange }: {
+    label: string;
+    hint?: string;
+    value: string;
+    disabled?: boolean;
+    onChange: (value: string) => void;
+  },
+) {
+  async function choose() {
+    const params = new URLSearchParams({ title: label });
+    if (value) params.set("path", value);
+    const response = await fetch(`/api/pick-folder?${params}`);
+    if (!response.ok) return;
+    const body = await response.json().catch(() => ({}));
+    if (typeof body.path === "string" && body.path) onChange(body.path);
+  }
+  return (
+    <div className="settings-row">
+      <span className="settings-label">
+        {label}
+        {hint && <small className="settings-hint">{hint}</small>}
+      </span>
+      <div className="path-actions">
+        <code>{value || "Not set"}</code>
+        <button type="button" className="ghost" disabled={disabled} onClick={() => void choose()}>
+          Choose…
+        </button>
+        {value && (
+          <button type="button" className="ghost" disabled={disabled} onClick={() => onChange("")}>
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PathRow({ label, value, openKey }: { label: string; value: string; openKey?: string }) {
   return (
     <div className="settings-row">

@@ -1,5 +1,6 @@
 import * as React from "react";
 import {
+  FolderRow,
   NumberRow,
   PathRow,
   SelectRow,
@@ -177,6 +178,15 @@ export function SettingsSectionView(
             checked={s.launch.showLogsOnFailure}
             disabled={busy}
             onChange={(value) => onPatch({ launch: { showLogsOnFailure: value } })}
+          />
+        </SettingsGroup>
+        <SettingsGroup title="PlugY">
+          <FolderRow
+            label="PlugY folder"
+            hint="Exordium ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll, else one in its core's folder, else the one in this folder. Without any, it starts without PlugY."
+            value={s.launch.plugYFolder}
+            disabled={busy}
+            onChange={(value) => onPatch({ launch: { plugYFolder: value } })}
           />
         </SettingsGroup>
       </>
