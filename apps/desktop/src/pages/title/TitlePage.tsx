@@ -1,7 +1,9 @@
+import { plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { Lightbox } from "../../components/Lightbox.tsx";
 import { Stat } from "../../components/Stat.tsx";
 import { GearIcon, HeartIcon, PlayIcon, TitleIcon } from "../../components/icons.tsx";
+import { useTranslation } from "../../hooks/useTranslation.tsx";
 import { artUrl, screenshotUrl } from "../../lib/art.ts";
 import { openLink, playTime, relative, RENDERERS } from "../../lib/util.ts";
 import type { Character, Playtime, Screenshot, Tab, Title } from "../../types.ts";
@@ -52,6 +54,7 @@ export function TitlePage(
   },
 ) {
   const errors = t.problems.filter((p) => p.level === "error");
+  const translation = useTranslation(t.description ?? "");
   const [characters, setCharacters] = React.useState<Character[] | null>(null);
   const [screenshots, setScreenshots] = React.useState<Screenshot[] | null>(null);
   React.useEffect(() => {
@@ -91,7 +94,7 @@ export function TitlePage(
     <>
       <section className={t.art.banner === "png" ? "hero art" : "hero"}>
         <button type="button" className="page-back" onClick={onBack}>
-          ‹ Library
+          {tr("‹ Library")}
         </button>
         {t.art.banner === "png" && <img className="hero-art" src={artUrl(root, t.key, "banner", art)} alt="" />}
         {t.art.banner === "d2se" && (
@@ -101,11 +104,13 @@ export function TitlePage(
         )}
         <div className="hero-text">
           <div className={t.author ? "eyebrow accent" : "eyebrow accent unknown"}>
-            {t.author ? `BY ${t.author.toUpperCase()}` : "AUTHOR UNKNOWN"}
+            {t.author ? tr("BY {author}", { author: t.author.toUpperCase() }) : tr("AUTHOR UNKNOWN")}
           </div>
           <h1>{t.title}</h1>
           <div className="hero-sub">
-            {t.kind === "core" ? `VANILLA · CORE ${t.core}` : `MOD · CORE ${t.core ?? "?"}`}
+            {t.kind === "core"
+              ? tr("VANILLA · CORE {core}", { core: t.core })
+              : tr("MOD · CORE {core}", { core: t.core ?? "?" })}
             {t.version ? ` · V${t.version}` : ""}
           </div>
         </div>
@@ -119,14 +124,17 @@ export function TitlePage(
               type="button"
               className="play"
               disabled={coreJob !== null}
-              title={`This mod runs on core ${missingCore}, which is not in your library yet.`}
+              title={tr("This mod runs on core {missingCore}, which is not in your library yet.", { missingCore })}
               onClick={() => onInstallCore(missingCore)}
             >
               {coreJob
-                ? `INSTALLING ${coreJob.core}${
-                  coreJob.total > 0 ? ` · ${Math.min(100, Math.round((coreJob.received / coreJob.total) * 100))}%` : "…"
-                }`
-                : `INSTALL CORE ${missingCore}`}
+                ? tr("INSTALLING {core}{progress}", {
+                  core: coreJob.core,
+                  progress: coreJob.total > 0
+                    ? ` · ${Math.min(100, Math.round((coreJob.received / coreJob.total) * 100))}%`
+                    : "…",
+                })
+                : tr("INSTALL CORE {missingCore}", { missingCore })}
             </button>
           )
           : (
@@ -134,12 +142,12 @@ export function TitlePage(
               type="button"
               className="play"
               disabled={starting || errors.length > 0}
-              title={running > 0 ? `${running} running — start another copy` : undefined}
+              title={running > 0 ? tr("{running} running — start another copy", { running }) : undefined}
               onClick={onPlay}
             >
-              {starting ? "STARTING…" : (
+              {starting ? tr("STARTING…") : (
                 <>
-                  <PlayIcon /> PLAY
+                  <PlayIcon /> {tr("PLAY")}
                   {running > 0 && <span className="play-count" aria-label={`${running} running`}>{running}</span>}
                 </>
               )}
@@ -149,28 +157,28 @@ export function TitlePage(
           <TitleIcon t={t} root={root} art={art} size={28} />
           <span>{t.title}</span>
         </div>
-        <Stat label="LAST PLAYED" value={playedAt ? relative(playedAt) : "Never"} />
-        <Stat label="PLAY TIME" value={playtime ? playTime(playtime.seconds) : "—"} />
+        <Stat label={tr("LAST PLAYED")} value={playedAt ? relative(playedAt) : "Never"} />
+        <Stat label={tr("PLAY TIME")} value={playtime ? playTime(playtime.seconds) : "—"} />
         <Stat
-          label="RENDERER"
+          label={tr("RENDERER")}
           value={t.settings
-            ? `${RENDERERS[t.settings.renderer] ?? t.settings.renderer}${t.settings.windowed ? " · windowed" : ""}`
+            ? `${RENDERERS[t.settings.renderer] ?? t.settings.renderer}${t.settings.windowed ? tr(" · windowed") : ""}`
             : "—"}
         />
-        <Stat label="CHARACTERS" value={characters === null ? "…" : String(characters.length)} />
-        {running > 0 && <Stat label="RUNNING" value={running === 1 ? "1 copy" : `${running} copies`} />}
+        <Stat label={tr("CHARACTERS")} value={characters === null ? "…" : String(characters.length)} />
+        {running > 0 && <Stat label={tr("RUNNING")} value={plural(running, "{count} copy", "{count} copies")} />}
         <div className="grow" />
         <button
           type="button"
           className={favorite ? "square favorite on" : "square favorite"}
-          aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+          aria-label={favorite ? tr("Remove from favorites") : tr("Add to favorites")}
           aria-pressed={favorite}
-          title={favorite ? "Remove from favorites" : "Add to favorites"}
+          title={favorite ? tr("Remove from favorites") : tr("Add to favorites")}
           onClick={onFavorite}
         >
           <HeartIcon filled={favorite} />
         </button>
-        <button type="button" className="square" aria-label="Properties" onClick={onProperties}>
+        <button type="button" className="square" aria-label={tr("Properties")} onClick={onProperties}>
           <GearIcon />
         </button>
       </div>
@@ -185,7 +193,14 @@ export function TitlePage(
             className={tab === name ? "tab on" : "tab"}
             onClick={() => onTab(name)}
           >
-            {name[0]!.toUpperCase() + name.slice(1)}
+            {{
+              overview: tr("Overview"),
+              documentation: tr("Documentation"),
+              changelogs: tr("Changelogs"),
+              screenshots: tr("Screenshots"),
+              backups: tr("Backups"),
+              logs: tr("Logs"),
+            }[name]}
             {name === "screenshots" && t.screenshots > 0 ? ` · ${t.screenshots}` : ""}
             {name === "documentation" && t.docs.length > 0 ? ` · ${t.docs.length}` : ""}
             {name === "changelogs" && t.changelogs.length > 0 ? ` · ${t.changelogs.length}` : ""}
@@ -199,25 +214,27 @@ export function TitlePage(
             <div className="overview-main">
               <section className="characters">
                 <div className="section-head">
-                  <h2 className="eyebrow">CHARACTERS</h2>
+                  <h2 className="eyebrow">{tr("CHARACTERS")}</h2>
                   <span className="muted small">
-                    from {t.kind === "core" ? "the core's" : "the mod's"} own save folder
+                    {t.kind === "core" ? tr("from the core's own save folder") : tr("from the mod's own save folder")}
                   </span>
                 </div>
-                {characters === null && <p className="muted">Reading saves…</p>}
-                {characters?.length === 0 && <p className="muted">No characters yet.</p>}
+                {characters === null && <p className="muted">{tr("Reading saves…")}</p>}
+                {characters?.length === 0 && <p className="muted">{tr("No characters yet.")}</p>}
                 <div className="char-grid">
                   {characters?.map((c) => (
                     <div className="char" key={c.name}>
                       <span className="char-name">{c.name}</span>
-                      <span className="char-meta">Level {c.level} {c.className}</span>
+                      <span className="char-meta">
+                        {tr("Level {level} {className}", { level: c.level, className: c.className })}
+                      </span>
                       <span className="char-tags">
                         {c.expansion
-                          ? <span className="good-text">Expansion</span>
-                          : <span className="muted">Classic</span>}
+                          ? <span className="good-text">{tr("Expansion")}</span>
+                          : <span className="muted">{tr("Classic")}</span>}
                         {c.hardcore && (
                           <span className={c.dead ? "bad-text" : "warn-text"}>
-                            {c.dead ? "Hardcore · dead" : "Hardcore"}
+                            {c.dead ? tr("Hardcore · dead") : tr("Hardcore")}
                           </span>
                         )}
                       </span>
@@ -227,8 +244,9 @@ export function TitlePage(
               </section>
               {t.description && (
                 <section className="about-mod">
-                  <h2 className="eyebrow">ABOUT THIS MOD</h2>
-                  <p>{t.description}</p>
+                  <h2 className="eyebrow">{tr("ABOUT THIS MOD")}</h2>
+                  <p>{translation.text}</p>
+                  <div className="mod-under">{translation.button}</div>
                 </section>
               )}
               <ScreenshotStrip root={root} t={t} />
@@ -237,22 +255,22 @@ export function TitlePage(
             </div>
             <aside className="side">
               <section className="card">
-                <h2 className="eyebrow">DETAILS</h2>
+                <h2 className="eyebrow">{tr("DETAILS")}</h2>
                 <dl className="kv">
-                  <dt>Version</dt>
+                  <dt>{tr("Version")}</dt>
                   <dd>{t.version ?? "—"}</dd>
-                  <dt>Core</dt>
+                  <dt>{tr("Core")}</dt>
                   <dd>{t.core ?? "—"}</dd>
-                  <dt>Author</dt>
-                  <dd>{t.author ?? "Unknown"}</dd>
-                  <dt>Sessions</dt>
+                  <dt>{tr("Author")}</dt>
+                  <dd>{t.author ?? tr("Unknown")}</dd>
+                  <dt>{tr("Sessions")}</dt>
                   <dd>{playtime?.runs ?? 0}</dd>
                 </dl>
               </section>
               <section className="card">
-                <h2 className="eyebrow">LINKS</h2>
+                <h2 className="eyebrow">{tr("LINKS")}</h2>
                 {t.links.length === 0
-                  ? <p className="muted small">None yet. Add a website or Discord in Properties.</p>
+                  ? <p className="muted small">{tr("None yet. Add a website or Discord in Properties.")}</p>
                   : (
                     <ul className="links">
                       {t.links.map((link) => (
@@ -274,37 +292,37 @@ export function TitlePage(
                   )}
               </section>
               <section className="card">
-                <h2 className="eyebrow">HOW IT LAUNCHES</h2>
+                <h2 className="eyebrow">{tr("HOW IT LAUNCHES")}</h2>
                 {t.settings
                   ? (
                     <dl className="kv">
-                      <dt>Renderer</dt>
+                      <dt>{tr("Renderer")}</dt>
                       <dd>{RENDERERS[t.settings.renderer] ?? t.settings.renderer}</dd>
-                      <dt>Window</dt>
-                      <dd>{t.settings.windowed ? "Windowed" : "Fullscreen"}</dd>
-                      <dt>Data</dt>
+                      <dt>{tr("Window")}</dt>
+                      <dd>{t.settings.windowed ? tr("Windowed") : tr("Fullscreen")}</dd>
+                      <dt>{tr("Data")}</dt>
                       <dd>
                         {[t.settings.direct && "-direct", t.settings.txt && "-txt"].filter(Boolean).join(" ") ||
-                          "MPQs only"}
+                          tr("MPQs only")}
                       </dd>
-                      <dt>Options</dt>
+                      <dt>{tr("Options")}</dt>
                       <dd>
                         {[
                           t.settings.noSound && "-ns",
                           t.settings.skipToBNet && "-skiptobnet",
                           t.settings.startAct && `-act${t.settings.startAct}`,
                           t.settings.seed && `-seed ${t.settings.seed}`,
-                        ].filter(Boolean).join(" ") || "Default"}
+                        ].filter(Boolean).join(" ") || tr("Default")}
                       </dd>
-                      <dt>Language</dt>
-                      <dd>{t.settings.language ?? "MOD"}</dd>
+                      <dt>{tr("Language")}</dt>
+                      <dd>{t.settings.language ?? tr("MOD")}</dd>
                     </dl>
                   )
-                  : <p className="muted">No D2SE_SETUP.ini.</p>}
+                  : <p className="muted">{tr("No D2SE_SETUP.ini.")}</p>}
               </section>
               <section className="card">
-                <h2 className="eyebrow">PLUGINS</h2>
-                {t.plugins.length === 0 ? <p className="muted">None.</p> : (
+                <h2 className="eyebrow">{tr("PLUGINS")}</h2>
+                {t.plugins.length === 0 ? <p className="muted">{tr("None.")}</p> : (
                   <div className="pills">
                     {t.plugins.map((p) => <span className="pill" key={p.path}>{p.path.replace(/\.dll$/i, "")}</span>)}
                   </div>
@@ -314,7 +332,7 @@ export function TitlePage(
                 {t.problems.length === 0
                   ? (
                     <p>
-                      <span className="dot good" /> Ready to play. No problems found.
+                      <span className="dot good" /> {tr("Ready to play. No problems found.")}
                     </p>
                   )
                   : (
@@ -331,24 +349,24 @@ export function TitlePage(
           <DocPanel
             titleKey={t.key}
             entries={t.docs}
-            empty="This mod ships no documentation: no readme, and no HTML pages in its folder."
+            empty={tr("This mod ships no documentation: no readme, and no HTML pages in its folder.")}
           />
         )}
 
         {tab === "changelogs" && (
-          <DocPanel titleKey={t.key} entries={t.changelogs} empty="No changelog found in the mod's folder." />
+          <DocPanel titleKey={t.key} entries={t.changelogs} empty={tr("No changelog found in the mod's folder.")} />
         )}
 
         {tab === "screenshots" && (
           <section className="screenshots">
             <div className="section-head">
-              <h2 className="eyebrow">SCREENSHOTS</h2>
+              <h2 className="eyebrow">{tr("SCREENSHOTS")}</h2>
               <span className="muted small">
-                from {t.kind === "core" ? "the core's" : "the mod's"} Screenshots folder
+                {t.kind === "core" ? tr("from the core's Screenshots folder") : tr("from the mod's Screenshots folder")}
               </span>
             </div>
-            {screenshots === null && <p className="muted">Reading screenshots…</p>}
-            {screenshots?.length === 0 && <p className="muted">No screenshots found.</p>}
+            {screenshots === null && <p className="muted">{tr("Reading screenshots…")}</p>}
+            {screenshots?.length === 0 && <p className="muted">{tr("No screenshots found.")}</p>}
             <div className="screenshot-grid">
               {screenshots?.map((shot, i) => (
                 <button

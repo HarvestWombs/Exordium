@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { SettingsGroup, ToggleRow } from "../../components/settings-rows.tsx";
 import type { BackupSettings } from "../../types.ts";
@@ -21,7 +22,7 @@ export function BackupSettingsPage() {
       const response = await fetch("/api/backups");
       const body = await response.json().catch(() => ({}));
       if (response.ok && body.settings) apply(body.settings);
-      else setProblem(body.error ?? "Could not read the backup settings.");
+      else setProblem(body.error ?? tr("Could not read the backup settings."));
     })();
   }, [apply]);
 
@@ -35,7 +36,7 @@ export function BackupSettingsPage() {
         body: JSON.stringify({ action: "settings", ...change }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "Could not save.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not save."));
       apply(body.settings);
     } catch (error) {
       setProblem((error as Error).message);
@@ -44,22 +45,24 @@ export function BackupSettingsPage() {
     }
   }
 
-  if (!settings) return problem ? <p className="error">{problem}</p> : <p className="muted">Reading…</p>;
+  if (!settings) return problem ? <p className="error">{problem}</p> : <p className="muted">{tr("Reading…")}</p>;
   return (
     <>
-      <SettingsGroup title="Automatic">
+      <SettingsGroup title={tr("Automatic")}>
         <ToggleRow
-          label="Back up when a game closes"
-          hint="When the last copy of a title closes, copy its save folder. Skipped if nothing changed since the last backup."
+          label={tr("Back up when a game closes")}
+          hint={tr(
+            "When the last copy of a title closes, copy its save folder. Skipped if nothing changed since the last backup.",
+          )}
           checked={settings.auto}
           disabled={busy}
           onChange={(value) => void save({ auto: value })}
         />
         <label className="settings-row">
           <span className="settings-label">
-            Keep the newest
+            {tr("Keep the newest")}
             <small className="settings-hint">
-              Automatic backups kept per title. Manual ones stay until you delete them.
+              {tr("Automatic backups kept per title. Manual ones stay until you delete them.")}
             </small>
           </span>
           <input
@@ -77,13 +80,14 @@ export function BackupSettingsPage() {
           />
         </label>
       </SettingsGroup>
-      <SettingsGroup title="Location">
+      <SettingsGroup title={tr("Location")}>
         <div className="settings-row">
           <span className="settings-label">
-            Backup folder
+            {tr("Backup folder")}
             <small className="settings-hint">
-              Blank uses Exordium's own folder. A cloud-synced folder keeps them off this machine. Changing it does not
-              move existing backups.
+              {tr(
+                "Blank uses Exordium's own folder. A cloud-synced folder keeps them off this machine. Changing it does not move existing backups.",
+              )}
             </small>
           </span>
           <div className="path-actions">
@@ -100,7 +104,7 @@ export function BackupSettingsPage() {
               disabled={busy || folder.trim() === (settings.custom ? settings.folder : "")}
               onClick={() => void save({ folder })}
             >
-              Save
+              {tr("Save")}
             </button>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import type { ReactNode } from "react";
 import { openAppFolder } from "../lib/util.ts";
 
@@ -121,13 +122,13 @@ export function FolderRow(
         {hint && <small className="settings-hint">{hint}</small>}
       </span>
       <div className="path-actions">
-        <code>{value || "Not set"}</code>
+        <code>{value || tr("Not set")}</code>
         <button type="button" className="ghost" disabled={disabled} onClick={() => void choose()}>
-          Choose…
+          {tr("Choose…")}
         </button>
         {value && (
           <button type="button" className="ghost" disabled={disabled} onClick={() => onChange("")}>
-            Clear
+            {tr("Clear")}
           </button>
         )}
       </div>
@@ -143,7 +144,7 @@ export function PathRow({ label, value, openKey }: { label: string; value: strin
         <code>{value}</code>
         {openKey && (
           <button type="button" className="ghost" onClick={() => void openAppFolder(openKey)}>
-            Open
+            {tr("Open")}
           </button>
         )}
       </div>

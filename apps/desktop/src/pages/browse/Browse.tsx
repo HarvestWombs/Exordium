@@ -1,3 +1,4 @@
+import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { Cores } from "./Cores.tsx";
 import { Downloads } from "./Downloads.tsx";
@@ -78,7 +79,7 @@ export function Browse(
     try {
       const response = await fetch(`/api/browse/moddb${refresh ? "?refresh=1" : ""}`);
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not read ModDB.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not read ModDB."));
       setModDb({ items: body.items ?? [], fetchedAt: body.fetchedAt ?? null });
     } catch (err) {
       setModDbError((err as Error).message);
@@ -97,7 +98,7 @@ export function Browse(
     try {
       const response = await fetch(`/api/browse${refresh ? "?refresh=1" : ""}`);
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not reach the sources.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not reach the sources."));
       setData(body);
     } catch (err) {
       setError((err as Error).message);
@@ -233,7 +234,7 @@ export function Browse(
       root: installRoot,
       title: request.item?.title ?? request.title,
     });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? "It did not start.");
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? tr("It did not start."));
     if (importMetadata) {
       const key = `${request.id}/${request.file}`;
       setMetadataJobs((current) => new Set(current).add(key));
@@ -248,7 +249,7 @@ export function Browse(
       title: request.title,
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? "It did not start.");
+    if (!response.ok) throw new Error(body.error ?? tr("It did not start."));
     const itemKey = request.itemKey;
     if (itemKey && typeof body.id === "string") setUrlJobs((current) => ({ ...current, [itemKey]: body.id }));
     if (importMetadata) {
@@ -268,7 +269,7 @@ export function Browse(
       id: `url-${Date.now()}`,
       file: url,
       url,
-      title: title.trim() || "ModDB download",
+      title: title.trim() || tr("ModDB download"),
       mode: "url",
       ...(itemKey ? { itemKey } : {}),
     });
@@ -309,14 +310,20 @@ export function Browse(
       )}
       <aside className="browse-filters">
         <section className="source-switch">
-          <h2 className="filters-title">SOURCES</h2>
+          <h2 className="filters-title">{tr("SOURCES")}</h2>
           <button
             type="button"
             className={view === "archive" ? "source-card on" : "source-card"}
             onClick={() => setView("archive")}
           >
             <span>Internet Archive</span>
-            <small>{data ? `${data.items.length} indexed mods` : loading ? "Reading…" : "Archive catalog"}</small>
+            <small>
+              {data
+                ? tr("{count} indexed mods", { count: data.items.length })
+                : loading
+                ? tr("Reading…")
+                : tr("Archive catalog")}
+            </small>
           </button>
           <button
             type="button"
@@ -324,29 +331,29 @@ export function Browse(
             onClick={() => setView("moddb")}
           >
             <span>ModDB</span>
-            <small>Files, addons, and mods</small>
+            <small>{tr("Files, addons, and mods")}</small>
           </button>
           <button
             type="button"
             className={view === "cores" ? "source-card on" : "source-card"}
             onClick={() => setView("cores")}
           >
-            <span>Cores</span>
-            <small>Install game versions</small>
+            <span>{tr("Cores")}</span>
+            <small>{tr("Install game versions")}</small>
           </button>
           <button
             type="button"
             className={view === "downloads" ? "source-card on" : "source-card"}
             onClick={() => setView("downloads")}
           >
-            <span>Downloads{busy ? " · active" : ""}</span>
-            <small>Queue and installs</small>
+            <span>{tr("Downloads")}{busy ? tr(" · active") : ""}</span>
+            <small>{tr("Queue and installs")}</small>
           </button>
         </section>
 
         {(view === "archive" || view === "moddb") && (
           <>
-            <h2 className="filters-title filters-title-secondary">FILTERS</h2>
+            <h2 className="filters-title filters-title-secondary">{tr("FILTERS")}</h2>
             {selected.size > 0 && (
               <div className="active-filters">
                 {[...selected].map((keyword) => (
@@ -363,11 +370,15 @@ export function Browse(
             )}
             <p className="muted small">
               {view === "moddb"
-                ? modDb ? `${modDbMatches.length} matches` : modDbLoading ? "Reading ModDB…" : ""
+                ? modDb
+                  ? plural(modDbMatches.length, "{count} match", "{count} matches")
+                  : modDbLoading
+                  ? tr("Reading ModDB…")
+                  : ""
                 : data
-                ? `${matches.length} matches`
+                ? plural(matches.length, "{count} match", "{count} matches")
                 : loading
-                ? "Reading sources…"
+                ? tr("Reading sources…")
                 : ""}
             </p>
 
@@ -394,13 +405,13 @@ export function Browse(
             ))}
 
             <section className="filter-group">
-              <h3>PREFERENCES</h3>
+              <h3>{tr("PREFERENCES")}</h3>
               <button
                 type="button"
                 className={hideInstalled ? "filter-row on" : "filter-row"}
                 onClick={() => setHideInstalled((v) => !v)}
               >
-                <span>Hide mods in my library</span>
+                <span>{tr("Hide mods in my library")}</span>
               </button>
               {view === "moddb"
                 ? (
@@ -410,12 +421,12 @@ export function Browse(
                     disabled={modDbLoading}
                     onClick={() => void loadModDb(true)}
                   >
-                    <span>{modDbLoading ? "Refreshing…" : "Refresh source"}</span>
+                    <span>{modDbLoading ? tr("Refreshing…") : tr("Refresh source")}</span>
                   </button>
                 )
                 : (
                   <button type="button" className="filter-row" disabled={loading} onClick={() => void load(true)}>
-                    <span>{loading ? "Refreshing…" : "Refresh source"}</span>
+                    <span>{loading ? tr("Refreshing…") : tr("Refresh source")}</span>
                   </button>
                 )}
               {view === "moddb" && (
@@ -424,14 +435,14 @@ export function Browse(
                   className="filter-row"
                   onClick={() => openPlace({ what: "moddb" })}
                 >
-                  <span>Open ModDB ↗</span>
+                  <span>{tr("Open ModDB ↗")}</span>
                 </button>
               )}
             </section>
 
             {view === "moddb" && (
               <section className="filter-group">
-                <h3>FROM A LINK</h3>
+                <h3>{tr("FROM A LINK")}</h3>
                 <form
                   className="link-install"
                   onSubmit={(event) => {
@@ -444,15 +455,17 @@ export function Browse(
                   <input
                     value={linkAddress}
                     onChange={(event) => setLinkAddress(event.currentTarget.value)}
-                    placeholder="ModDB page or archive link"
-                    aria-label="Download address"
+                    placeholder={tr("ModDB page or archive link")}
+                    aria-label={tr("Download address")}
                   />
                   <button type="submit" className="ghost primary compact" disabled={!linkOk || !root}>
-                    Install
+                    {tr("Install")}
                   </button>
                 </form>
                 {linkAddress.trim() && !linkOk && (
-                  <p className="warn-text small">Use a ModDB mod, addon or download page, or a link to an archive.</p>
+                  <p className="warn-text small">
+                    {tr("Use a ModDB mod, addon or download page, or a link to an archive.")}
+                  </p>
                 )}
               </section>
             )}
@@ -483,8 +496,8 @@ export function Browse(
               {modDb && <span className="tab-count">{modDbCounts.get(t.id) ?? 0}</span>}
             </button>
           ))}
-          {view === "cores" && <span className="browse-context">CORES</span>}
-          {view === "downloads" && <span className="browse-context">DOWNLOADS</span>}
+          {view === "cores" && <span className="browse-context">{tr("CORES")}</span>}
+          {view === "downloads" && <span className="browse-context">{tr("DOWNLOADS")}</span>}
           <div className="grow" />
           {(view === "archive" || view === "moddb") && (
             <label className="search browse-search">
@@ -492,8 +505,8 @@ export function Browse(
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.currentTarget.value)}
-                placeholder="Search by name…"
-                aria-label="Search mods"
+                placeholder={tr("Search by name…")}
+                aria-label={tr("Search mods")}
               />
             </label>
           )}
@@ -503,8 +516,8 @@ export function Browse(
         {view === "moddb" && (
           <div className="browse-list">
             {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}
-            {!modDb && !modDbError && <p className="muted pad">Reading ModDB…</p>}
-            {modDb && modDbMatches.length === 0 && <p className="muted pad">Nothing matches these filters.</p>}
+            {!modDb && !modDbError && <p className="muted pad">{tr("Reading ModDB…")}</p>}
+            {modDb && modDbMatches.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}
             {modDbMatches.slice(0, shown).map((item) => {
               const key = `moddb:${item.kind}:${item.id}`;
               return (
@@ -530,13 +543,16 @@ export function Browse(
                 className="ghost more"
                 onClick={() => setShown((n) => n + PAGE)}
               >
-                Show more ({modDbMatches.length - shown} left)
+                {tr("Show more ({count} left)", { count: modDbMatches.length - shown })}
               </button>
             )}
             {modDb && (
               <p className="muted small pad">
-                Installers (.exe) are never run for you: open their page and install them yourself if you trust them.
-                {modDb.fetchedAt && ` ModDB read ${new Date(modDb.fetchedAt).toLocaleString()}.`}
+                {tr(
+                  "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
+                )}
+                {modDb.fetchedAt &&
+                  tr(" ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
               </p>
             )}
           </div>
@@ -555,8 +571,8 @@ export function Browse(
           : (
             <div className="browse-list">
               {error && <div className="banner-error" role="alert">{error}</div>}
-              {!data && !error && <p className="muted pad">Reading sources…</p>}
-              {data && sorted.length === 0 && <p className="muted pad">Nothing matches these filters.</p>}
+              {!data && !error && <p className="muted pad">{tr("Reading sources…")}</p>}
+              {data && sorted.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}
               {sorted.slice(0, shown).map((item) => (
                 <ModCard
                   key={`${item.source}:${item.id}`}
@@ -581,7 +597,7 @@ export function Browse(
                   className="ghost more"
                   onClick={() => setShown((n) => n + PAGE)}
                 >
-                  Show more ({sorted.length - shown} left)
+                  {tr("Show more ({count} left)", { count: sorted.length - shown })}
                 </button>
               )}
             </div>

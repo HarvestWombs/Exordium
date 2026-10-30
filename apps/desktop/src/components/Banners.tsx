@@ -1,3 +1,4 @@
+import { plural, tr } from "../lib/i18n.ts";
 /**
  * The strips under the top bar: an error (click to dismiss), a passing notice, Exordium's own update
  * once it is downloaded, and the offer to import the D2SE install's mods.
@@ -28,24 +29,31 @@ export function Banners(
       {update && (
         <div className="banner-action" role="status">
           <div>
-            <strong>Exordium {update.version} is ready.</strong>
-            <span>Restart to update from {update.current}. Your library, boxes and characters stay as they are.</span>
+            <strong>{tr("Exordium {version} is ready.", { version: update.version })}</strong>
+            <span>
+              {tr("Restart to update from {current}. Your library, boxes and characters stay as they are.", {
+                current: update.current,
+              })}
+            </span>
           </div>
-          <button type="button" className="ghost primary" onClick={onRestart}>Restart to update</button>
-          <button type="button" className="ghost" onClick={onLater}>Later</button>
+          <button type="button" className="ghost primary" onClick={onRestart}>{tr("Restart to update")}</button>
+          <button type="button" className="ghost" onClick={onLater}>{tr("Later")}</button>
         </div>
       )}
       {importCount > 0 && (
         <div className="banner-action" role="status">
           <div>
-            <strong>Import your D2SE mods?</strong>
+            <strong>{tr("Import your D2SE mods?")}</strong>
             <span>
-              {importCount} mod{importCount === 1 ? " is" : "s are"}{" "}
-              in your Diablo II install. Each is reviewed, then copied into Exordium's library.
+              {plural(
+                importCount,
+                "{count} mod is in your Diablo II install. Each is reviewed, then copied into Exordium's library.",
+                "{count} mods are in your Diablo II install. Each is reviewed, then copied into Exordium's library.",
+              )}
             </span>
           </div>
-          <button type="button" className="ghost primary" onClick={onImport}>Import mods</button>
-          <button type="button" className="ghost" onClick={onNotNow}>Not now</button>
+          <button type="button" className="ghost primary" onClick={onImport}>{tr("Import mods")}</button>
+          <button type="button" className="ghost" onClick={onNotNow}>{tr("Not now")}</button>
         </div>
       )}
     </>

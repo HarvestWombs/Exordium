@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import type { CatalogCore, Scan } from "../types.ts";
 
@@ -22,15 +23,15 @@ export function useImports(
   async function importArchive(): Promise<boolean> {
     if (!root) return false;
     const params = new URLSearchParams({
-      title: "Choose a mod archive to import",
+      title: tr("Choose a mod archive to import"),
       multiple: "false",
-      extensions: JSON.stringify([{ label: "Mod archives", extensions: ["zip", "7z", "rar", "tar", "tgz"] }]),
+      extensions: JSON.stringify([{ label: tr("Mod archives"), extensions: ["zip", "7z", "rar", "tar", "tgz"] }]),
     });
     const pick = await (await fetch(`/api/pick-open-files?${params}`)).json() as {
       available?: boolean;
       paths?: string[];
     };
-    if (pick.available === false) throw new Error("No file picker is available here.");
+    if (pick.available === false) throw new Error(tr("No file picker is available here."));
     const archive = pick.paths?.[0];
     if (!archive) return false;
     const response = await fetch("/api/install-local-archive", {
@@ -39,24 +40,24 @@ export function useImports(
       body: JSON.stringify({ archive, root, importMetadata: true }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? "Could not install the archive.");
+    if (!response.ok) throw new Error(body.error ?? tr("Could not install the archive."));
     const name = body.result?.installed?.[0]?.name as string | undefined;
     await load(root);
     if (name) {
       openTitle(`mod:${name}`);
-      say(`Imported ${name} into Exordium's library.`);
+      say(tr("Imported {name} into Exordium's library.", { name }));
     }
     return true;
   }
 
   async function importFolder() {
     try {
-      const params = new URLSearchParams({ title: "Choose a mod's folder to import" });
+      const params = new URLSearchParams({ title: tr("Choose a mod's folder to import") });
       const pick = await (await fetch(`/api/pick-folder?${params}`)).json() as {
         available: boolean;
         path: string | null;
       };
-      if (!pick.available) throw new Error("No folder picker is available here.");
+      if (!pick.available) throw new Error(tr("No folder picker is available here."));
       if (!pick.path) return;
       const name = pick.path.split(/[/]|[\\]/).filter(Boolean).pop() ?? pick.path;
       setFolderImport([{ folder: name, title: name, core: null, path: pick.path }]);
@@ -75,7 +76,7 @@ export function useImports(
         body: JSON.stringify({ root, core }),
       });
       const started = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(started.error ?? `Core ${core} could not be installed.`);
+      if (!response.ok) throw new Error(started.error ?? tr("Core {core} could not be installed.", { core }));
       // Follow the download until the core is in the library, then read the library again.
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -84,10 +85,10 @@ export function useImports(
         const job = entry?.job;
         if (job) setCoreJob({ core, received: job.received, total: job.total });
         if (entry?.status === "installed" || !job || job.state === "installed") break;
-        if (job.state === "failed") throw new Error(job.error ?? "The download failed.");
+        if (job.state === "failed") throw new Error(job.error ?? tr("The download failed."));
       }
       await load(root);
-      say(`Core ${core} is installed.`);
+      say(tr("Core {core} is installed.", { core }));
     } catch (err) {
       reportError(err);
     } finally {

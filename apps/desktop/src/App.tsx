@@ -1,3 +1,4 @@
+import { plural, tr } from "./lib/i18n.ts";
 import * as React from "react";
 import { Browse } from "./pages/browse/Browse.tsx";
 import { titleKey } from "./pages/browse/browse-util.ts";
@@ -108,7 +109,7 @@ export function App() {
     try {
       const response = await fetch(`/api/scan-d2se?root=${encodeURIComponent(installRoot)}`);
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not read that install.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not read that install."));
       setScan(body);
       await fetch("/api/settings", {
         method: "POST",
@@ -169,7 +170,7 @@ export function App() {
     if (!root) return;
     setStarting(title.key);
     setError(null);
-    setActivity(`Starting ${title.title} — preparing its box…`);
+    setActivity(tr("Starting {title} — preparing its box…", { title: title.title }));
     try {
       const response = await fetch("/api/play", {
         method: "POST",
@@ -177,11 +178,12 @@ export function App() {
         body: JSON.stringify(title.kind === "core" ? { root, core: title.folder } : { root, folder: title.folder }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "The game did not start.");
+      if (!response.ok) throw new Error(body.error ?? tr("The game did not start."));
       const next = await refreshStatus();
       if (next.appSettings.settings.launch.minimizeOnLaunch) void fetch("/api/window/minimize").catch(() => {});
-      setActivity(`${title.title} launched`);
-      setTimeout(() => setActivity((current) => (current === `${title.title} launched` ? null : current)), 4000);
+      const launched = tr("{title} launched", { title: title.title });
+      setActivity(launched);
+      setTimeout(() => setActivity((current) => (current === launched ? null : current)), 4000);
     } catch (err) {
       setError((err as Error).message);
       setActivity(null);
@@ -276,9 +278,15 @@ export function App() {
   function followImports(running: CopyJob[]) {
     for (const job of running) {
       void followCopy(job, () => {}).then((done) => {
-        if (done.state === "done") void onConverted(`Imported ${done.label} into Exordium's library.`);
-        else if (done.state === "failed") {
-          setError(`${done.label} was not imported: ${done.error ?? "the copy stopped"}.`);
+        if (done.state === "done") {
+          void onConverted(tr("Imported {label} into Exordium's library.", { label: done.label }));
+        } else if (done.state === "failed") {
+          setError(
+            tr("{label} was not imported: {error}.", {
+              label: done.label,
+              error: done.error ?? tr("the copy stopped"),
+            }),
+          );
         }
       });
     }
@@ -404,9 +412,9 @@ export function App() {
           onNewCollection={() => newCollection()}
           onDelete={(c) =>
             setConfirmBox({
-              title: `Delete ${c.name}?`,
-              body: "The collection goes; the titles in it stay in your library.",
-              action: "Delete",
+              title: tr("Delete {name}?", { name: c.name }),
+              body: tr("The collection goes; the titles in it stay in your library."),
+              action: tr("Delete"),
               danger: true,
               run: () => collectionAction({ action: "delete", id: c.id }),
             })}
@@ -543,14 +551,14 @@ export function App() {
             : (
               <div className="empty">
                 {scanning
-                  ? "Reading the install…"
+                  ? tr("Reading the install…")
                   : !scan && root
                   ? (
                     <button type="button" className="ghost primary" onClick={() => void load(root)}>
-                      Read library
+                      {tr("Read library")}
                     </button>
                   )
-                  : "Nothing to show yet."}
+                  : tr("Nothing to show yet.")}
               </div>
             )}
         </main>
@@ -561,15 +569,22 @@ export function App() {
         <span>
           {activity ??
             (scanning
-              ? "Reading the install…"
+              ? tr("Reading the install…")
               : status?.running.length
               ? runningSummary(status.running)
-              : "Nothing running")}
+              : tr("Nothing running"))}
         </span>
         <div className="grow" />
-        <span>Registry: private per title</span>
+        <span>{tr("Registry: private per title")}</span>
         <span>·</span>
-        <span>{scan ? `Library: ${scan.mods.length} mods, ${scan.cores.length} cores` : "Library: not read yet"}</span>
+        <span>
+          {scan
+            ? tr("Library: {mods}, {cores}", {
+              mods: plural(scan.mods.length, "{count} mod", "{count} mods"),
+              cores: plural(scan.cores.length, "{count} core", "{count} cores"),
+            })
+            : tr("Library: not read yet")}
+        </span>
       </footer>
 
       {dialog && selected && root && (

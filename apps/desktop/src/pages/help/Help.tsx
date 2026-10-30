@@ -1,3 +1,4 @@
+import { plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
 import { SettingsHead } from "../../components/settings-rows.tsx";
@@ -110,8 +111,8 @@ function Faq({ open, onOpen }: { open: number | null; onOpen: (i: number | null)
   return (
     <>
       <SettingsHead
-        title="Frequently asked questions"
-        text="Short answers; the topics on the left have the long ones."
+        title={tr("Frequently asked questions")}
+        text={tr("Short answers; the topics on the left have the long ones.")}
       />
       <div className="faq">
         {FAQ.map((entry: FaqEntry, i) => (
@@ -182,15 +183,15 @@ export function HelpPage({ version }: { version: string | null }) {
           className="help-search"
           type="search"
           value={query}
-          placeholder="Search help"
-          aria-label="Search help"
+          placeholder={tr("Search help")}
+          aria-label={tr("Search help")}
           onChange={(e) => setQuery(e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && hits[0]) openHit(hits[0]);
             if (e.key === "Escape") setQuery("");
           }}
         />
-        <span className="eyebrow">HELP</span>
+        <span className="eyebrow">{tr("HELP")}</span>
         {TOPICS.filter((t) => !t.group).map((t) => nav(t.id, t.label))}
         {[...new Set(TOPICS.flatMap((t) => (t.group ? [t.group] : [])))].map((group) => (
           <React.Fragment key={group}>
@@ -198,19 +199,23 @@ export function HelpPage({ version }: { version: string | null }) {
             {TOPICS.filter((t) => t.group === group).map((t) => nav(t.id, t.label))}
           </React.Fragment>
         ))}
-        <span className="eyebrow">MORE</span>
+        <span className="eyebrow">{tr("MORE")}</span>
         {nav("faq", "FAQ")}
-        {nav("about", "About")}
+        {nav("about", tr("About"))}
       </aside>
       <div className="settings-page help-page">
         {searching
           ? (
             <>
               <SettingsHead
-                title={`Results for “${query.trim()}”`}
+                title={tr("Results for “{query}”", { query: query.trim() })}
                 text={hits.length
-                  ? `${hits.length} place${hits.length === 1 ? "" : "s"} in Help. Enter opens the first.`
-                  : "Nothing in Help mentions that. Try fewer or different words."}
+                  ? plural(
+                    hits.length,
+                    "{count} place in Help. Enter opens the first.",
+                    "{count} places in Help. Enter opens the first.",
+                  )
+                  : tr("Nothing in Help mentions that. Try fewer or different words.")}
               />
               <div className="help-results">
                 {hits.map((hit) => (

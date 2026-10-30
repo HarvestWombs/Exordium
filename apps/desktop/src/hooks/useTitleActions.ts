@@ -1,3 +1,4 @@
+import { plural, tr } from "../lib/i18n.ts";
 import type * as React from "react";
 import type { ConfirmRequest, Status, Title, TitleAction } from "../types.ts";
 
@@ -8,7 +9,7 @@ async function library(path: string, body: Record<string, unknown>): Promise<Rec
     body: JSON.stringify(body),
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? "That did not work.");
+  if (!response.ok) throw new Error(result.error ?? tr("That did not work."));
   return result;
 }
 
@@ -66,7 +67,7 @@ export function useTitleActions(
         }
         case "shortcut": {
           const result = await library("shortcut", { key: t.key });
-          say(`Added ${result.name} to your desktop.`);
+          say(tr("Added {name} to your desktop.", { name: String(result.name) }));
           break;
         }
         case "files":
@@ -79,14 +80,15 @@ export function useTitleActions(
         case "unhide":
           await library("hide", { key: t.key, on: false });
           await refreshStatus();
-          say(`${t.title} is back in the list.`);
+          say(tr("{title} is back in the list.", { title: t.title }));
           break;
         case "hide":
           confirm({
-            title: `Hide ${t.title}?`,
-            body:
+            title: tr("Hide {title}?", { title: t.title }),
+            body: tr(
               "It leaves the mod list; its files are not touched. Hidden titles are under the Hidden filter, where you can bring them back.",
-            action: "Hide",
+            ),
+            action: tr("Hide"),
             run: async () => {
               await library("hide", { key: t.key, on: true });
               await refreshStatus();
@@ -100,13 +102,18 @@ export function useTitleActions(
           );
           const characters = response.ok ? ((await response.json()).characters as unknown[]).length : 0;
           confirm({
-            title: `Uninstall ${t.title}?`,
-            body: `This deletes ${root}\\mods\\${t.folder} from Exordium's library.${
-              characters ? ` Its save folder holds ${characters} character${characters === 1 ? "" : "s"}.` : ""
-            }`,
-            action: "Uninstall",
+            title: tr("Uninstall {title}?", { title: t.title }),
+            body: tr("This deletes {path} from Exordium's library.", { path: `${root}\\mods\\${t.folder}` }) +
+              (characters
+                ? plural(
+                  characters,
+                  " Its save folder holds {count} character.",
+                  " Its save folder holds {count} characters.",
+                )
+                : ""),
+            action: tr("Uninstall"),
             danger: true,
-            checkbox: characters ? "Keep a copy of the characters in Exordium's folder first" : undefined,
+            checkbox: characters ? tr("Keep a copy of the characters in Exordium's folder first") : undefined,
             run: async (keepSaves) => {
               const result = await library("uninstall", { key: t.key, root, keepSaves });
               if (selectedKey === t.key) setSelectedKey(null);
@@ -114,8 +121,11 @@ export function useTitleActions(
               if (root) await load(root);
               say(
                 result.savesBackup
-                  ? `${t.title} was uninstalled. Its characters were copied to ${result.savesBackup}.`
-                  : `${t.title} was uninstalled.`,
+                  ? tr("{title} was uninstalled. Its characters were copied to {folder}.", {
+                    title: t.title,
+                    folder: String(result.savesBackup),
+                  })
+                  : tr("{title} was uninstalled.", { title: t.title }),
               );
             },
           });

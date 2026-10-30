@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { Title } from "../../types.ts";
 
@@ -36,7 +37,7 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
         }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not save.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not save."));
       await onChanged();
     } catch (error) {
       setProblem((error as Error).message);
@@ -49,9 +50,9 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
     <div className="page-with-footer">
       <div className="stack">
         <section className="option-section">
-          <h2 className="eyebrow">NAME</h2>
+          <h2 className="eyebrow">{tr("NAME")}</h2>
           <p className="muted small">
-            What the library shows for this mod. Leave blank to use the mod's own name
+            {tr("What the library shows for this mod. Leave blank to use the mod's own name")}
             {t.kind === "mod" ? ` (${t.folder})` : ""}.
           </p>
           <input
@@ -63,20 +64,21 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
           />
         </section>
         <section className="option-section">
-          <h2 className="eyebrow">AUTHOR</h2>
+          <h2 className="eyebrow">{tr("AUTHOR")}</h2>
           <input
             type="text"
             value={author}
             disabled={saving}
-            placeholder="Who made this mod"
+            placeholder={tr("Who made this mod")}
             onChange={(e) => setAuthor(e.currentTarget.value)}
           />
         </section>
         <section className="option-section">
-          <h2 className="eyebrow">LINKS</h2>
+          <h2 className="eyebrow">{tr("LINKS")}</h2>
           {own.length > 0 && (
             <p className="muted small">
-              From the mod itself: {own.map((link) => link.label).join(", ")}. Those always show; add your own below.
+              {tr("From the mod itself:")} {own.map((link) => link.label).join(", ")}
+              {tr(". Those always show; add your own below.")}
             </p>
           )}
           {links.map((link, i) => (
@@ -84,7 +86,7 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
               <input
                 type="text"
                 value={link.label}
-                placeholder="Label (Discord, Website…)"
+                placeholder={tr("Label (Discord, Website…)")}
                 disabled={saving}
                 onChange={(e) => setLinks(links.map((l, j) => (j === i ? { ...l, label: e.currentTarget.value } : l)))}
               />
@@ -101,7 +103,7 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
                 disabled={saving}
                 onClick={() => setLinks(links.filter((_, j) => j !== i))}
               >
-                Remove
+                {tr("Remove")}
               </button>
             </div>
           ))}
@@ -111,45 +113,51 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
             disabled={saving}
             onClick={() => setLinks([...links, { label: "", url: "" }])}
           >
-            Add link
+            {tr("Add link")}
           </button>
         </section>
         <section className="option-section">
-          <h2 className="eyebrow">REALMS</h2>
+          <h2 className="eyebrow">{tr("REALMS")}</h2>
           {t.realm
             ? (
               <dl className="realm-grid">
                 {t.realm.gatewayName && (
                   <>
-                    <dt>Name</dt>
+                    <dt>{tr("Name")}</dt>
                     <dd>{t.realm.gatewayName}</dd>
                   </>
                 )}
                 {t.realm.gateway && (
                   <>
-                    <dt>Gateway</dt>
+                    <dt>{tr("Gateway")}</dt>
                     <dd>{t.realm.gateway}{t.realm.port ? `:${t.realm.port}` : ""}</dd>
                   </>
                 )}
                 {t.realm.selected && (
                   <>
-                    <dt>Selected</dt>
+                    <dt>{tr("Selected")}</dt>
                     <dd>{t.realm.selected}</dd>
                   </>
                 )}
                 {t.realm.timezone && (
                   <>
-                    <dt>Timezone</dt>
+                    <dt>{tr("Timezone")}</dt>
                     <dd>{t.realm.timezone}</dd>
                   </>
                 )}
               </dl>
             )
-            : <p className="muted small">This mod sets no private realm; it uses Battle.net's own gateway list.</p>}
+            : (
+              <p className="muted small">
+                {tr("This mod sets no private realm; it uses Battle.net's own gateway list.")}
+              </p>
+            )}
         </section>
       </div>
       <footer className="dialog-footer">
-        <span className={problem ? "error" : "muted small"}>{problem ?? (changed ? "Unsaved changes" : "Saved")}</span>
+        <span className={problem ? "error" : "muted small"}>
+          {problem ?? (changed ? tr("Unsaved changes") : tr("Saved"))}
+        </span>
         <div className="row-actions">
           <button
             type="button"
@@ -161,10 +169,10 @@ export function AboutPage({ t, root, onChanged }: { t: Title; root: string; onCh
               setLinks(t.options.links ?? []);
             }}
           >
-            Reset
+            {tr("Reset")}
           </button>
           <button type="button" className="ghost primary" disabled={!changed || saving} onClick={() => void apply()}>
-            Apply
+            {tr("Apply")}
           </button>
         </div>
       </footer>

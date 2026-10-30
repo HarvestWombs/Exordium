@@ -28,8 +28,18 @@ function writable(folder: string): boolean {
   }
 }
 
+/** The per-user data folder: `%LOCALAPPDATA%`, `~/Library/Application Support`, or `$XDG_DATA_HOME`. */
+export function userDataFolder(): string {
+  const home = Deno.env.get("HOME");
+  if (Deno.build.os === "windows") return slash(Deno.env.get("LOCALAPPDATA") ?? Deno.cwd());
+  if (Deno.build.os === "darwin") return home ? `${slash(home)}/Library/Application Support` : Deno.cwd();
+  const xdg = Deno.env.get("XDG_DATA_HOME");
+  if (xdg) return slash(xdg);
+  return home ? `${slash(home)}/.local/share` : Deno.cwd();
+}
+
 function fallbackRoot(): string {
-  return slash(`${Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()}/Exordium`);
+  return `${userDataFolder()}/Exordium`;
 }
 
 export function resolveExordiumRoot(): string {

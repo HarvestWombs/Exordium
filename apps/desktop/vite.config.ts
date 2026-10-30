@@ -13,5 +13,7 @@ export default defineConfig({
     port: 5273,
     strictPort: true,
     hmr: { clientPort: 5273 },
+    // The fonts' packages sit in the workspace's node_modules, above `root`.
+    fs: { allow: ["../../.."] },
   },
 });

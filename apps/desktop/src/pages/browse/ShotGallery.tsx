@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { Lightbox } from "../../components/Lightbox.tsx";
 import { smallerModDbImage } from "./browse-util.ts";
@@ -15,7 +16,7 @@ export function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) 
             <button
               type="button"
               className="shot-main-button"
-              title="Open the gallery"
+              title={tr("Open the gallery")}
               onClick={() => setGallery(true)}
             >
               <img className="shot-main" src={shots[shot]?.full} alt="" onError={smallerModDbImage} />

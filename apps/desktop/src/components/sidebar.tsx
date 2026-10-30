@@ -1,3 +1,4 @@
+import { plural, tr } from "../lib/i18n.ts";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import type { Title } from "../types.ts";
@@ -60,10 +61,13 @@ export function TitleRow(
     >
       <TitleIcon t={t} root={root} art={art} size={24} />
       <span className="row-title">{t.title}</span>
-      {favorite && <span className="row-star" title="Favorite">★</span>}
-      {running
-        ? <span className="row-live">RUNNING</span>
-        : <span className={`dot ${health}`} title={health === "good" ? "Ready" : `${t.problems.length} problems`} />}
+      {favorite && <span className="row-star" title={tr("Favorite")}>★</span>}
+      {running ? <span className="row-live">{tr("RUNNING")}</span> : (
+        <span
+          className={`dot ${health}`}
+          title={health === "good" ? tr("Ready") : plural(t.problems.length, "{count} problem", "{count} problems")}
+        />
+      )}
     </button>
   );
 }

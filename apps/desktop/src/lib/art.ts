@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import type { ArtKind } from "../types.ts";
 
 export function artUrl(root: string | null, key: string, kind: ArtKind, version: number): string {
@@ -11,9 +12,9 @@ export function screenshotUrl(root: string, key: string, name: string): string {
 }
 
 export const ART_SLOTS: { kind: ArtKind; label: string; hint: string }[] = [
-  { kind: "banner", label: "BANNER", hint: "The title's page header. 1920×500 or larger." },
-  { kind: "icon", label: "ICON", hint: "The library list and Game.exe in the taskbar. Square, 256×256." },
-  { kind: "portrait", label: "PORTRAIT", hint: "The grid view's capsule. 600×900." },
+  { kind: "banner", label: tr("BANNER"), hint: tr("The title's page header. 1920×500 or larger.") },
+  { kind: "icon", label: tr("ICON"), hint: tr("The library list and Game.exe in the taskbar. Square, 256×256.") },
+  { kind: "portrait", label: tr("PORTRAIT"), hint: tr("The grid view's capsule. 600×900.") },
 ];
 
 /** What the picker offers. Anything the WebView can decode works; these are the usual ones. */
@@ -37,7 +38,7 @@ export async function artAsPng(file: File, kind: ArtKind): Promise<Blob> {
     try {
       await img.decode();
     } catch {
-      throw new Error(`${file.name} is not an image this app can read.`);
+      throw new Error(tr("{name} is not an image this app can read.", { name: file.name }));
     }
     const width = img.naturalWidth || 256;
     const height = img.naturalHeight || 256;
@@ -51,11 +52,11 @@ export async function artAsPng(file: File, kind: ArtKind): Promise<Blob> {
     canvas.width = kind === "icon" ? Math.max(w, h) : w;
     canvas.height = kind === "icon" ? Math.max(w, h) : h;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Could not convert that image.");
+    if (!context) throw new Error(tr("Could not convert that image."));
     context.imageSmoothingQuality = "high";
     context.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
     const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!png) throw new Error("Could not convert that image.");
+    if (!png) throw new Error(tr("Could not convert that image."));
     return png;
   } finally {
     URL.revokeObjectURL(url);

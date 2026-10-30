@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { baseName } from "./browse-util.ts";
 
@@ -34,28 +35,36 @@ export function InstallModModal(
     }
   }
   const what = request.mode === "url"
-    ? "Downloads the archive, unpacks it,"
+    ? tr(
+      "Downloads the archive, unpacks it and adds it to the Diablo II install below. Existing mod folders are never overwritten.",
+    )
     : request.mode === "downloaded"
-    ? `Unpacks ${baseName(request.file)}`
-    : `Downloads ${baseName(request.file)}, unpacks it,`;
+    ? tr(
+      "Unpacks {file} and adds it to the Diablo II install below. Existing mod folders are never overwritten.",
+      { file: baseName(request.file) },
+    )
+    : tr(
+      "Downloads {file}, unpacks it and adds it to the Diablo II install below. Existing mod folders are never overwritten.",
+      { file: baseName(request.file) },
+    );
   return (
     <div className="scrim" role="presentation" onMouseDown={() => !busy && onClose()}>
       <form
         className="install-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`Install ${request.title}`}
+        aria-label={tr("Install {title}", { title: request.title })}
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();
           void run();
         }}
       >
-        <h2>Install {request.title}</h2>
+        <h2>{tr("Install {title}", { title: request.title })}</h2>
         <p className="muted">
-          {what} and adds it to the Diablo II install below. Existing mod folders are never overwritten.
+          {what}
         </p>
-        {target && <p className="muted small">Installs into {target}\mods</p>}
+        {target && <p className="muted small">{tr("Installs into {target}\\mods", { target })}</p>}
         <label className="confirm-check">
           <input
             type="checkbox"
@@ -63,13 +72,13 @@ export function InstallModModal(
             disabled={busy}
             onChange={(event) => setImportMetadata(event.currentTarget.checked)}
           />
-          Draft an exordium.mod.json from its D2SE_SETUP.ini
+          {tr("Draft an exordium.mod.json from its D2SE_SETUP.ini")}
         </label>
         {error && <p className="bad-text small" role="alert">{error}</p>}
         <div className="row-actions">
-          <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className="ghost" disabled={busy} onClick={onClose}>{tr("Cancel")}</button>
           <button type="submit" className="ghost primary" disabled={busy || !ready}>
-            {busy ? "Starting…" : "Install"}
+            {busy ? tr("Starting…") : tr("Install")}
           </button>
         </div>
       </form>

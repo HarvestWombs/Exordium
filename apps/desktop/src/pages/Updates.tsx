@@ -1,3 +1,4 @@
+import { formatDate, formatDateTime, tr } from "../lib/i18n.ts";
 import * as React from "react";
 import { SettingsGroup } from "../components/settings-rows.tsx";
 import { openLink } from "../lib/util.ts";
@@ -11,7 +12,7 @@ export async function applyUpdate(): Promise<void> {
     body: JSON.stringify({ action: "apply" }),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? "The update could not be applied.");
+  if (!response.ok) throw new Error(body.error ?? tr("The update could not be applied."));
 }
 
 /** Settings > Updates: the running version, what GitHub has, and the one button that fits. */
@@ -38,40 +39,43 @@ export function UpdatesPanel({ status }: { status: Status }) {
       body: JSON.stringify({ action }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) setProblem(body.error ?? "Could not reach GitHub.");
+    if (!response.ok) setProblem(body.error ?? tr("Could not reach GitHub."));
     else setView(body);
   }
 
-  if (!view) return <p className="muted">Reading update status…</p>;
+  if (!view) return <p className="muted">{tr("Reading update status…")}</p>;
   const update = view.update;
   const percent = update && update.asset.size > 0 ? Math.round((view.received / update.asset.size) * 100) : 0;
   const line = view.phase === "checking"
-    ? "Checking GitHub…"
+    ? tr("Checking GitHub…")
     : view.phase === "downloading"
-    ? `Downloading ${update?.version} — ${percent}%`
+    ? tr("Downloading {version} — {percent}%", { version: update?.version, percent })
     : view.phase === "ready"
-    ? `${update?.version} is downloaded and checked. Restart to update.`
+    ? tr("{version} is downloaded and checked. Restart to update.", { version: update?.version })
     : view.phase === "available"
-    ? `${update?.version} is available.`
+    ? tr("{version} is available.", { version: update?.version })
     : view.phase === "current"
-    ? "Exordium is up to date."
+    ? tr("Exordium is up to date.")
     : view.phase === "failed"
-    ? view.error ?? "The last check failed."
-    : "Not checked yet.";
+    ? view.error ?? tr("The last check failed.")
+    : tr("Not checked yet.");
 
   return (
     <SettingsGroup title="Exordium">
       <div className="settings-row update-row">
         <div>
-          <strong>Version {view.current}</strong>
+          <strong>{tr("Version {current}", { current: view.current })}</strong>
           <p className={view.phase === "failed" ? "bad-text small" : "muted small"}>{line}</p>
           {view.checkedAt && (
             <p className="muted small">
-              Checked {new Date(view.checkedAt).toLocaleString()} · github.com/{view.repo}
+              {tr("Checked {date} · github.com/{repo}", {
+                date: formatDateTime(view.checkedAt),
+                repo: view.repo,
+              })}
             </p>
           )}
           {!view.packaged && view.phase === "ready" && (
-            <p className="warn-text small">This is a dev server: updates install into the packaged app only.</p>
+            <p className="warn-text small">{tr("This is a dev server: updates install into the packaged app only.")}</p>
           )}
         </div>
         <div className="row-actions">
@@ -83,13 +87,13 @@ export function UpdatesPanel({ status }: { status: Status }) {
                 disabled={!view.packaged}
                 onClick={() => void applyUpdate().catch((e) => setProblem(e.message))}
               >
-                Restart to update
+                {tr("Restart to update")}
               </button>
             )
             : view.phase === "available"
             ? (
               <button type="button" className="ghost primary" onClick={() => void run("download")}>
-                Download {update?.version}
+                {tr("Download {version}", { version: update?.version })}
               </button>
             )
             : (
@@ -99,7 +103,7 @@ export function UpdatesPanel({ status }: { status: Status }) {
                 disabled={view.phase === "checking" || view.phase === "downloading"}
                 onClick={() => void run("check")}
               >
-                {view.phase === "checking" ? "Checking…" : "Check now"}
+                {view.phase === "checking" ? tr("Checking…") : tr("Check now")}
               </button>
             )}
         </div>
@@ -120,14 +124,16 @@ export function UpdatesPanel({ status }: { status: Status }) {
           <div>
             <strong>
               {update.name}
-              {update.prerelease ? " · pre-release" : ""}
+              {update.prerelease ? tr(" · pre-release") : ""}
             </strong>
             {update.publishedAt && (
-              <p className="muted small">Released {new Date(update.publishedAt).toLocaleDateString()}</p>
+              <p className="muted small">
+                {tr("Released {date}", { date: formatDate(update.publishedAt) })}
+              </p>
             )}
             {update.notes && <p className="update-notes-text">{update.notes}</p>}
             <button type="button" className="link-button" onClick={() => openLink(update.url)}>
-              Release page ↗
+              {tr("Release page ↗")}
             </button>
           </div>
         </div>

@@ -1,4 +1,6 @@
+import { formatDate, formatNumber, tr } from "../../lib/i18n.ts";
 import * as React from "react";
+import { useTranslation } from "../../hooks/useTranslation.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import { ACTIVE, baseName, formatBytes, jobLabel, jobProgress, openLink } from "./browse-util.ts";
@@ -51,7 +53,7 @@ export function ModCard(
       void (async () => {
         const response = await fetch(`/api/browse/item?id=${encodeURIComponent(item.id)}`);
         const body = await response.json();
-        if (!response.ok) return setDetailsError(body.error ?? "Could not read this item.");
+        if (!response.ok) return setDetailsError(body.error ?? tr("Could not read this item."));
         setDetails(body);
         setFile([...body.archives].sort((a: { size: number }, b: { size: number }) => b.size - a.size)[0]?.name ?? "");
         onDetails(body);
@@ -64,19 +66,25 @@ export function ModCard(
 
   const job = jobs.find((j) => baseName(j.file) === baseName(file)) ?? jobs[0];
   const description = details?.description ?? "";
+  const translation = useTranslation(description);
   const shots = details?.screenshots ?? [];
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
 
   return (
     <article ref={ref} className="mod-card">
-      <button type="button" className="mod-cover" title="Open its archive.org page" onClick={() => onOpen("page")}>
+      <button
+        type="button"
+        className="mod-cover"
+        title={tr("Open its archive.org page")}
+        onClick={() => onOpen("page")}
+      >
         {
           /* The uploader's first screenshot when there is one: archive.org's own tile is a generic logo for
             most items. */
         }
         <img src={shots[0]?.thumb ?? item.cover} alt="" loading="lazy" />
-        {installed && <span className="ribbon">IN LIBRARY</span>}
+        {installed && <span className="ribbon">{tr("IN LIBRARY")}</span>}
       </button>
 
       <div className="mod-info">
@@ -84,15 +92,20 @@ export function ModCard(
         <p className={expanded ? "mod-description open" : "mod-description"}>
           {details === null
             ? "…"
-            : description || "The uploader gave no description, and none was found in the archive."}
+            : translation.text || tr("The uploader gave no description, and none was found in the archive.")}
         </p>
         <div className="mod-under">
           {details?.descriptionSource && description && (
-            <span className="muted small">From {details.descriptionSource}</span>
+            <span className="muted small">
+              {tr("From {descriptionSource}", { descriptionSource: details.descriptionSource })}
+            </span>
           )}
           {description.length > 280 && (
-            <button type="button" className="link-button" onClick={onExpand}>{expanded ? "Less" : "More"}</button>
+            <button type="button" className="link-button" onClick={onExpand}>
+              {expanded ? tr("Less") : tr("More")}
+            </button>
           )}
+          {translation.button}
           {details?.links.map((link) => (
             <button
               type="button"
@@ -107,7 +120,7 @@ export function ModCard(
         </div>
         {keywords.length > 0 && (
           <div className="mod-tags">
-            <span className="eyebrow">TAGS</span>
+            <span className="eyebrow">{tr("TAGS")}</span>
             {keywords.map((keyword) => (
               <button
                 type="button"
@@ -121,20 +134,20 @@ export function ModCard(
           </div>
         )}
         <dl className="mod-facts">
-          <dt>ADDED</dt>
-          <dd>{item.addedAt ? new Date(item.addedAt).toLocaleDateString() : "—"}</dd>
-          <dt>BY</dt>
+          <dt>{tr("ADDED")}</dt>
+          <dd>{item.addedAt ? formatDate(item.addedAt) : "—"}</dd>
+          <dt>{tr("BY")}</dt>
           <dd>{item.creator ?? "—"}</dd>
-          <dt>DOWNLOADS</dt>
-          <dd>{item.downloads.toLocaleString()}</dd>
+          <dt>{tr("DOWNLOADS")}</dt>
+          <dd>{formatNumber(item.downloads)}</dd>
         </dl>
       </div>
 
-      <ShotGallery shots={shots} empty={details ? "No screenshots" : detailsError ?? "…"} />
+      <ShotGallery shots={shots} empty={details ? tr("No screenshots") : detailsError ?? "…"} />
 
       <div className="mod-bar">
         <span className="source-badge">Internet Archive</span>
-        <button type="button" className="link-button" onClick={() => onOpen("page")}>Page ↗</button>
+        <button type="button" className="link-button" onClick={() => onOpen("page")}>{tr("Page ↗")}</button>
         <div className="grow" />
         {detailsError && <span className="bad-text small">{detailsError}</span>}
         <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job?.file)} />
@@ -147,7 +160,7 @@ export function ModCard(
           <select
             value={file}
             onChange={(e) => setFile(e.currentTarget.value)}
-            aria-label="File to install"
+            aria-label={tr("File to install")}
           >
             {details.archives.map((a) => <option key={a.name} value={a.name}>{a.name} ({formatBytes(a.size)})</option>)}
           </select>
@@ -159,10 +172,10 @@ export function ModCard(
           type="button"
           className="download"
           disabled={!details || !file || !root || running || job?.state === "installed"}
-          title={root ? undefined : "Choose the Diablo II install first"}
+          title={root ? undefined : tr("Choose the Diablo II install first")}
           onClick={() => onInstall(file, job?.state === "downloaded")}
         >
-          {job ? jobLabel(job) : details && !file ? "NO FILES" : "INSTALL"}
+          {job ? jobLabel(job) : details && !file ? tr("NO FILES") : tr("INSTALL")}
         </button>
       </div>
     </article>

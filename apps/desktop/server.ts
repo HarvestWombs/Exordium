@@ -43,6 +43,18 @@ import {
   writeWritableLayer,
 } from "@exordium/registry";
 import {
+  denoFs,
+  detectRunners,
+  pickRunner,
+  prefixFor,
+  prefixInitCommand,
+  regAddCommand,
+  type Runner,
+  type RunnerCommand,
+  toWinePath,
+  wineCommand,
+} from "@exordium/runner";
+import {
   activeJobCount,
   archiveItem,
   archiveList,
@@ -86,7 +98,7 @@ import { copyTree, installArchive } from "./install.ts";
 import { exordiumManifestFromD2SE } from "./mod-manifest.ts";
 import { runHidden } from "./native.ts";
 import { pickFolderNative, pickOpenFilesNative } from "./native-dialog.ts";
-import { exordiumRoot } from "./paths.ts";
+import { exordiumRoot, userDataFolder } from "./paths.ts";
 import {
   checkInstall,
   copyJob,
@@ -100,6 +112,7 @@ import {
 } from "./library-setup.ts";
 import { APP_VERSION, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
+import { translate } from "./translate.ts";
 import { powerShellLiteral, runPowerShellHidden } from "./windows-hidden-process.ts";
 import { hardenedWebViewEnv, startDetached, watchWebView } from "./webview.ts";
 import {
@@ -187,6 +200,7 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/discord/callback") return await discordCallback(url);
   if (url.pathname === "/api/discord/disconnect") return await discordDisconnect(request);
   if (url.pathname === "/api/cores") return await coresRoute(request, url);
+  if (url.pathname === "/api/translate") return await translateRoute(request);
   if (url.pathname === "/api/screenshots") return await screenshots(url);
   if (url.pathname === "/api/logs") return await logs(request, url);
   if (url.pathname === "/api/open-folder") return await openFolder(request);
@@ -194,7 +208,9 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/pick-folder") return await pickFolderRoute(url);
   if (url.pathname === "/api/pick-open-files") return await pickOpenFilesRoute(url);
   if (url.pathname === "/api/symlink-status") return Response.json(await symlinkStatus());
-  if (url.pathname === "/api/restart-admin") return await restartAdmin(request);
+  if (url.pathname === "/api/restart-admin") {
+    return Deno.build.os === "windows" ? await restartAdmin(request) : windowsOnly("Restarting as administrator");
+  }
   if (url.pathname === "/api/install-local-archive") return await installLocalArchive(request);
   if (url.pathname.startsWith("/api/library/")) return await libraryRoute(request, url);
   if (url.pathname === "/api/collections") return await collectionsRoute(request);
@@ -202,7 +218,9 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/browse" || url.pathname.startsWith("/api/browse/")) {
     return await browseRoute(request, url);
   }
-  if (url.pathname === "/api/launch-d2se") return await launchD2SE(request);
+  if (url.pathname === "/api/launch-d2se") {
+    return Deno.build.os === "windows" ? await launchD2SE(request) : windowsOnly("Starting a mod through D2SE");
+  }
   if (url.pathname.startsWith("/api/window/")) return await windowRoute(url);
   if (url.pathname.startsWith("/api/")) return Response.json({ error: "Not found" }, { status: 404 });
 
@@ -1298,7 +1316,7 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
   lap("machineSnapshot");
   const base = { id: "machine", role: "base" as const, entries: snapshot.entries };
   const settings = settingsLayer(loader.settings);
-  const box = boxLayer(realised.folder);
+  const box = boxLayer(gamePath(realised.folder));
   const writable = await readWritableLayer(exordiumRoot, id);
   const registry = resolve({ files: [], registry: [base, settings, box, writable] }).registry;
   const lowerRegistry = resolve({ files: [], registry: [base, settings, box] }).registry;
@@ -1308,7 +1326,7 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
     ? setup.mod.title ?? target.folder
     : await coreName(imported.layout.root, target.version);
   const iconFile = await artFile(imported.layout.root, target, "icon");
-  const icon = iconFile ? winPath(iconFile) : null;
+  const icon = iconFile ? gamePath(iconFile) : null;
   const presence = gamePresenceAllowed(state, appSettings)
     ? activityJson(runActivity({ kind: target.kind, name: title, core: core?.version ?? loader.gameVersion ?? null }))
     : null;
@@ -1343,6 +1361,8 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
     title,
     hive: hive.hive,
     registryFile: hive.file,
+    hostRegistryFile: hive.hostFile,
+    hostHive: hive.hostHive,
     registryValues: registry.length,
     folder: realised.folder,
     reused: realised.reused,
@@ -1439,6 +1459,11 @@ interface AppSettings {
      * below its core and mod, so a PlugY of their own wins. Empty: none. Exordium ships no PlugY.
      */
     plugYFolder: string;
+    /**
+     * Off Windows, what runs the game: a runner id from detection (`system:/usr/bin/wine`), or a path
+     * to a Wine binary, a Wine or Proton folder, or umu-run. Empty: the first runner found.
+     */
+    wineRunner: string;
   };
   boxes: {
     /** On each library read, delete the boxes of this install's titles that are gone. */
@@ -1468,6 +1493,8 @@ interface AppSettings {
   appearance: {
     theme: "dark" | "light" | "system";
     reduceMotion: boolean;
+    /** The interface's language (src/lib/i18n.ts); "system" follows Windows. */
+    language: "system" | "en" | "fr" | "es" | "de";
   };
 }
 
@@ -1497,7 +1524,7 @@ interface DiscordAccount {
 }
 
 const stateFile = `${exordiumRoot}/exordium.json`;
-const legacyStateFile = `${(Deno.env.get("LOCALAPPDATA") ?? Deno.cwd()).replace(/\\/g, "/")}/Exordium/state.json`;
+const legacyStateFile = `${userDataFolder()}/Exordium/state.json`;
 const DEFAULT_APP_SETTINGS: AppSettings = {
   library: {
     autoScanOnStartup: true,
@@ -1510,6 +1537,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     minimizeOnLaunch: false,
     showLogsOnFailure: true,
     plugYFolder: "",
+    wineRunner: "",
   },
   boxes: {
     autoCleanStale: false,
@@ -1536,6 +1564,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   appearance: {
     theme: "dark",
     reduceMotion: false,
+    language: "system",
   },
 };
 
@@ -2111,7 +2140,21 @@ function localOnlyGuarded(path: string): boolean {
       "/api/browse/moddb-item",
       "/api/browse/download",
       "/api/browse/url-download",
+      "/api/translate",
     ].includes(path);
+}
+
+/** A mod's description, into the player's language (translate.ts). */
+async function translateRoute(request: Request): Promise<Response> {
+  if (request.method !== "POST") return Response.json({ error: "POST only" }, { status: 405 });
+  const { text, to } = await request.json().catch(() => ({})) as { text?: unknown; to?: unknown };
+  if (typeof text !== "string" || !text.trim() || typeof to !== "string" || !/^[A-Za-z-]{2,12}$/.test(to)) {
+    return Response.json({ error: "Nothing to translate" }, { status: 400 });
+  }
+  return await translate(text, to).then(
+    (translation) => Response.json(translation),
+    (error) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 502 }),
+  );
 }
 
 async function localOnlyRefusal(): Promise<Response | null> {
@@ -2375,6 +2418,19 @@ function appSettingsResponse(settings: AppSettings) {
       logs: winPath(`${exordiumRoot}/logs`),
       art: winPath(`${exordiumRoot}/art`),
     },
+    platform: Deno.build.os,
+    wine: wineStatus(settings),
+  };
+}
+
+/** Off Windows, the runners found and the one a launch would use; null on Windows. */
+function wineStatus(settings: AppSettings) {
+  if (Deno.build.os === "windows") return null;
+  const runners = detectRunners(denoFs, Deno.env.toObject());
+  const selected = pickRunner(denoFs, runners, settings.launch.wineRunner);
+  return {
+    runners: runners.map(({ id, kind, source, label, program }) => ({ id, kind, source, label, program })),
+    selected: selected ? { id: selected.id, label: selected.label, program: selected.program } : null,
   };
 }
 
@@ -2408,6 +2464,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     minimizeOnLaunch: "boolean",
     plugYFolder: "string",
     showLogsOnFailure: "boolean",
+    wineRunner: "string",
   });
   mergeObject(next.boxes, record.boxes, {
     autoCleanStale: "boolean",
@@ -2435,6 +2492,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   mergeObject(next.appearance, record.appearance, {
     theme: ["dark", "light", "system"],
     reduceMotion: "boolean",
+    language: ["system", "en", "fr", "es", "de"],
   });
   return next;
 }
@@ -2729,8 +2787,10 @@ async function play(request: Request): Promise<Response> {
     await Deno.remove(`${box.folder}/${box.log}`).catch(() => {});
     const startedAt = new Date().toISOString();
     let pid: number;
-    if (box.nativeGameExe || box.singleExe) {
-      await applyRegistryFile(box.registryFile);
+    if (Deno.build.os !== "windows") {
+      pid = await playUnderWine(key, copy, box, startedAt);
+    } else if (box.nativeGameExe || box.singleExe) {
+      await applyRegistryFile(box.hostRegistryFile);
       const gameExe = `${box.folder}/${GAME_EXE}`;
       const child = new Deno.Command(gameExe, {
         args: box.commandLine.split(" ").filter(Boolean),
@@ -2854,6 +2914,7 @@ async function followDirectRun(
   child: Deno.ChildProcess,
   box: { id: string; title: string; folder: string },
   startedAt: string,
+  collect: () => Promise<unknown> = () => collectRegistryMachine(box.id),
 ): Promise<void> {
   let exitCode = 0;
   try {
@@ -2861,7 +2922,7 @@ async function followDirectRun(
     endedRuns.add(`${key}#${copy}`);
     void updatePresence();
     notify("status");
-    await collectRegistryMachine(box.id).catch((error) => {
+    await collect().catch((error) => {
       console.warn(`[direct-run] ${box.id}: registry was not captured: ${(error as Error).message}`);
     });
     const stillBusy = legacyRunning.some((run) => run.key === key && run.copy !== copy);
@@ -2903,6 +2964,105 @@ async function followDirectRun(
   }
 }
 
+// ---- Wine (off Windows): the runner, Exordium's prefix, and a run --------------------------------
+
+/** The prefixes made ready since this server started; a prefix is checked once per session. */
+const preparedPrefixes = new Set<string>();
+
+/** The runner Settings names, else the first one found. Throws a 409 the page shows when there is none. */
+function currentRunner(settings: AppSettings): Runner {
+  const runners = detectRunners(denoFs, Deno.env.toObject());
+  const runner = pickRunner(denoFs, runners, settings.launch.wineRunner);
+  if (!runner) {
+    throw new HttpError(
+      409,
+      "No Wine was found. Install Wine (or Proton, Lutris or Bottles), or choose one in Settings, Launching.",
+    );
+  }
+  return runner;
+}
+
+/** Runs a runner command to its end, with no stdio (the packaged app has no console). */
+function runnerOutput(command: RunnerCommand, cwd?: string): Promise<Deno.CommandOutput> {
+  return new Deno.Command(command.program, {
+    args: command.args,
+    env: command.env,
+    ...(cwd ? { cwd } : {}),
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).output();
+}
+
+/**
+ * Exordium's prefix for `runner`, created on first use (`wineboot -u`, which takes a while the first
+ * time). It lives in Exordium's root: the user's own `~/.wine` and launcher bottles are never used.
+ */
+async function preparePrefix(runner: Runner): Promise<string> {
+  const prefix = prefixFor(exordiumRoot, runner);
+  if (preparedPrefixes.has(prefix)) return prefix;
+  const init = prefixInitCommand(runner, prefix);
+  if (init && !(await Deno.stat(`${prefix}/system.reg`).catch(() => null))) {
+    await Deno.mkdir(prefix, { recursive: true });
+    appLog("info", `preparing the Wine prefix ${prefix} with ${runner.label} (${runner.program})`);
+    const { code } = await runnerOutput(init);
+    if (code !== 0) throw new HttpError(500, `${runner.label} could not prepare its Wine prefix (exit ${code}).`);
+  }
+  preparedPrefixes.add(prefix);
+  return prefix;
+}
+
+/**
+ * Starts a box's `Game.exe` through Wine. No `--detach`: the host process the runner starts is the
+ * game for its whole life (the loader waits for its own relaunch, when it makes one), so the run is
+ * followed by its exit, like a 1.14 run on Windows. Returns the host pid.
+ */
+async function playUnderWine(
+  key: string,
+  copy: number,
+  box: Awaited<ReturnType<typeof realiseD2SEBox>>,
+  startedAt: string,
+): Promise<number> {
+  const runner = currentRunner(appSettingsFromState(await readState()));
+  const prefix = await preparePrefix(runner);
+  const gameExe = `${box.folder}/${GAME_EXE}`;
+  // 1.14 takes no private hive: its values go to the prefix's HKCU, and nothing is collected after.
+  if (box.singleExe) await applyRegistryFile(box.hostRegistryFile, { runner, prefix });
+  const command = wineCommand(runner, prefix, gameExe, box.commandLine.split(" ").filter(Boolean));
+  const child = new Deno.Command(command.program, {
+    args: command.args,
+    cwd: box.folder,
+    // Wine hands the host environment to the game, so the loader finds this copy's config and log.
+    env: { ...command.env, EXORDIUM_LOADER_CONFIG: box.config, EXORDIUM_LOADER_LOG: box.log },
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
+  legacyRunning = [
+    ...legacyRunning,
+    {
+      key,
+      copy,
+      title: box.title,
+      presence: box.presence,
+      pid: child.pid,
+      gamePid: child.pid,
+      startedAt,
+      state: "running",
+    },
+  ];
+  const collect = box.singleExe ? () => Promise.resolve() : async () => {
+    // The loader reads the run's hive back as text; it opens Wine paths, this server reads the host's.
+    const dump = `${box.hostHive}.out.txt`;
+    const read = wineCommand(runner, prefix, gameExe, ["--dump-hive", box.hive, gamePath(dump)]);
+    const { code } = await runnerOutput(read, box.folder);
+    if (code !== 0) throw new Error(`--dump-hive exited with ${code}`);
+    return await collectRegistryDump(box.id, dump);
+  };
+  void followDirectRun(key, copy, child, box, startedAt, collect);
+  return child.pid;
+}
+
 async function collectRegistryMachine(boxId: string) {
   const lower = JSON.parse(
     await Deno.readTextFile(`${exordiumRoot}/boxes/${boxId}/registry.lower.json`),
@@ -2917,17 +3077,29 @@ function isRegistryEntry(value: RegistryEntry | RegistryTombstone): value is Reg
   return "value" in value;
 }
 
-async function applyRegistryFile(file: string): Promise<void> {
+/**
+ * Writes a box's registry values to HKCU for a game that cannot take a private hive (1.14). Under
+ * Wine, `wine` names the runner and prefix, and the values go to the prefix's HKCU, which is
+ * Exordium's own.
+ */
+async function applyRegistryFile(file: string, wine?: { runner: Runner; prefix: string }): Promise<void> {
   const entries = parseHiveText(await Deno.readTextFile(file.replace(/\\/g, "/")));
-  for (const entry of entries) await writeMachineValue(entry.key, entry.name, entry.value);
+  for (const entry of entries) await writeMachineValue(entry.key, entry.name, entry.value, wine);
 }
 
-async function writeMachineValue(key: string, name: string, value: RegistryValue): Promise<void> {
+async function writeMachineValue(
+  key: string,
+  name: string,
+  value: RegistryValue,
+  wine?: { runner: Runner; prefix: string },
+): Promise<void> {
   if (!/^HKCU\\/i.test(key) && !/^HKEY_CURRENT_USER\\/i.test(key)) {
     throw new HttpError(500, `Classic launch can only write HKCU values for now; got ${key}.`);
   }
   const args = ["add", key, ...regValueNameArgs(name), "/t", regType(value), "/d", regData(value), "/f"];
-  const code = await runHidden("reg.exe", args);
+  const code = wine
+    ? (await runnerOutput(regAddCommand(wine.runner, wine.prefix, args))).code
+    : await runHidden("reg.exe", args);
   if (code !== 0) {
     throw new HttpError(500, `Could not write registry value ${key}\\${name || "(Default)"} (reg.exe exited ${code}).`);
   }
@@ -3217,8 +3389,23 @@ async function screenshots(url: URL): Promise<Response> {
  * fails with "Invalid handle". The dev server has a console, so it only ever broke in the app.
  */
 function showInExplorer(target: string, select = false): void {
+  if (Deno.build.os !== "windows") {
+    // Neither opener selects a file: show its folder instead.
+    openWithDesktop(select ? target.replace(/\/[^/]*$/, "") || "/" : target);
+    return;
+  }
   new Deno.Command("explorer.exe", {
     args: select ? [`/select,${target}`] : [target],
+    stdin: "null",
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
+}
+
+/** The desktop's own opener off Windows: `open` on macOS, `xdg-open` elsewhere. */
+function openWithDesktop(target: string): void {
+  new Deno.Command(Deno.build.os === "darwin" ? "open" : "xdg-open", {
+    args: [target],
     stdin: "null",
     stdout: "null",
     stderr: "null",
@@ -3232,6 +3419,7 @@ function showInExplorer(target: string, select = false): void {
  * passes the URL as one argv with no shell, so `&` and `?` are safe.
  */
 function openExternal(url: string): void {
+  if (Deno.build.os !== "windows") return openWithDesktop(url);
   new Deno.Command("rundll32.exe", {
     args: ["url.dll,FileProtocolHandler", url],
     stdin: "null",
@@ -3676,6 +3864,7 @@ $link.Save()
  * no console window. Values are passed as separate arguments, never spliced into script text.
  */
 async function makeShortcut(key: string, target: BoxTarget): Promise<Response> {
+  if (Deno.build.os !== "windows") return windowsOnly("Desktop shortcuts");
   if (!isPackaged()) {
     return Response.json({ error: "Desktop shortcuts start the packaged Exordium.exe; this is the dev server." }, {
       status: 409,
@@ -4211,7 +4400,9 @@ async function installRegistry(
   // What the run's changes are measured against, as it was at launch: collecting may happen later,
   // after the machine's keys or Exordium's own key list have changed.
   await Deno.writeTextFile(`${boxFolder}/registry.lower.json`, JSON.stringify(lower));
-  return { hive: winPath(`${boxFolder}/${hiveName}`), file: winPath(file) };
+  const hive = `${boxFolder}/${hiveName}`;
+  // The game's paths go into the loader config; the host's are what this server reads and writes.
+  return { hive: gamePath(hive), file: gamePath(file), hostHive: hive, hostFile: file };
 }
 
 /**
@@ -4230,8 +4421,17 @@ async function collectRegistryDump(boxId: string, dump: string) {
   return { values: after.length, changes: layer.entries };
 }
 
+/** A path as the user reads it: backslashes on Windows, unchanged elsewhere. */
 function winPath(path: string): string {
-  return path.replace(/\//g, "\\");
+  return Deno.build.os === "windows" ? path.replace(/\//g, "\\") : path;
+}
+
+/**
+ * A path as the game opens it: the loader config and the registry hold these. On Windows the same as
+ * winPath; under Wine the host path through `Z:` (packages/runner/paths.ts).
+ */
+function gamePath(path: string): string {
+  return Deno.build.os === "windows" ? path.replace(/\//g, "\\") : toWinePath(path);
 }
 
 function fileUrlPath(url: URL): string {
@@ -4283,8 +4483,8 @@ async function installNativeLoader(
         title: identity.title,
         boxId: run.boxId,
         copy,
-        session: winPath(sessions.file(run.boxId, copy)),
-        ledger: winPath(sessions.ledger),
+        session: gamePath(sessions.file(run.boxId, copy)),
+        ledger: gamePath(sessions.ledger),
         // Kept in the config for the next non-injecting game-activity implementation.
         ...(run.presence ? { discordClientId: DISCORD_CLIENT_ID, discordActivity: run.presence } : {}),
         handoff: true,
@@ -4505,14 +4705,19 @@ public class D2 {
 `;
 }
 
-const shell32 = Deno.dlopen("shell32.dll", {
+const SHELL32 = {
   ShellExecuteA: {
     parameters: ["pointer", "buffer", "buffer", "buffer", "buffer", "i32"],
     result: "pointer",
   },
-});
+} as const;
+
+/** Opened on first use, on Windows only: opened at module level, it stopped the server loading elsewhere. */
+let shell32: Deno.DynamicLibrary<typeof SHELL32> | null = null;
 
 async function runElevated(scriptPath: string, resultPath: string, timeoutMs = 150_000): Promise<void> {
+  if (Deno.build.os !== "windows") throw new Error("Elevated launches are only available on Windows.");
+  shell32 ??= Deno.dlopen("shell32.dll", SHELL32);
   const parameters = `-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`;
   const result = shell32.symbols.ShellExecuteA(
     null,
@@ -4550,6 +4755,11 @@ function psQuote(value: string): string {
 
 function cstr(value: string): Uint8Array {
   return new TextEncoder().encode(`${value}\0`);
+}
+
+/** The answer for a feature that only exists on Windows (D2SE, `.lnk` shortcuts, elevation). */
+function windowsOnly(feature: string): Response {
+  return Response.json({ error: `${feature} is only available on Windows.` }, { status: 501 });
 }
 
 class HttpError extends Error {

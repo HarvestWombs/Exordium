@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import { formatSize } from "../lib/util.ts";
 import type { CopyJob } from "../types.ts";
 
@@ -33,7 +34,7 @@ export function CopyProgress({ job, label }: { job: CopyJob; label?: string | un
       <span className="muted small">
         {job.state === "failed"
           ? job.error
-          : `${label ?? (job.state === "done" ? "Copied" : "Copying")} — ${formatSize(job.copied)} of ${
+          : `${label ?? (job.state === "done" ? tr("Copied") : tr("Copying"))} — ${formatSize(job.copied)} of ${
             formatSize(job.total)
           }`}
       </span>

@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
 import { HeartIcon, PlayIcon, TitleIcon } from "../../components/icons.tsx";
@@ -67,12 +68,12 @@ export function LibraryGrid(
   return (
     <div className="library-grid" style={{ "--capsule": `${CAPSULE_SIZES[size]}px` } as React.CSSProperties}>
       <div className="grid-head">
-        <h1>Library</h1>
+        <h1>{tr("Library")}</h1>
         <div className="grow" />
         <button type="button" className="ghost compact" onClick={onImport}>
-          Import…
+          {tr("Import…")}
         </button>
-        <div className="segmented" role="group" aria-label="Card size">
+        <div className="segmented" role="group" aria-label={tr("Card size")}>
           {(Object.keys(CAPSULE_SIZES) as CapsuleSize[]).map((s) => (
             <button
               type="button"
@@ -81,13 +82,13 @@ export function LibraryGrid(
               className={size === s ? "on" : ""}
               onClick={() => changeSize(s)}
             >
-              {s[0]!.toUpperCase() + s.slice(1)}
+              {{ small: tr("Small"), medium: tr("Medium"), large: tr("Large") }[s]}
             </button>
           ))}
         </div>
       </div>
       {before}
-      {total === 0 && <p className="muted">Nothing matches these filters.</p>}
+      {total === 0 && <p className="muted">{tr("Nothing matches these filters.")}</p>}
       {shelves.filter((shelf) => shelf.titles.length > 0).map((shelf) => (
         <section key={shelf.id} className="shelf">
           <h2 className="eyebrow">
@@ -142,16 +143,16 @@ export function LibraryGrid(
                         </div>
                       )}
                     {favorites.has(t.key) && (
-                      <span className="capsule-badge favorite" aria-label="Favorite">
+                      <span className="capsule-badge favorite" aria-label={tr("Favorite")}>
                         <HeartIcon filled />
                       </span>
                     )}
-                    {live && <span className="capsule-badge live">PLAYING</span>}
+                    {live && <span className="capsule-badge live">{tr("PLAYING")}</span>}
                     {!errors && (
                       <button
                         type="button"
                         className="capsule-play"
-                        aria-label={`Play ${t.title}`}
+                        aria-label={tr("Play {title}", { title: t.title })}
                         disabled={starting === t.key}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -164,7 +165,9 @@ export function LibraryGrid(
                   </div>
                   <div className="capsule-name">{t.title}</div>
                   <div className="capsule-sub">
-                    {t.kind === "core" ? `Core · ${t.core ?? ""}` : `Mod · ${t.core ?? "?"}`}
+                    {t.kind === "core"
+                      ? tr("Core · {core}", { core: t.core ?? "" })
+                      : tr("Mod · {core}", { core: t.core ?? "?" })}
                   </div>
                 </div>
               );

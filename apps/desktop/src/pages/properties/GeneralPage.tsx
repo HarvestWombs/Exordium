@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { RENDERERS } from "../../lib/util.ts";
 import type { Title, TitleOptions } from "../../types.ts";
@@ -32,7 +33,7 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
         }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not save options.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not save options."));
       setDraft(body.options ?? draft);
       await onChanged();
     } catch (error) {
@@ -45,25 +46,27 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
   return (
     <div className="page-with-footer">
       <div className="stack">
-        {!t.settings && <p className="muted">This title has no D2SE_SETUP.ini to launch from.</p>}
+        {!t.settings && <p className="muted">{tr("This title has no D2SE_SETUP.ini to launch from.")}</p>}
         {t.settings && (
           <>
             <section className="option-section">
               <div className="section-head">
-                <h2 className="eyebrow">LANGUAGE</h2>
-                <span className="muted small">{t.languages.length ? `${t.languages.length} available` : "MOD"}</span>
+                <h2 className="eyebrow">{tr("LANGUAGE")}</h2>
+                <span className="muted small">
+                  {t.languages.length ? tr("{count} available", { count: t.languages.length }) : tr("MOD")}
+                </span>
               </div>
               <select
                 value={s.language ?? "MOD"}
                 disabled={saving}
                 onChange={(e) => update({ language: e.currentTarget.value })}
               >
-                <option value="MOD">MOD</option>
+                <option value="MOD">{tr("MOD")}</option>
                 {t.languages.map((language) => <option key={language} value={language}>{language}</option>)}
               </select>
             </section>
             <fieldset disabled={saving} className="option-section">
-              <legend className="eyebrow">RENDER MODE</legend>
+              <legend className="eyebrow">{tr("RENDER MODE")}</legend>
               <div className="radio-grid">
                 {Object.entries(RENDERERS).map(([id, label]) => (
                   <label key={id} className={s.renderer === id ? "radio on" : "radio"}>
@@ -80,14 +83,14 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
               </div>
             </fieldset>
             <fieldset disabled={saving} className="checks option-section">
-              <legend className="eyebrow">LAUNCH OPTIONS</legend>
+              <legend className="eyebrow">{tr("LAUNCH OPTIONS")}</legend>
               <label>
                 <input
                   type="checkbox"
                   checked={s.windowed}
                   onChange={(e) => update({ windowed: e.currentTarget.checked })}
                 />{" "}
-                Windowed
+                {tr("Windowed")}
               </label>
               <label>
                 <input
@@ -95,7 +98,7 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
                   checked={s.noSound}
                   onChange={(e) => update({ noSound: e.currentTarget.checked })}
                 />{" "}
-                No sound
+                {tr("No sound")}
               </label>
               <label>
                 <input
@@ -103,7 +106,7 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
                   checked={s.hardcore}
                   onChange={(e) => update({ hardcore: e.currentTarget.checked })}
                 />{" "}
-                Allow hardcore characters
+                {tr("Allow hardcore characters")}
               </label>
               <label>
                 <input
@@ -111,7 +114,7 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
                   checked={s.skipToBNet ?? false}
                   onChange={(e) => update({ skipToBNet: e.currentTarget.checked })}
                 />{" "}
-                Skip to Battle.net
+                {tr("Skip to Battle.net")}
               </label>
               <label>
                 <input type="checkbox" checked={s.plugY} onChange={(e) => update({ plugY: e.currentTarget.checked })} />
@@ -119,18 +122,18 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
                 PlugY
               </label>
               <label>
-                Seed{" "}
+                {tr("Seed")}{" "}
                 <input
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   value={s.seed ?? ""}
-                  placeholder="None"
+                  placeholder={tr("None")}
                   onChange={(e) => update({ seed: e.currentTarget.value.replace(/\D/g, "") || null })}
                 />
               </label>
               <label>
-                Start act{" "}
+                {tr("Start act")}{" "}
                 <select
                   value={s.startAct ?? ""}
                   onChange={(e) =>
@@ -138,42 +141,44 @@ export function GeneralPage({ t, root, onChanged }: { t: Title; root: string; on
                       startAct: e.currentTarget.value ? Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 5 : null,
                     })}
                 >
-                  <option value="">Normal</option>
-                  <option value="1">Act I</option>
-                  <option value="2">Act II</option>
-                  <option value="3">Act III</option>
-                  <option value="4">Act IV</option>
-                  <option value="5">Act V</option>
+                  <option value="">{tr("Normal")}</option>
+                  <option value="1">{tr("Act I")}</option>
+                  <option value="2">{tr("Act II")}</option>
+                  <option value="3">{tr("Act III")}</option>
+                  <option value="4">{tr("Act IV")}</option>
+                  <option value="5">{tr("Act V")}</option>
                 </select>
               </label>
             </fieldset>
             <fieldset disabled={saving} className="checks option-section">
-              <legend className="eyebrow">MODDING</legend>
+              <legend className="eyebrow">{tr("MODDING")}</legend>
               <label>
                 <input
                   type="checkbox"
                   checked={s.direct}
                   onChange={(e) => update({ direct: e.currentTarget.checked })}
                 />{" "}
-                Read loose data files (-direct)
+                {tr("Read loose data files (-direct)")}
               </label>
               <label>
                 <input type="checkbox" checked={s.txt} onChange={(e) => update({ txt: e.currentTarget.checked })} />
                 {" "}
-                Compile .txt tables (-txt)
+                {tr("Compile .txt tables (-txt)")}
               </label>
             </fieldset>
           </>
         )}
       </div>
       <footer className="dialog-footer">
-        <span className={problem ? "error" : "muted small"}>{problem ?? (changed ? "Unsaved changes" : "Saved")}</span>
+        <span className={problem ? "error" : "muted small"}>
+          {problem ?? (changed ? tr("Unsaved changes") : tr("Saved"))}
+        </span>
         <div className="row-actions">
           <button type="button" className="ghost" disabled={!changed || saving} onClick={() => setDraft(t.options)}>
-            Reset
+            {tr("Reset")}
           </button>
           <button type="button" className="ghost primary" disabled={!changed || saving} onClick={() => void apply()}>
-            {saving ? "Applying…" : "Apply"}
+            {saving ? tr("Applying…") : tr("Apply")}
           </button>
         </div>
       </footer>

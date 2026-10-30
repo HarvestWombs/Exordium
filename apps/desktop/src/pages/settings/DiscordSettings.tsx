@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { SettingsGroup, ToggleRow } from "../../components/settings-rows.tsx";
 import { openLink } from "../../lib/util.ts";
@@ -24,7 +25,7 @@ export function DiscordSettings(
       }
       const response = await fetch(path, init);
       const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json.error ?? "Discord settings did not update.");
+      if (!response.ok) throw new Error(json.error ?? tr("Discord settings did not update."));
       await onChanged();
       return json;
     } catch (error) {
@@ -42,14 +43,14 @@ export function DiscordSettings(
 
   return (
     <>
-      <SettingsGroup title="Account">
+      <SettingsGroup title={tr("Account")}>
         <div className="settings-row">
           <span className="settings-label">
-            {account ? account.globalName ?? account.username : "Discord account"}
+            {account ? account.globalName ?? account.username : tr("Discord account")}
             <small className="settings-hint">
               {account
-                ? `Connected. Scopes: ${account.scopes.join(", ") || "none"}.`
-                : "Sign in with Discord: your identity for social features as they land. No password is shared."}
+                ? tr("Connected. Scopes: {scopes}.", { scopes: account.scopes.join(", ") || tr("none") })
+                : tr("Sign in with Discord: your identity for social features as they land. No password is shared.")}
             </small>
           </span>
           {account
@@ -60,27 +61,31 @@ export function DiscordSettings(
                 disabled={busy}
                 onClick={() => void post("/api/discord/disconnect")}
               >
-                Disconnect
+                {tr("Disconnect")}
               </button>
             )
             : (
               <button type="button" className="ghost compact" disabled={busy} onClick={() => void connect()}>
-                Connect Discord
+                {tr("Connect Discord")}
               </button>
             )}
         </div>
       </SettingsGroup>
-      <SettingsGroup title="Activity">
+      <SettingsGroup title={tr("Activity")}>
         <ToggleRow
-          label="Show launched games"
-          hint="Show what you're playing in Discord (title, core, time played). Needs Exordium open while you play."
+          label={tr("Show launched games")}
+          hint={tr(
+            "Show what you're playing in Discord (title, core, time played). Needs Exordium open while you play.",
+          )}
           checked={status.discord.gameActivity}
           disabled={busy}
           onChange={(value) => void post("/api/discord", { gameActivity: value })}
         />
         <ToggleRow
-          label="Show Exordium idle status"
-          hint="Shows &quot;Choosing a mod · in Exordium&quot; while Exordium is open and nothing runs. Separate from games."
+          label={tr("Show Exordium idle status")}
+          hint={tr(
+            "Shows “Choosing a mod · in Exordium” while Exordium is open and nothing runs. Separate from games.",
+          )}
           checked={status.discord.enabled}
           disabled={busy}
           onChange={(value) => void post("/api/discord", { enabled: value })}

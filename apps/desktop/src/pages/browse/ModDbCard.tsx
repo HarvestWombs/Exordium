@@ -1,4 +1,6 @@
+import { formatDate, formatNumber, tr } from "../../lib/i18n.ts";
 import * as React from "react";
+import { useTranslation } from "../../hooks/useTranslation.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import {
@@ -46,7 +48,7 @@ export function ModDbCard(
       void (async () => {
         const response = await fetch(`/api/browse/moddb-item?page=${encodeURIComponent(item.page)}`);
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) return setDetailsError(body.error ?? "Could not read this page.");
+        if (!response.ok) return setDetailsError(body.error ?? tr("Could not read this page."));
         setDetails(body);
         setFile(body.files?.[0]?.page ?? "");
         for (const s of body.screenshots as Shot[]) new Image().src = s.full;
@@ -60,6 +62,7 @@ export function ModDbCard(
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
   const description = details?.description || item.description;
+  const translation = useTranslation(description);
   const shots = details?.screenshots ?? [];
   const isMod = item.kind === "mod";
   const chosen = isMod ? details?.files.find((f) => f.page === file) ?? null : null;
@@ -69,20 +72,23 @@ export function ModDbCard(
 
   return (
     <article ref={ref} className="mod-card">
-      <button type="button" className="mod-cover" title="Open its ModDB page" onClick={() => openLink(item.page)}>
+      <button type="button" className="mod-cover" title={tr("Open its ModDB page")} onClick={() => openLink(item.page)}>
         <img src={shots[0]?.full ?? item.cover} alt="" loading="lazy" onError={smallerModDbImage} />
-        {installed && <span className="ribbon">IN LIBRARY</span>}
+        {installed && <span className="ribbon">{tr("IN LIBRARY")}</span>}
       </button>
 
       <div className="mod-info">
         <h2 className="mod-title">{item.title}</h2>
         <p className={expanded ? "mod-description open" : "mod-description"}>
-          {description || (details ? "The author gave no description." : "…")}
+          {translation.text || (details ? tr("The author gave no description.") : "…")}
         </p>
         <div className="mod-under">
           {description.length > 280 && (
-            <button type="button" className="link-button" onClick={onExpand}>{expanded ? "Less" : "More"}</button>
+            <button type="button" className="link-button" onClick={onExpand}>
+              {expanded ? tr("Less") : tr("More")}
+            </button>
           )}
+          {translation.button}
           {details?.links.map((link) => (
             <button
               type="button"
@@ -97,7 +103,7 @@ export function ModDbCard(
         </div>
         {item.keywords.length > 0 && (
           <div className="mod-tags">
-            <span className="eyebrow">TAGS</span>
+            <span className="eyebrow">{tr("TAGS")}</span>
             {item.keywords.map((keyword) => (
               <button
                 type="button"
@@ -111,43 +117,41 @@ export function ModDbCard(
           </div>
         )}
         <dl className="mod-facts">
-          <dt>ADDED</dt>
+          <dt>{tr("ADDED")}</dt>
           <dd>
-            {(details?.addedAt ?? item.addedAt)
-              ? new Date(details?.addedAt ?? item.addedAt!).toLocaleDateString()
-              : "—"}
+            {(details?.addedAt ?? item.addedAt) ? formatDate(details?.addedAt ?? item.addedAt!) : "—"}
           </dd>
-          <dt>BY</dt>
+          <dt>{tr("BY")}</dt>
           <dd>{details?.creator ?? "—"}</dd>
           {details?.updatedAt
             ? (
               <>
-                <dt>UPDATED</dt>
-                <dd>{new Date(details.updatedAt).toLocaleDateString()}</dd>
+                <dt>{tr("UPDATED")}</dt>
+                <dd>{formatDate(details.updatedAt)}</dd>
               </>
             )
             : null}
           {isMod
             ? (
               <>
-                <dt>FILES</dt>
+                <dt>{tr("FILES")}</dt>
                 <dd>{details ? details.files.length : "—"}</dd>
               </>
             )
             : (
               <>
-                <dt>DOWNLOADS</dt>
-                <dd>{details?.downloads != null ? details.downloads.toLocaleString() : "—"}</dd>
+                <dt>{tr("DOWNLOADS")}</dt>
+                <dd>{details?.downloads != null ? formatNumber(details.downloads) : "—"}</dd>
               </>
             )}
         </dl>
       </div>
 
-      <ShotGallery shots={shots} empty={details ? "No screenshots" : detailsError ?? "…"} />
+      <ShotGallery shots={shots} empty={details ? tr("No screenshots") : detailsError ?? "…"} />
 
       <div className="mod-bar">
         <span className="source-badge">ModDB · {item.sourceLabel}</span>
-        <button type="button" className="link-button" onClick={() => openLink(item.page)}>Page ↗</button>
+        <button type="button" className="link-button" onClick={() => openLink(item.page)}>{tr("Page ↗")}</button>
         <div className="grow" />
         {detailsError && <span className="bad-text small">{detailsError}</span>}
         {job && <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job)} />}
@@ -160,7 +164,7 @@ export function ModDbCard(
           <select
             value={file}
             onChange={(e) => setFile(e.currentTarget.value)}
-            aria-label="File to install"
+            aria-label={tr("File to install")}
           >
             {details.files.map((f) => (
               <option key={f.page} value={f.page}>
@@ -176,10 +180,10 @@ export function ModDbCard(
             <button
               type="button"
               className="download"
-              title="An installer: Exordium never runs one for you. Open its page and install it yourself."
+              title={tr("An installer: Exordium never runs one for you. Open its page and install it yourself.")}
               onClick={() => openLink(item.page)}
             >
-              INSTALLER ↗
+              {tr("INSTALLER ↗")}
             </button>
           )
           : (
@@ -188,10 +192,10 @@ export function ModDbCard(
               className="download"
               disabled={!details || !root || running || job?.state === "installed" ||
                 (isMod && !chosen && details.files.length > 0)}
-              title={root ? undefined : "Choose the Diablo II install first"}
+              title={root ? undefined : tr("Choose the Diablo II install first")}
               onClick={() => onInstall(target)}
             >
-              {job ? jobLabel(job) : "INSTALL"}
+              {job ? jobLabel(job) : tr("INSTALL")}
             </button>
           )}
       </div>

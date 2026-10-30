@@ -1,3 +1,4 @@
+import { formatDateTime, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { formatSize } from "../../lib/util.ts";
 import type { LogFile } from "../../types.ts";
@@ -52,22 +53,22 @@ export function Logs({ root, titleKey }: { root: string; titleKey: string }) {
   async function openFolder() {
     setError(null);
     const response = await fetch(`/api/logs?${query}`, { method: "POST" });
-    if (!response.ok) setError((await response.json()).error ?? "Could not open the folder.");
+    if (!response.ok) setError((await response.json()).error ?? tr("Could not open the folder."));
   }
 
   return (
     <section className="logs">
       <div className="section-head">
-        <h2 className="eyebrow">LOGS</h2>
-        <span className="muted small">what the last runs wrote, in this title's box</span>
+        <h2 className="eyebrow">{tr("LOGS")}</h2>
+        <span className="muted small">{tr("what the last runs wrote, in this title's box")}</span>
         <div className="grow" />
-        <button type="button" className="ghost" onClick={() => void refresh()}>Refresh</button>
-        <button type="button" className="ghost" onClick={() => void openFolder()}>Open folder</button>
+        <button type="button" className="ghost" onClick={() => void refresh()}>{tr("Refresh")}</button>
+        <button type="button" className="ghost" onClick={() => void openFolder()}>{tr("Open folder")}</button>
       </div>
       {error && <p className="bad-text small">{error}</p>}
-      {list === null && <p className="muted">Reading logs…</p>}
+      {list === null && <p className="muted">{tr("Reading logs…")}</p>}
       {list?.logs.length === 0 && (
-        <p className="muted">No logs yet. They appear here after the title has been played.</p>
+        <p className="muted">{tr("No logs yet. They appear here after the title has been played.")}</p>
       )}
       {list && list.logs.length > 0 && (
         <div className="logs-body">
@@ -82,15 +83,15 @@ export function Logs({ root, titleKey }: { root: string; titleKey: string }) {
                   <span className="log-name">{log.name}</span>
                   <span className="muted small">
                     {formatSize(log.size)}
-                    {log.modifiedAt ? ` · ${new Date(log.modifiedAt).toLocaleString()}` : ""}
+                    {log.modifiedAt ? ` · ${formatDateTime(log.modifiedAt)}` : ""}
                   </span>
                 </button>
               </li>
             ))}
           </ul>
           <div className="log-view">
-            {text?.truncated && <p className="muted small">Showing the last 512 KB.</p>}
-            <pre ref={viewer} className="log-text">{text === null ? "Reading…" : text.body || "(empty)"}</pre>
+            {text?.truncated && <p className="muted small">{tr("Showing the last 512 KB.")}</p>}
+            <pre ref={viewer} className="log-text">{text === null ? tr("Reading…") : text.body || tr("(empty)")}</pre>
           </div>
         </div>
       )}

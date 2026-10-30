@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { CloseIcon } from "../../components/icons.tsx";
 import type { DialogPage, Title } from "../../types.ts";
@@ -25,31 +26,31 @@ export function Properties(
   }, [onClose]);
   return (
     <div className="scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={`${t.title} properties`}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label={tr("{title} properties", { title: t.title })}>
         <div className="dialog-head">
           <h1>{t.title}</h1>
-          <span className="muted">Properties</span>
+          <span className="muted">{tr("Properties")}</span>
           <div className="grow" />
-          <button type="button" className="square" aria-label="Close" onClick={onClose}>
+          <button type="button" className="square" aria-label={tr("Close")} onClick={onClose}>
             <CloseIcon />
           </button>
         </div>
         <div className="dialog-body">
           <nav className="dialog-nav">
             <button type="button" className={page === "about" ? "on" : ""} onClick={() => onPage("about")}>
-              About
+              {tr("About")}
             </button>
             <button type="button" className={page === "general" ? "on" : ""} onClick={() => onPage("general")}>
-              General
+              {tr("General")}
             </button>
             <button type="button" className={page === "updates" ? "on" : ""} onClick={() => onPage("updates")}>
-              Updates
+              {tr("Updates")}
             </button>
             <button type="button" className={page === "files" ? "on" : ""} onClick={() => onPage("files")}>
-              Installed Files
+              {tr("Installed Files")}
             </button>
             <button type="button" className={page === "artwork" ? "on" : ""} onClick={() => onPage("artwork")}>
-              Customization
+              {tr("Customization")}
             </button>
           </nav>
           <div className="dialog-page">

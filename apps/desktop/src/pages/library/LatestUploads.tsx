@@ -1,3 +1,4 @@
+import { formatDate, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { artUrl } from "../../lib/art.ts";
 import { keptUploads, loadUploads } from "../../lib/latest-uploads.ts";
@@ -7,12 +8,12 @@ import type { Title, Upload } from "../../types.ts";
 export function uploadedWhen(iso: string): string {
   const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const days = Math.round((midnight(new Date()) - midnight(new Date(iso))) / 86_400_000);
-  if (days < 1) return "Today";
-  if (days < 2) return "Yesterday";
-  if (days < 7) return "This week";
-  if (days < 14) return "1 week ago";
-  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  if (days < 1) return tr("Today");
+  if (days < 2) return tr("Yesterday");
+  if (days < 7) return tr("This week");
+  if (days < 14) return tr("1 week ago");
+  if (days < 60) return tr("{days} weeks ago", { days: Math.floor(days / 7) });
+  return formatDate(iso, { month: "short", year: "numeric" });
 }
 
 /**
@@ -42,10 +43,10 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
   return (
     <section className="uploads">
       <div className="uploads-head">
-        <h2 className="eyebrow">LATEST UPLOADS</h2>
+        <h2 className="eyebrow">{tr("LATEST UPLOADS")}</h2>
         <div className="grow" />
-        <button type="button" className="uploads-arrow" aria-label="Newer" onClick={() => scroll(-1)}>‹</button>
-        <button type="button" className="uploads-arrow" aria-label="Older" onClick={() => scroll(1)}>›</button>
+        <button type="button" className="uploads-arrow" aria-label={tr("Newer")} onClick={() => scroll(-1)}>‹</button>
+        <button type="button" className="uploads-arrow" aria-label={tr("Older")} onClick={() => scroll(1)}>›</button>
       </div>
       <div className="uploads-strip" ref={strip}>
         {cards.map((upload, index) => (
@@ -57,7 +58,7 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
             onClick={() => onOpen(upload)}
           >
             <span className="upload-when">
-              {upload.source === "update" ? "Update available" : uploadedWhen(upload.addedAt)}
+              {upload.source === "update" ? tr("Update available") : uploadedWhen(upload.addedAt)}
             </span>
             <span className="upload-art">
               {upload.cover
@@ -88,6 +89,8 @@ export function pendingUpdates(titles: Title[], hidden: Set<string>, root: strin
         : t.art.portrait
         ? artUrl(root, t.key, "portrait", art)
         : "",
-      sourceLabel: t.updateCheck!.latestVersion ? `Update · v${t.updateCheck!.latestVersion}` : "Update available",
+      sourceLabel: t.updateCheck!.latestVersion
+        ? tr("Update · v{latestVersion}", { latestVersion: t.updateCheck!.latestVersion })
+        : tr("Update available"),
     }));
 }

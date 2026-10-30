@@ -15,6 +15,8 @@
     "jsr:@std/net@^1.0.7": "1.0.7",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/streams@^1.2.0": "1.2.0",
+    "npm:@fontsource/cinzel@5.2.5": "5.2.5",
+    "npm:@fontsource/ibm-plex-sans@5.2.5": "5.2.5",
     "npm:@types/react-dom@19.0.0": "19.0.0",
     "npm:@types/react@19.0.0": "19.0.0",
     "npm:@vitejs/plugin-react@^4.3.4": "4.7.0_vite@6.4.3",
@@ -348,6 +350,12 @@
       "integrity": "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA==",
       "os": ["win32"],
       "cpu": ["x64"]
+    },
+    "@fontsource/cinzel@5.2.5": {
+      "integrity": "sha512-rtWRRViKOMLsCx0j+duTUIDuuDf3ke9uJoss108M/yFHPdxowxTvkehP0D1IrfzR+xM7pFU/tJGGmBflVHohHA=="
+    },
+    "@fontsource/ibm-plex-sans@5.2.5": {
+      "integrity": "sha512-W1kkC/fpDuoKQ5pNSQt/Bg0rpV9AATreA9ABwZf678AlwSCY2TQBT1YwAxxB65E9jcT/ysDrU1sGVNUyWCBXRw=="
     },
     "@jridgewell/gen-mapping@0.3.13": {
       "integrity": "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==",
@@ -799,6 +807,8 @@
         ],
         "packageJson": {
           "dependencies": [
+            "npm:@fontsource/cinzel@5.2.5",
+            "npm:@fontsource/ibm-plex-sans@5.2.5",
             "npm:@types/react-dom@19.0.0",
             "npm:@types/react@19.0.0",
             "npm:@vitejs/plugin-react@^4.3.4",

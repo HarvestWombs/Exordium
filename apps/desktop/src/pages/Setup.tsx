@@ -1,3 +1,4 @@
+import { plural, tr } from "../lib/i18n.ts";
 import * as React from "react";
 import { CopyProgress, followCopy, setupPost } from "../components/progress.tsx";
 import { formatSize } from "../lib/util.ts";
@@ -21,9 +22,9 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
   const read = React.useCallback(async (root: string) => {
     const response = await fetch(`/api/cores?root=${encodeURIComponent(root)}`);
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? "Could not read the cores catalog.");
+    if (!response.ok) throw new Error(body.error ?? tr("Could not read the cores catalog."));
     if (body.error) throw new Error(body.error);
-    if (!body.configured) throw new Error("No cores are published yet.");
+    if (!body.configured) throw new Error(tr("No cores are published yet."));
     return body.cores as CatalogCore[];
   }, []);
 
@@ -56,7 +57,7 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
       if (!response.ok) {
         failures.push({
           core: entry.core,
-          error: (await response.json().catch(() => ({}))).error ?? "It did not start.",
+          error: (await response.json().catch(() => ({}))).error ?? tr("It did not start."),
         });
         continue;
       }
@@ -67,7 +68,7 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
         if (job) setRunning((r) => r && { ...r, received: job.received, total: job.total || r.total });
         if (!job || job.state === "installed") break;
         if (job.state === "failed") {
-          failures.push({ core: entry.core, error: job.error ?? "The download failed." });
+          failures.push({ core: entry.core, error: job.error ?? tr("The download failed.") });
           break;
         }
       }
@@ -94,18 +95,18 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
     return (
       <>
         <p className="bad-text small">{error}</p>
-        <p className="muted small">You can install cores later from Browse → Cores.</p>
+        <p className="muted small">{tr("You can install cores later from Browse → Cores.")}</p>
         <div className="setup-actions">
-          <button type="button" className="ghost" onClick={onDone}>Skip for now</button>
+          <button type="button" className="ghost" onClick={onDone}>{tr("Skip for now")}</button>
         </div>
       </>
     );
   }
-  if (!list) return <p className="muted small">Reading the cores catalog…</p>;
+  if (!list) return <p className="muted small">{tr("Reading the cores catalog…")}</p>;
   return (
     <>
       <p className="muted small">
-        Downloaded from HarvestLabs and checked against their published checksums. Choose which to install:
+        {tr("Downloaded from HarvestLabs and checked against their published checksums. Choose which to install:")}
       </p>
       <div className="setup-cores">
         {list.map((core) => (
@@ -117,7 +118,7 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
               onChange={() => toggle(core.core)}
             />
             {core.core}
-            <span className="muted small">{core.status === "available" ? formatSize(core.size) : "installed"}</span>
+            <span className="muted small">{core.status === "available" ? formatSize(core.size) : tr("installed")}</span>
           </label>
         ))}
       </div>
@@ -128,9 +129,11 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
             className="link-button"
             onClick={() => setChosen(new Set(available.map((c) => c.core)))}
           >
-            Select all
+            {tr("Select all")}
           </button>
-          <button type="button" className="link-button" onClick={() => setChosen(new Set())}>Select none</button>
+          <button type="button" className="link-button" onClick={() => setChosen(new Set())}>
+            {tr("Select none")}
+          </button>
         </div>
       )}
       {running && (
@@ -144,12 +147,16 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
             total: running.total,
             error: null,
           }}
-          label={`Downloading ${running.core} (${running.index} of ${running.count})`}
+          label={tr("Downloading {core} ({index} of {count})", {
+            core: running.core,
+            index: running.index,
+            count: running.count,
+          })}
         />
       )}
       {failed.length > 0 && (
         <p className="bad-text small">
-          Not installed: {failed.map((f) => `${f.core} (${f.error})`).join("; ")}
+          {tr("Not installed:")} {failed.map((f) => `${f.core} (${f.error})`).join("; ")}
         </p>
       )}
       <div className="setup-actions">
@@ -160,13 +167,15 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
           onClick={() => void download()}
         >
           {busy
-            ? "Downloading…"
+            ? tr("Downloading…")
             : failed.length > 0
-            ? "Try again"
-            : `Download ${queued.length} core${queued.length === 1 ? "" : "s"} (${formatSize(bytes)})`}
+            ? tr("Try again")
+            : plural(queued.length, "Download {count} core ({bytes})", "Download {count} cores ({bytes})", {
+              bytes: formatSize(bytes),
+            })}
         </button>
         <button type="button" className="ghost" disabled={busy} onClick={onDone}>
-          {available.length === 0 ? "Continue" : failed.length > 0 ? "Continue without them" : "Skip"}
+          {available.length === 0 ? tr("Continue") : failed.length > 0 ? tr("Continue without them") : tr("Skip")}
         </button>
       </div>
     </>
@@ -206,7 +215,7 @@ export function SetupPage(
     if (body.check) {
       setCheck(body.check);
       if (body.check.problem) setProblem(body.check.problem);
-    } else setProblem(body.error ?? "Could not read that folder.");
+    } else setProblem(body.error ?? tr("Could not read that folder."));
   }
 
   React.useEffect(() => {
@@ -215,7 +224,7 @@ export function SetupPage(
   }, []);
 
   async function choose() {
-    const params = new URLSearchParams({ title: "Choose your Diablo II folder" });
+    const params = new URLSearchParams({ title: tr("Choose your Diablo II folder") });
     if (folder) params.set("path", folder);
     const response = await fetch(`/api/pick-folder?${params}`);
     if (!response.ok) return;
@@ -232,12 +241,12 @@ export function SetupPage(
     const { ok, body } = await setupPost({ action: "start", install: folder.trim() });
     if (!ok || !body.job) {
       setBusy(false);
-      return setProblem(body.error ?? body.check?.problem ?? "Could not start copying.");
+      return setProblem(body.error ?? body.check?.problem ?? tr("Could not start copying."));
     }
     const job = await followCopy(body.job, setGameJob);
     setBusy(false);
     if (job.state === "done") setStep("cores");
-    else setProblem(job.error ?? "Copying stopped.");
+    else setProblem(job.error ?? tr("Copying stopped."));
   }
 
   const ready = check !== null && !check.problem;
@@ -246,19 +255,20 @@ export function SetupPage(
     <main className="setup-page">
       <div className="setup-shell">
         <div className="setup-head">
-          <p className="eyebrow accent">First launch</p>
-          <h1>Set up Exordium</h1>
+          <p className="eyebrow accent">{tr("First launch")}</p>
+          <h1>{tr("Set up Exordium")}</h1>
           <p className="muted">
-            Exordium keeps its own copy of the game files, cores and mods it runs, so your Diablo II folder is only read
-            during setup and is never changed.
+            {tr(
+              "Exordium keeps its own copy of the game files, cores and mods it runs, so your Diablo II folder is only read during setup and is never changed.",
+            )}
           </p>
         </div>
         <ol className="setup-steps">
           <li className={`setup-step ${step === "install" ? "active" : "done"}`}>
             <span className="setup-num">{step === "install" ? "1" : "✓"}</span>
             <div>
-              <h2>Your Diablo II install</h2>
-              <p className="muted">The folder with Diablo II: Lord of Destruction (d2data.mpq, d2exp.mpq).</p>
+              <h2>{tr("Your Diablo II install")}</h2>
+              <p className="muted">{tr("The folder with Diablo II: Lord of Destruction (d2data.mpq, d2exp.mpq).")}</p>
               <div className="setup-path">
                 <input
                   value={folder}
@@ -275,21 +285,24 @@ export function SetupPage(
                   disabled={busy || step !== "install"}
                   onClick={() => void choose()}
                 >
-                  Choose…
+                  {tr("Choose…")}
                 </button>
               </div>
               {check && !check.problem && (
                 <ul className="setup-found">
                   <li>
-                    {GAME_ARCHIVE_COUNT - check.missing.length} of {GAME_ARCHIVE_COUNT} game archives
+                    {tr("{found} of {total} game archives", {
+                      found: GAME_ARCHIVE_COUNT - check.missing.length,
+                      total: GAME_ARCHIVE_COUNT,
+                    })}
                     {check.missing.length > 0 && (
-                      <span className="warn-text">(missing {check.missing.join(", ")})</span>
+                      <span className="warn-text">{tr("(missing {files})", { files: check.missing.join(", ") })}</span>
                     )}
                   </li>
                   <li>
                     {check.d2se
-                      ? `D2SE: ${check.mods.length} mod${check.mods.length === 1 ? "" : "s"} to import`
-                      : "No D2SE in this install"}
+                      ? plural(check.mods.length, "D2SE: {count} mod to import", "D2SE: {count} mods to import")
+                      : tr("No D2SE in this install")}
                   </li>
                 </ul>
               )}
@@ -297,9 +310,11 @@ export function SetupPage(
               {step === "install" && ready && (
                 <div className="setup-actions">
                   <button type="button" className="ghost primary" disabled={busy} onClick={() => void copyGame()}>
-                    {busy && gameJob ? "Copying…" : `Copy game files (${formatSize(check.gameBytes)})`}
+                    {busy && gameJob
+                      ? tr("Copying…")
+                      : tr("Copy game files ({gameBytes})", { gameBytes: formatSize(check.gameBytes) })}
                   </button>
-                  <span className="muted small">Into {app.paths.data}\library</span>
+                  <span className="muted small">{tr("Into {data}\\library", { data: app.paths.data })}</span>
                 </div>
               )}
             </div>
@@ -308,8 +323,8 @@ export function SetupPage(
           <li className={`setup-step ${step === "cores" ? "active" : step === "done" ? "done" : ""}`}>
             <span className="setup-num">{step === "done" ? "✓" : "2"}</span>
             <div>
-              <h2>Cores</h2>
-              <p className="muted">The game versions mods run on, such as 1.10f or 1.13c.</p>
+              <h2>{tr("Cores")}</h2>
+              <p className="muted">{tr("The game versions mods run on, such as 1.10f or 1.13c.")}</p>
               {step === "cores" && <SetupCores onDone={() => setStep("done")} />}
             </div>
           </li>
@@ -317,18 +332,20 @@ export function SetupPage(
           <li className={`setup-step ${step === "done" ? "active" : ""}`}>
             <span className="setup-num">3</span>
             <div>
-              <h2>Library</h2>
+              <h2>{tr("Library")}</h2>
               <p className="muted">
                 {check && check.mods.length > 0
-                  ? `${check.mods.length} D2SE mod${
-                    check.mods.length === 1 ? " was" : "s were"
-                  } found in your install. The library offers to import them, each reviewed in the converter first.`
-                  : "Install mods from Browse, or import a mod archive from disk."}
+                  ? plural(
+                    check.mods.length,
+                    "{count} D2SE mod was found in your install. The library offers to import it, reviewed in the converter first.",
+                    "{count} D2SE mods were found in your install. The library offers to import them, each reviewed in the converter first.",
+                  )
+                  : tr("Install mods from Browse, or import a mod archive from disk.")}
               </p>
               {step === "done" && (
                 <div className="setup-actions">
                   <button type="button" className="ghost primary" onClick={() => onDone("library")}>
-                    Open the library
+                    {tr("Open the library")}
                   </button>
                 </div>
               )}
@@ -342,10 +359,11 @@ export function SetupPage(
         )}
         {symlink && !symlink.ok && (
           <div className="setup-warning">
-            <strong>Symlinks are not available.</strong>
+            <strong>{tr("Symlinks are not available.")}</strong>
             <span>
-              Boxes need file symlinks to avoid copying full MPQs. Enable Windows Developer Mode or restart Exordium as
-              administrator.
+              {tr(
+                "Boxes need file symlinks to avoid copying full MPQs. Enable Windows Developer Mode or restart Exordium as administrator.",
+              )}
             </span>
             {!symlink.admin && (
               <button
@@ -353,7 +371,7 @@ export function SetupPage(
                 className="ghost"
                 onClick={() => void fetch("/api/restart-admin", { method: "POST" })}
               >
-                Restart as admin
+                {tr("Restart as admin")}
               </button>
             )}
           </div>

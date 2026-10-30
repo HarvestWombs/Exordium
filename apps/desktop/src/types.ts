@@ -244,6 +244,8 @@ export interface AppPreferences {
     showLogsOnFailure: boolean;
     /** A folder holding PlugY.dll, used by titles with PlugY on that bring none. Empty: none. */
     plugYFolder: string;
+    /** Off Windows: a detected runner's id, or a path to a Wine or Proton build. Empty: the first found. */
+    wineRunner: string;
   };
   boxes: {
     autoCleanStale: boolean;
@@ -270,12 +272,29 @@ export interface AppPreferences {
   appearance: {
     theme: "dark" | "light" | "system";
     reduceMotion: boolean;
+    /** The interface's language; "system" follows Windows, falling back to English. */
+    language: "system" | "en" | "fr" | "es" | "de";
   };
 }
 
 export interface AppSettingsState {
   settings: AppPreferences;
   paths: Record<"data" | "boxes" | "downloads" | "backups" | "logs" | "art", string>;
+  /** `Deno.build.os` of the server. */
+  platform: string;
+  /** Off Windows, the Wine runners found and the one a launch would use; null on Windows. */
+  wine: {
+    runners: WineRunner[];
+    selected: { id: string; label: string; program: string } | null;
+  } | null;
+}
+
+export interface WineRunner {
+  id: string;
+  kind: "wine" | "proton" | "umu";
+  source: "system" | "lutris" | "bottles" | "heroic" | "steam" | "custom";
+  label: string;
+  program: string;
 }
 
 export interface Character {

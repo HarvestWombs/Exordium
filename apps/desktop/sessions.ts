@@ -113,6 +113,7 @@ let kernel32: Deno.DynamicLibrary<typeof KERNEL32> | null = null;
  */
 export function processAlive(pid: number, created: number): boolean {
   if (!pid) return false;
+  if (Deno.build.os !== "windows") return hostProcessAlive(pid);
   kernel32 ??= Deno.dlopen("kernel32.dll", KERNEL32);
   const handle = kernel32.symbols.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
   if (!handle) return false;
@@ -127,6 +128,26 @@ export function processAlive(pid: number, created: number): boolean {
     return !created || Math.abs(started - created) <= 1;
   } finally {
     kernel32.symbols.CloseHandle(handle);
+  }
+}
+
+/**
+ * Off Windows a run is a host process (the runner Exordium started), and only its pid is known: on
+ * Linux `/proc/<pid>` exists while it runs, elsewhere `ps` answers.
+ */
+function hostProcessAlive(pid: number): boolean {
+  if (Deno.build.os === "linux") {
+    try {
+      Deno.statSync(`/proc/${pid}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    return new Deno.Command("ps", { args: ["-p", String(pid)], stdout: "null", stderr: "null" }).outputSync().success;
+  } catch {
+    return false;
   }
 }
 

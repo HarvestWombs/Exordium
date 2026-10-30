@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 
 export interface LightboxImage {
@@ -39,7 +40,7 @@ export function Lightbox(
   // The stage, bar and strip span the window, so only the picture and the buttons keep a click.
   const keep = (event: React.MouseEvent) => event.stopPropagation();
   return (
-    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Screenshots" onClick={onClose}>
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label={tr("Screenshots")} onClick={onClose}>
       <div className="lightbox-stage">
         <img className="lightbox-image" src={image.src} alt={image.caption ?? ""} onClick={keep} />
         {count > 1 && (
@@ -47,7 +48,7 @@ export function Lightbox(
             <button
               type="button"
               className="lightbox-nav prev"
-              aria-label="Previous"
+              aria-label={tr("Previous")}
               onClick={(event) => {
                 keep(event);
                 move(-1);
@@ -58,7 +59,7 @@ export function Lightbox(
             <button
               type="button"
               className="lightbox-nav next"
-              aria-label="Next"
+              aria-label={tr("Next")}
               onClick={(event) => {
                 keep(event);
                 move(1);
@@ -74,7 +75,7 @@ export function Lightbox(
           {index + 1} / {count}
           {image.caption ? ` · ${image.caption}` : ""}
         </span>
-        <button type="button" className="lightbox-close" aria-label="Close" onClick={onClose}>✕</button>
+        <button type="button" className="lightbox-close" aria-label={tr("Close")} onClick={onClose}>✕</button>
       </div>
       {count > 1 && (
         <div className="lightbox-strip" ref={strip}>

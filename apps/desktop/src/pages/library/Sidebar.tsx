@@ -1,3 +1,4 @@
+import { plural, tr } from "../../lib/i18n.ts";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import { SearchIcon } from "../../components/icons.tsx";
@@ -62,16 +63,21 @@ export function Sidebar(
                 type="text"
                 value={search}
                 onChange={(e) => onSearch(e.currentTarget.value)}
-                placeholder={scan ? `Search ${scan.mods.length} mods and ${scan.cores.length} cores` : "Search"}
-                aria-label="Search the library"
+                placeholder={scan
+                  ? tr("Search {mods} and {cores}", {
+                    mods: plural(scan.mods.length, "{count} mod", "{count} mods"),
+                    cores: plural(scan.cores.length, "{count} core", "{count} cores"),
+                  })
+                  : tr("Search")}
+                aria-label={tr("Search the library")}
               />
             </label>
           )}
           <button
             type="button"
             className="square rail-toggle"
-            aria-label={rail ? "Expand the sidebar" : "Fold the sidebar to icons"}
-            title={rail ? "Expand the sidebar" : "Fold the sidebar to icons"}
+            aria-label={rail ? tr("Expand the sidebar") : tr("Fold the sidebar to icons")}
+            title={rail ? tr("Expand the sidebar") : tr("Fold the sidebar to icons")}
             onClick={onToggleRail}
           >
             {rail ? "»" : "«"}
@@ -86,7 +92,13 @@ export function Sidebar(
                 className={filter === f ? "chip on" : "chip"}
                 onClick={() => onFilter(f)}
               >
-                {f[0]!.toUpperCase() + f.slice(1)}
+                {{
+                  all: tr("All"),
+                  mods: tr("Mods"),
+                  cores: tr("Cores"),
+                  issues: tr("Issues"),
+                  hidden: tr("Hidden"),
+                }[f]}
                 {f === "hidden" ? ` · ${hiddenCount}` : ""}
               </button>
             ))}
@@ -94,17 +106,17 @@ export function Sidebar(
         )}
       </div>
       <div className="list">
-        {scanning && !scan && <p className="muted pad">Reading the install…</p>}
+        {scanning && !scan && <p className="muted pad">{tr("Reading the install…")}</p>}
         {!scanning && !scan && onRead && (
           <div className="pad">
-            <p className="muted small">The library has not been read yet.</p>
-            <button type="button" className="ghost primary compact" onClick={onRead}>Read library</button>
+            <p className="muted small">{tr("The library has not been read yet.")}</p>
+            <button type="button" className="ghost primary compact" onClick={onRead}>{tr("Read library")}</button>
           </div>
         )}
         {soloSection && (
           <div className="solo-bar">
-            <span>Only {soloSection.name}</span>
-            <button type="button" className="link-button" onClick={onClearSolo}>View all</button>
+            <span>{tr("Only {name}", { name: soloSection.name })}</span>
+            <button type="button" className="link-button" onClick={onClearSolo}>{tr("View all")}</button>
           </div>
         )}
         {sections.map((section) => {
@@ -124,7 +136,7 @@ export function Sidebar(
               {c
                 ? section.titles.length > 0
                   ? section.titles.map((t) => row(t, `collection-${c.id}-`, c))
-                  : <p className="muted small pad">Drag titles here, or right-click one → Add to.</p>
+                  : <p className="muted small pad">{tr("Drag titles here, or right-click one → Add to.")}</p>
                 : section.titles.map((t) => row(t, `${section.id}-`, null))}
             </ListSection>
           );

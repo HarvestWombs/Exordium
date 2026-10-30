@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import { SettingsGroup } from "../../components/settings-rows.tsx";
 import { openLink } from "../../lib/util.ts";
 
@@ -21,18 +22,18 @@ export function About({ version }: { version: string | null }) {
         <img src={APP_ICON} alt="" />
         <div>
           <h1>Exordium</h1>
-          <p className="muted">A launcher for Legacy Diablo II and its mods.</p>
-          {version && <p className="muted small">Version {version}</p>}
+          <p className="muted">{tr("A launcher for Legacy Diablo II and its mods.")}</p>
+          {version && <p className="muted small">{tr("Version {version}", { version })}</p>}
         </div>
       </div>
-      <SettingsGroup title="AUTHOR">
+      <SettingsGroup title={tr("AUTHOR")}>
         <div className="about-links">
           <span>Harvest</span>
           <AboutLink href="https://github.com/HarvestWombs">GitHub</AboutLink>
-          <AboutLink href="https://streamelements.com/cfs_harvest/tip">Donate</AboutLink>
+          <AboutLink href="https://streamelements.com/cfs_harvest/tip">{tr("Donate")}</AboutLink>
         </div>
       </SettingsGroup>
-      <SettingsGroup title="CREDITS">
+      <SettingsGroup title={tr("CREDITS")}>
         <div className="about-links">
           <span>Lectem</span>
           <AboutLink href="https://github.com/ThePhrozenKeep/D2MOO">D2MOO</AboutLink>
@@ -58,21 +59,21 @@ export function About({ version }: { version: string | null }) {
           <AboutLink href="https://www.patreon.com/ThePhrozenKeep">Patreon</AboutLink>
         </div>
       </SettingsGroup>
-      <SettingsGroup title="LICENCE">
+      <SettingsGroup title={tr("LICENCE")}>
         <p className="muted small">
-          Exordium by Harvest (HarvestLabs). Copyright © 2026. Exordium is free software: you can redistribute it and
-          modify it under the GNU General Public License, version 3 or (at your option) any later version, with the
-          attribution terms in its NOTICE file. It comes with no warranty. LICENSE.txt and NOTICE.txt are beside
-          Exordium.exe.
+          {tr(
+            "Exordium by Harvest (HarvestLabs). Copyright © 2026. Exordium is free software: you can redistribute it and modify it under the GNU General Public License, version 3 or (at your option) any later version, with the attribution terms in its NOTICE file. It comes with no warranty. LICENSE.txt and NOTICE.txt are beside Exordium.exe.",
+          )}
         </p>
         <div className="about-links">
-          <AboutLink href="https://github.com/HarvestWombs/Exordium">Source</AboutLink>
-          <AboutLink href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL v3</AboutLink>
+          <AboutLink href="https://github.com/HarvestWombs/Exordium">{tr("Source")}</AboutLink>
+          <AboutLink href="https://www.gnu.org/licenses/gpl-3.0.html">{tr("GNU GPL v3")}</AboutLink>
         </div>
       </SettingsGroup>
       <p className="muted small">
-        Archives are unpacked with 7-Zip by Igor Pavlov (GNU LGPL; its licence ships with Exordium). Diablo II is a
-        trademark of Blizzard Entertainment; Exordium is not affiliated with or endorsed by Blizzard.
+        {tr(
+          "Archives are unpacked with 7-Zip by Igor Pavlov (GNU LGPL; its licence ships with Exordium). Diablo II is a trademark of Blizzard Entertainment; Exordium is not affiliated with or endorsed by Blizzard.",
+        )}
       </p>
     </>
   );

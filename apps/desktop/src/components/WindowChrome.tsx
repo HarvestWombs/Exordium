@@ -1,10 +1,16 @@
+import { tr } from "../lib/i18n.ts";
 import type * as React from "react";
 
 export function WindowControls({ maximized, onToggleMaximize }: { maximized: boolean; onToggleMaximize: () => void }) {
   const post = (path: string) => void fetch(path, { method: "POST" }).catch(() => {});
   return (
     <div className="window-controls">
-      <button type="button" className="window-control" title="Minimize" onClick={() => post("/api/window/minimize")}>
+      <button
+        type="button"
+        className="window-control"
+        title={tr("Minimize")}
+        onClick={() => post("/api/window/minimize")}
+      >
         <svg viewBox="0 0 10 10" aria-hidden="true">
           <path d="M0 5h10" />
         </svg>
@@ -12,7 +18,7 @@ export function WindowControls({ maximized, onToggleMaximize }: { maximized: boo
       <button
         type="button"
         className="window-control"
-        title={maximized ? "Restore" : "Maximize"}
+        title={maximized ? tr("Restore") : tr("Maximize")}
         onClick={onToggleMaximize}
       >
         <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -22,7 +28,7 @@ export function WindowControls({ maximized, onToggleMaximize }: { maximized: boo
       <button
         type="button"
         className="window-control close"
-        title="Close"
+        title={tr("Close")}
         onClick={() => post("/api/window/close")}
       >
         <svg viewBox="0 0 10 10" aria-hidden="true">

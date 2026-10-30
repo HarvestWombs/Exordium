@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import type * as React from "react";
 import { WindowControls } from "./WindowChrome.tsx";
 
@@ -50,13 +51,13 @@ export function TopBar(
     >
       <div className="wordmark">EXORDIUM</div>
       <nav className="topnav">
-        {item("library", "LIBRARY")}
-        {item("browse", "BROWSE", {
+        {item("library", tr("LIBRARY"))}
+        {item("browse", tr("BROWSE"), {
           disabled: !libraryReady,
-          title: libraryReady ? undefined : "Finish setting up Exordium first",
+          title: libraryReady ? undefined : tr("Finish setting up Exordium first"),
         })}
-        {item("settings", "SETTINGS")}
-        {item("help", "HELP")}
+        {item("settings", tr("SETTINGS"))}
+        {item("help", tr("HELP"))}
       </nav>
       <div className="grow" />
       {desktop && <WindowControls maximized={maximized} onToggleMaximize={onToggleMaximize} />}

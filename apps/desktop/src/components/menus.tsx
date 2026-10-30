@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
 import type { Collection, Title, TitleAction } from "../types.ts";
@@ -120,12 +121,12 @@ export function TitleMenu(
   const errors = t.problems.some((p) => p.level === "error");
   return (
     <PopupMenu x={x} y={y} onClose={onClose}>
-      {item("play", "Play", errors, errors ? "Its problems have to be fixed first" : undefined)}
+      {item("play", tr("Play"), errors, errors ? tr("Its problems have to be fixed first") : undefined)}
       <hr />
-      {item("favorite", favorite ? "Remove from favorites" : "Add to favorites")}
+      {item("favorite", favorite ? tr("Remove from favorites") : tr("Add to favorites"))}
       {submenu(
         "add",
-        "Add to",
+        tr("Add to"),
         <>
           {collections.map((c) => {
             const on = c.keys.includes(t.key);
@@ -143,36 +144,36 @@ export function TitleMenu(
             );
           })}
           {collections.length > 0 && <hr />}
-          <button type="button" role="menuitem" onClick={onNewCollection}>New collection…</button>
+          <button type="button" role="menuitem" onClick={onNewCollection}>{tr("New collection…")}</button>
         </>,
       )}
       {from && (
         <button type="button" role="menuitem" onClick={() => onCollection(from.id, false)}>
-          Remove from {from.name}
+          {tr("Remove from {name}", { name: from.name })}
         </button>
       )}
       {submenu(
         "manage",
-        "Manage",
+        tr("Manage"),
         <>
           {item(
             "shortcut",
-            "Add desktop shortcut",
+            tr("Add desktop shortcut"),
             !packaged,
-            packaged ? undefined : "Shortcuts start the packaged Exordium.exe",
+            packaged ? undefined : tr("Shortcuts start the packaged Exordium.exe"),
           )}
-          {item("files", "Browse local files")}
-          {hidden ? item("unhide", "Show in the list again") : item("hide", "Hide from the list")}
+          {item("files", tr("Browse local files"))}
+          {hidden ? item("unhide", tr("Show in the list again")) : item("hide", tr("Hide from the list"))}
           {item(
             "uninstall",
-            "Uninstall",
+            tr("Uninstall"),
             t.kind === "core",
-            t.kind === "core" ? "A core is shared by the mods built on it" : undefined,
+            t.kind === "core" ? tr("A core is shared by the mods built on it") : undefined,
           )}
         </>,
       )}
       <hr />
-      {item("properties", "Properties")}
+      {item("properties", tr("Properties"))}
     </PopupMenu>
   );
 }

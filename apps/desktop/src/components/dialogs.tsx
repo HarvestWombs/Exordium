@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import type { ConfirmRequest, NameRequest } from "../types.ts";
 
@@ -41,14 +42,14 @@ export function NameDialog({ request, onClose }: { request: NameRequest; onClose
           maxLength={60}
           autoFocus
           disabled={busy}
-          placeholder="Name"
+          placeholder={tr("Name")}
           onChange={(e) => setName(e.currentTarget.value)}
         />
         {problem && <p className="bad-text small">{problem}</p>}
         <div className="row-actions">
-          <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className="ghost" disabled={busy} onClick={onClose}>{tr("Cancel")}</button>
           <button type="submit" className="ghost primary" disabled={busy || !name.trim()}>
-            {busy ? "Working…" : request.action}
+            {busy ? tr("Working…") : request.action}
           </button>
         </div>
       </form>
@@ -94,14 +95,14 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
         )}
         {problem && <p className="bad-text small">{problem}</p>}
         <div className="row-actions">
-          <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className="ghost" disabled={busy} onClick={onClose}>{tr("Cancel")}</button>
           <button
             type="button"
             className={request.danger ? "ghost danger" : "ghost primary"}
             disabled={busy}
             onClick={() => void run()}
           >
-            {busy ? "Working…" : request.action}
+            {busy ? tr("Working…") : request.action}
           </button>
         </div>
       </div>

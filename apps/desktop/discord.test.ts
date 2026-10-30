@@ -20,7 +20,7 @@ Deno.test("activity text fits Discord's 2 to 128 characters", () => {
 });
 
 Deno.test("without Discord, setting a presence is quiet and stays disconnected", async () => {
-  const presence = new DiscordPresence("1", (i) => `\\\\.\\pipe\\exordium-test-no-discord-${i}`);
+  const presence = new DiscordPresence("1", (i) => [`\\\\.\\pipe\\exordium-test-no-discord-${i}`]);
   await presence.set({ details: "Testing" });
   assertEquals(presence.connected, false);
   presence.close();

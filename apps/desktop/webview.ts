@@ -89,6 +89,15 @@ function wide(text: string): Uint8Array {
  * normally succeeds.
  */
 export function startDetached(exe: string, args: readonly string[], cwd: string): boolean {
+  if (Deno.build.os !== "windows") {
+    // No jobs elsewhere: a plain spawn with no stdio outlives this process.
+    try {
+      new Deno.Command(exe, { args: [...args], cwd, stdin: "null", stdout: "null", stderr: "null" }).spawn();
+      return true;
+    } catch {
+      return false;
+    }
+  }
   kernel32 ??= Deno.dlopen("kernel32.dll", KERNEL32);
   const quote = (arg: string) => /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
   const commandLine = wide([exe, ...args].map(quote).join(" "));
@@ -126,6 +135,8 @@ export function startDetached(exe: string, args: readonly string[], cwd: string)
  * for two checks running, `restart` is called once.
  */
 export function watchWebView(restart: () => void): void {
+  // WebView2 is the Windows shell's; elsewhere there are no msedgewebview2 processes to count.
+  if (Deno.build.os !== "windows") return;
   let seen = false;
   let missing = 0;
   const timer = setInterval(() => {

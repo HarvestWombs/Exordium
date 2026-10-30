@@ -1,10 +1,11 @@
+import { formatDecimal, tr } from "../../lib/i18n.ts";
 import type * as React from "react";
 import type { ArchiveSort, Job, JobState, ModDbKind } from "./types.ts";
 
 export const ARCHIVE_SORTS: { id: ArchiveSort; label: string }[] = [
-  { id: "all", label: "ALL" },
-  { id: "popular", label: "MOST DOWNLOADED" },
-  { id: "recent", label: "RECENTLY ADDED" },
+  { id: "all", label: tr("ALL") },
+  { id: "popular", label: tr("MOST DOWNLOADED") },
+  { id: "recent", label: tr("RECENTLY ADDED") },
 ];
 
 export const PAGE = 20;
@@ -12,10 +13,10 @@ export const PAGE = 20;
 export const ACTIVE: JobState[] = ["downloading", "extracting", "installing"];
 
 export const MODDB_KINDS: { id: "all" | ModDbKind; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "file", label: "Files" },
-  { id: "addon", label: "Addons" },
-  { id: "mod", label: "Mods" },
+  { id: "all", label: tr("All") },
+  { id: "file", label: tr("Files") },
+  { id: "addon", label: tr("Addons") },
+  { id: "mod", label: tr("Mods") },
 ];
 
 export const DOWNLOAD_URL = /\.(zip|rar|7z|tar|tgz|gz|bz2|xz)(?:[?#].*)?$/i;
@@ -54,9 +55,9 @@ export function titleFromUrl(url: string): string {
   try {
     const parsed = new URL(url);
     const last = parsed.pathname.split("/").filter(Boolean).at(-1);
-    return last ? decodeURIComponent(last).replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ") : "ModDB download";
+    return last ? decodeURIComponent(last).replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ") : tr("ModDB download");
   } catch {
-    return "ModDB download";
+    return tr("ModDB download");
   }
 }
 
@@ -112,15 +113,15 @@ export const INSTALLER_FILE = /\.(exe|msi|bat|cmd|com|scr)$/i;
 
 export function formatBytes(bytes: number): string {
   if (!bytes) return "";
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (bytes < 1024 * 1024) return tr("{value} KB", { value: (bytes / 1024).toFixed(0) });
+  if (bytes < 1024 * 1024 * 1024) return tr("{value} MB", { value: formatDecimal(bytes / 1024 / 1024) });
+  return tr("{value} GB", { value: formatDecimal(bytes / 1024 / 1024 / 1024, 2) });
 }
 
 export function formatRate(bytesPerSecond: number): string {
   if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`;
-  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
-  return `${(bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s`;
+  if (bytesPerSecond < 1024 * 1024) return tr("{value} KB/s", { value: (bytesPerSecond / 1024).toFixed(0) });
+  return tr("{value} MB/s", { value: (bytesPerSecond / 1024 / 1024).toFixed(1) });
 }
 
 export function formatDuration(seconds: number): string {

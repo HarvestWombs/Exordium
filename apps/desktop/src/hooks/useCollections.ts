@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import type { Collection, NameRequest, Status, Title } from "../types.ts";
 
@@ -42,7 +43,7 @@ export function useCollections(
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {
       void refreshStatus();
-      throw new Error(result.error ?? "That did not work.");
+      throw new Error(result.error ?? tr("That did not work."));
     }
     setCollections(result.collections);
   }
@@ -98,7 +99,7 @@ export function useCollections(
     return {
       className: dropTarget === c.id ? "drop" : "",
       draggable: true,
-      title: "Drag to reorder; drop a title here to add it; right-click for more",
+      title: tr("Drag to reorder; drop a title here to add it; right-click for more"),
       onDragStart: (event) => {
         drag.current = { type: "collection", id: c.id };
         event.dataTransfer.effectAllowed = "move";
@@ -144,8 +145,8 @@ export function useCollections(
 
   function newCollection(key?: string) {
     setNameDialog({
-      title: "New collection",
-      action: "Create",
+      title: tr("New collection"),
+      action: tr("Create"),
       initial: "",
       run: (name) => collectionAction({ action: "create", name, ...(key ? { key } : {}) }),
     });
@@ -153,8 +154,8 @@ export function useCollections(
 
   function renameCollection(c: Collection) {
     setNameDialog({
-      title: "Rename collection",
-      action: "Rename",
+      title: tr("Rename collection"),
+      action: tr("Rename"),
       initial: c.name,
       run: (name) => collectionAction({ action: "rename", id: c.id, name }),
     });

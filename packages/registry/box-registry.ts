@@ -57,7 +57,10 @@ export const BOX_LAYER = "box";
 
 const winPath = (path: string) => path.replace(/\//g, "\\").replace(/\\+$/, "");
 
-/** The values that tie the game to its box: where it is installed and where its saves are. */
+/**
+ * The values that tie the game to its box: where it is installed and where its saves are.
+ * `gameFolder` is the path as the game sees it: `C:/...` on Windows, `Z:\...` under Wine.
+ */
 export function boxLayer(gameFolder: string): RegistryLayer {
   const folder = winPath(gameFolder);
   return {
@@ -75,6 +78,8 @@ export function boxLayer(gameFolder: string): RegistryLayer {
  * machine-registry.ts). A key that does not exist is skipped. Nothing is written to the registry.
  */
 export function machineSnapshot(keys: readonly string[] = GAME_KEYS): Promise<RegFile> {
+  // Off Windows the game runs in Exordium's own Wine prefix: there is no machine registry to start from.
+  if (Deno.build.os !== "windows") return Promise.resolve({ entries: [], skipped: [] });
   return Promise.resolve(readMachineKeys(keys));
 }
 

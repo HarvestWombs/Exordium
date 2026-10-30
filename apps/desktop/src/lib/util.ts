@@ -1,3 +1,4 @@
+import { formatDate, formatDecimal, tr } from "../lib/i18n.ts";
 import type { Running, Title } from "../types.ts";
 
 /** A value kept in localStorage, or the fallback when storage is missing or unreadable. */
@@ -32,9 +33,9 @@ export function initials(title: string): string {
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes < 1024 * 1024) return tr("{value} KB", { value: formatDecimal(bytes / 1024) });
+  if (bytes < 1024 ** 3) return tr("{value} MB", { value: formatDecimal(bytes / 1024 / 1024) });
+  return tr("{value} GB", { value: formatDecimal(bytes / 1024 ** 3) });
 }
 
 export async function openLink(url: string) {
@@ -57,15 +58,17 @@ export async function openAppFolder(path: string) {
 export function runningSummary(runs: Running[]): string {
   const counts = new Map<string, number>();
   for (const run of runs) counts.set(run.title, (counts.get(run.title) ?? 0) + 1);
-  return [...counts].map(([title, n]) => n === 1 ? `${title} is running` : `${title} ×${n} are running`).join(" · ");
+  return [...counts].map(([title, n]) =>
+    n === 1 ? tr("{title} is running", { title }) : tr("{title} ×{n} are running", { title, n })
+  ).join(" · ");
 }
 
 /** "42 min", "3.4 h", as Steam counts play time. */
 export function playTime(seconds: number): string {
-  if (seconds < 60) return "< 1 min";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+  if (seconds < 60) return tr("< 1 min");
+  if (seconds < 3600) return tr("{minutes} min", { minutes: Math.floor(seconds / 60) });
   const hours = seconds / 3600;
-  return `${hours < 100 ? hours.toFixed(1) : Math.round(hours)} h`;
+  return tr("{hours} h", { hours: hours < 100 ? formatDecimal(hours) : Math.round(hours) });
 }
 
 export function installLocation(root: string, t: Title): string {
@@ -75,8 +78,8 @@ export function installLocation(root: string, t: Title): string {
 export function relative(iso: string): string {
   const then = new Date(iso);
   const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return then.toLocaleDateString();
+  if (days <= 0) return tr("Today");
+  if (days === 1) return tr("Yesterday");
+  if (days < 7) return tr("{days} days ago", { days });
+  return formatDate(then);
 }

@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import type { Job } from "./types.ts";
 
 /** What a finished or failed job left: the installed mod, a reason, or files to look at. */
@@ -16,7 +17,7 @@ export function JobResult(
         {job.path && (
           <>
             {" · "}
-            <button type="button" className="link-button" onClick={() => onOpen("file")}>Show archive</button>
+            <button type="button" className="link-button" onClick={() => onOpen("file")}>{tr("Show archive")}</button>
           </>
         )}
       </span>
@@ -27,15 +28,17 @@ export function JobResult(
     <>
       {job.result.installed.map((mod) => (
         <span key={mod.name} className="good-text small">
-          Installed as MODS\{mod.name} ·{" "}
-          <button type="button" className="link-button" onClick={() => onInstalled(mod.name)}>Open in library</button>
+          {tr("Installed as MODS\\{name}", { name: mod.name })} ·{" "}
+          <button type="button" className="link-button" onClick={() => onInstalled(mod.name)}>
+            {tr("Open in library")}
+          </button>
         </span>
       ))}
       {job.result.skipped.map((mod) => <span key={mod.name} className="warn-text small">{mod.reason}</span>)}
       {job.result.installed.length === 0 && job.result.skipped.length === 0 && (
         <span className="warn-text small">
-          No D2SE mod inside (no D2SE_SETUP.ini) · files unpacked ·{" "}
-          <button type="button" className="link-button" onClick={() => onOpen("unpacked")}>Show files</button>
+          {tr("No D2SE mod inside (no D2SE_SETUP.ini) · files unpacked ·")}{" "}
+          <button type="button" className="link-button" onClick={() => onOpen("unpacked")}>{tr("Show files")}</button>
         </span>
       )}
     </>

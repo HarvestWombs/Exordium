@@ -174,5 +174,27 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     const parsed = parseNativeDialogJson<string | string[]>(output);
     return { available: true, paths: Array.isArray(parsed) ? parsed : [parsed] };
   }
+  if (Deno.build.os === "darwin") return { available: false, paths: null };
+  // Linux: zenity, then kdialog, as the folder picker. One path per line.
+  const lines = (output: string | null) =>
+    output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : null;
+  const globs = (group: { extensions: readonly string[] }) =>
+    group.extensions.map((extension) => `*.${extension.replace(/^\./, "")}`).join(" ");
+  const multiple = options.multiple !== false;
+  const viaZenity = await runCommand("zenity", [
+    "--file-selection",
+    `--title=${title}`,
+    ...(multiple ? ["--multiple", "--separator=\n"] : []),
+    ...filters.map((group) => `--file-filter=${group.label} | ${globs(group)}`),
+    ...(options.startPath ? [`--filename=${options.startPath.replace(/\/*$/, "/")}`] : []),
+  ]);
+  if (viaZenity.ranOk) return { available: true, paths: lines(viaZenity.path) };
+  const viaKdialog = await runCommand("kdialog", [
+    "--getopenfilename",
+    options.startPath ?? Deno.env.get("HOME") ?? "/",
+    filters.map((group) => `${globs(group)}|${group.label}`).join("\n"),
+    ...(multiple ? ["--multiple", "--separate-output"] : []),
+  ]);
+  if (viaKdialog.ranOk) return { available: true, paths: lines(viaKdialog.path) };
   return { available: false, paths: null };
 }

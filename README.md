@@ -147,7 +147,7 @@ Everything lives in the **Exordium folder** beside `Exordium.exe`. Each folder i
 
 Settings worth knowing:
 
-- **Local-only mode** (Privacy): no network at all. Browse, cores and Discord are off; games still launch.
+- **Local-only mode** (Privacy): no network at all. Browse, cores, translation and Discord are off; games still launch.
 - **Defender troubleshooting mode** (Diagnostics): avoids what antivirus software may flag, if Exordium is being blocked.
 - **Minimize Exordium when a game starts** (Launching): it keeps running in the taskbar to back up characters and show Discord activity.
 - **Updates**: Exordium checks for a new version when it opens and downloads it in the background. Only releases signed by HarvestLabs are installed, and nothing changes until you restart.
@@ -217,7 +217,7 @@ The title you are playing, how long you have played, and, once you are in a game
 Exordium checks for a new version when it opens and downloads it in the background. Only releases signed by HarvestLabs are installed, and nothing changes until you choose to restart.
 
 **Does Exordium need the internet?**
-Only for Browse, cores, updates and Discord. With Local-only mode on (Settings, Privacy) it never goes online, and games still launch.
+Only for Browse, cores, updates, Discord and Translate, which sends that one description to Google. With Local-only mode on (Settings, Privacy) it never goes online, and games still launch.
 
 **My antivirus flagged Exordium. Is it safe?**
 Exordium starts games in an unusual way, which some antivirus software mistakes for a threat. Turn on Defender troubleshooting mode in Settings, Diagnostics, and restore the file from quarantine.

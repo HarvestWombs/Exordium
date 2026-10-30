@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import { CopyProgress, setupPost } from "../components/progress.tsx";
 import { formatSize } from "../lib/util.ts";
@@ -77,7 +78,7 @@ export function D2SEConverter(
   const mine = current ? queued[modKey(current)] : undefined;
 
   const discardOk = React.useCallback(
-    () => !dirty || confirm("Discard your unsaved changes to this exordium.mod.json?"),
+    () => !dirty || confirm(tr("Discard your unsaved changes to this exordium.mod.json?")),
     [dirty],
   );
   const close = React.useCallback(() => {
@@ -119,7 +120,7 @@ export function D2SEConverter(
       .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
       .then(({ ok, body }) => {
         if (cancelled) return;
-        if (!ok) throw new Error(body.error ?? "Could not convert this mod.");
+        if (!ok) throw new Error(body.error ?? tr("Could not convert this mod."));
         setText(JSON.stringify(body.manifest, null, 2));
         setExists(body.exists === true);
         setFrom(body.from ?? "");
@@ -170,7 +171,11 @@ export function D2SEConverter(
         if (stopped || !job) continue;
         setQueued((all) => ({ ...all, [key]: { ...entry, job } }));
         if (job.state === "done") {
-          void saved.current(`${entry.move ? "Moved" : "Imported"} ${job.label} into Exordium's library.`);
+          void saved.current(
+            entry.move
+              ? tr("Moved {label} into Exordium's library.", { label: job.label })
+              : tr("Imported {label} into Exordium's library.", { label: job.label }),
+          );
         }
       }
     }, 600);
@@ -198,7 +203,7 @@ export function D2SEConverter(
         body: JSON.stringify({ root, folder, ...(path ? { path } : {}), text, overwrite: exists, move }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "Could not import the mod.");
+      if (!response.ok) throw new Error(body.error ?? tr("Could not import the mod."));
       const key = modKey(current);
       const next = { ...queued, [key]: { job: body.job as CopyJob, move } };
       setQueued(next);
@@ -230,16 +235,17 @@ export function D2SEConverter(
 
   return (
     <div className="scrim" onClick={(event) => event.target === event.currentTarget && close()}>
-      <div className="converter-modal" role="dialog" aria-modal="true" aria-label="D2SE to Exordium converter">
+      <div className="converter-modal" role="dialog" aria-modal="true" aria-label={tr("D2SE to Exordium converter")}>
         <header>
           <div>
-            <p className="eyebrow accent">D2SE import</p>
-            <h2>Import into the library</h2>
+            <p className="eyebrow accent">{tr("D2SE import")}</p>
+            <h2>{tr("Import into the library")}</h2>
           </div>
           <span className="muted small converter-progress">
-            {mods.length} to review{imported > 0 ? ` · ${imported} imported` : ""}
+            {mods.length} {tr("to review")}
+            {imported > 0 ? ` · ${imported} imported` : ""}
           </span>
-          <button type="button" className="window-button" aria-label="Close" disabled={busy} onClick={close}>
+          <button type="button" className="window-button" aria-label={tr("Close")} disabled={busy} onClick={close}>
             ×
           </button>
         </header>
@@ -250,8 +256,8 @@ export function D2SEConverter(
                 className="converter-filter"
                 value={filter}
                 onChange={(event) => setFilter(event.currentTarget.value)}
-                placeholder="Filter mods…"
-                aria-label="Filter mods"
+                placeholder={tr("Filter mods…")}
+                aria-label={tr("Filter mods")}
               />
             )}
             {shownMods.map((mod) => {
@@ -279,19 +285,23 @@ export function D2SEConverter(
               <p className="muted small">
                 {mine
                   ? mine.job.state === "failed"
-                    ? `This import failed: ${mine.job.error ?? "the copy stopped"}.`
-                    : `Queued for import${
-                      mine.move ? " (moving)" : ""
-                    }. Its exordium.mod.json is written once the copy ends.`
+                    ? tr("This import failed: {error}.", { error: mine.job.error ?? tr("the copy stopped") })
+                    : mine.move
+                    ? tr("Queued for import (moving). Its exordium.mod.json is written once the copy ends.")
+                    : tr("Queued for import. Its exordium.mod.json is written once the copy ends.")
                   : from
-                  ? `${move ? "Moves" : "Copies"} ${from} (${
-                    size ? formatSize(size) : "measuring…"
-                  }) into the library and writes this exordium.mod.json there. ${
-                    move ? "It is removed from your Diablo II install." : "Your install is not changed."
-                  }`
-                  : "Choose a mod to import."}
-                {!mine && exists ? " It is already in the library." : ""}
-                {!mine && dirty ? " Edited." : ""}
+                  ? move
+                    ? tr(
+                      "Moves {from} ({size}) into the library and writes this exordium.mod.json there. It is removed from your Diablo II install.",
+                      { from, size: size ? formatSize(size) : tr("measuring…") },
+                    )
+                    : tr(
+                      "Copies {from} ({size}) into the library and writes this exordium.mod.json there. Your install is not changed.",
+                      { from, size: size ? formatSize(size) : tr("measuring…") },
+                    )
+                  : tr("Choose a mod to import.")}
+                {!mine && exists ? tr(" It is already in the library.") : ""}
+                {!mine && dirty ? tr(" Edited.") : ""}
               </p>
               <label className="confirm-check">
                 <input
@@ -300,7 +310,9 @@ export function D2SEConverter(
                   disabled={locked}
                   onChange={(event) => setMove(event.currentTarget.checked)}
                 />
-                Move instead of copy — removes {folder || "the mod"} from your Diablo II install to save space
+                {tr("Move instead of copy — removes {folder} from your Diablo II install to save space", {
+                  folder: folder || tr("the mod"),
+                })}
               </label>
             </div>
             <div className="converter-grid">
@@ -319,7 +331,7 @@ export function D2SEConverter(
               />
             </label>
             <label className="converter-json">
-              <span>JSON preview</span>
+              <span>{tr("JSON preview")}</span>
               <textarea
                 value={text}
                 disabled={locked}
@@ -331,7 +343,9 @@ export function D2SEConverter(
               />
             </label>
             {!manifest && text.trim() !== "" && (
-              <p className="warn-text small">The JSON is not valid yet — fix it to edit the fields or import.</p>
+              <p className="warn-text small">
+                {tr("The JSON is not valid yet — fix it to edit the fields or import.")}
+              </p>
             )}
             {problem && <p className="bad-text small">{problem}</p>}
           </section>
@@ -341,20 +355,25 @@ export function D2SEConverter(
             {copying && (
               <CopyProgress
                 job={copying.job}
-                label={`${copying.move ? "Moving" : "Copying"} ${copying.job.label}${
-                  waitingCount ? ` (${waitingCount} more queued)` : ""
-                }`}
+                label={`${
+                  copying.move
+                    ? tr("Moving {label}", { label: copying.job.label })
+                    : tr("Copying {label}", { label: copying.job.label })
+                }${waitingCount ? tr(" ({waitingCount} more queued)", { waitingCount }) : ""}`}
               />
             )}
-            {!copying && waitingCount > 0 && <p className="muted small">{waitingCount} queued…</p>}
+            {!copying && waitingCount > 0 && (
+              <p className="muted small">{tr("{waitingCount} queued…", { waitingCount })}</p>
+            )}
             {failed.length > 0 && (
               <p className="bad-text small">
-                Not imported: {failed.map((entry) => `${entry.job.label} (${entry.job.error ?? "failed"})`).join("; ")}
+                {tr("Not imported:")}{" "}
+                {failed.map((entry) => `${entry.job.label} (${entry.job.error ?? tr("failed")})`).join("; ")}
               </p>
             )}
           </div>
           <button type="button" className="ghost" disabled={busy} onClick={close}>
-            {running.length ? "Close (copies continue)" : "Close"}
+            {running.length ? tr("Close (copies continue)") : tr("Close")}
           </button>
           <button
             type="button"
@@ -362,7 +381,7 @@ export function D2SEConverter(
             disabled={locked || !manifest || exists}
             onClick={() => void save()}
           >
-            {busy ? "Working…" : mine ? badge(mine.job) : "Import"}
+            {busy ? tr("Working…") : mine ? badge(mine.job) : tr("Import")}
           </button>
         </footer>
       </div>

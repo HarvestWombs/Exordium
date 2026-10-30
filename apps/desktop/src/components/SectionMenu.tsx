@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import type { Collection, SidebarSection } from "../types.ts";
 import { PopupMenu } from "./menus.tsx";
 
@@ -44,26 +45,28 @@ export function SectionMenu(
   return (
     <PopupMenu x={x} y={y} onClose={onClose}>
       <button type="button" role="menuitem" onClick={done(() => onSolo(solo === section.id ? null : section.id))}>
-        {solo === section.id ? "View all" : `View only ${section.name}`}
+        {solo === section.id ? tr("View all") : tr("View only {name}", { name: section.name })}
       </button>
-      <button type="button" role="menuitem" onClick={done(onToggle)}>{collapsed ? "Expand" : "Collapse"}</button>
+      <button type="button" role="menuitem" onClick={done(onToggle)}>
+        {collapsed ? tr("Expand") : tr("Collapse")}
+      </button>
       {hasCollections && (
         <>
           <button type="button" role="menuitem" onClick={done(() => onFoldCollections(false))}>
-            Expand all collections
+            {tr("Expand all collections")}
           </button>
           <button type="button" role="menuitem" onClick={done(() => onFoldCollections(true))}>
-            Collapse all collections
+            {tr("Collapse all collections")}
           </button>
         </>
       )}
       <hr />
-      {c && <button type="button" role="menuitem" onClick={done(() => onRename(c))}>Rename…</button>}
-      <button type="button" role="menuitem" onClick={done(onNewCollection)}>New collection…</button>
+      {c && <button type="button" role="menuitem" onClick={done(() => onRename(c))}>{tr("Rename…")}</button>}
+      <button type="button" role="menuitem" onClick={done(onNewCollection)}>{tr("New collection…")}</button>
       {c && (
         <>
           <hr />
-          <button type="button" role="menuitem" onClick={done(() => onDelete(c))}>Delete collection</button>
+          <button type="button" role="menuitem" onClick={done(() => onDelete(c))}>{tr("Delete collection")}</button>
         </>
       )}
     </PopupMenu>

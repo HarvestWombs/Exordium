@@ -1,12 +1,13 @@
+import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { formatSize, relative } from "../../lib/util.ts";
 import type { BackupEntry, BackupSettings } from "../../types.ts";
 
 export const BACKUP_REASONS: Record<BackupEntry["reason"], string> = {
-  closed: "Automatic",
-  manual: "Manual",
-  "before-restore": "Before restore",
-  "before-rebuild": "Before rebuild",
+  closed: tr("Automatic"),
+  manual: tr("Manual"),
+  "before-restore": tr("Before restore"),
+  "before-rebuild": tr("Before rebuild"),
 };
 
 /**
@@ -25,7 +26,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
     const response = await fetch(`/api/backups?root=${encodeURIComponent(root)}&key=${encodeURIComponent(titleKey)}`);
     const body = await response.json();
     if (!response.ok) {
-      setMessage({ text: body.error ?? "Could not read the backups.", bad: true });
+      setMessage({ text: body.error ?? tr("Could not read the backups."), bad: true });
       return;
     }
     setList(body);
@@ -54,7 +55,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
       });
       const result = await response.json();
       if (!response.ok) {
-        setMessage({ text: result.error ?? "That did not work.", bad: true });
+        setMessage({ text: result.error ?? tr("That did not work."), bad: true });
         return null;
       }
       return result;
@@ -65,7 +66,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
 
   async function create() {
     const result = await post({ action: "create" });
-    if (result) setMessage({ text: "Backed up.", bad: false });
+    if (result) setMessage({ text: tr("Backed up."), bad: false });
     await refresh();
   }
 
@@ -78,9 +79,9 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
       const restored = Number(result.restored);
       setMessage({
         text: restored === 0
-          ? "The save folder already matches this backup; nothing was changed."
-          : `Restored ${restored} ${restored === 1 ? "file" : "files"}.` +
-            (result.before ? " What was there before is in the newest backup, marked Before restore." : ""),
+          ? tr("The save folder already matches this backup; nothing was changed.")
+          : plural(restored, "Restored {count} file.", "Restored {count} files.") +
+            (result.before ? tr(" What was there before is in the newest backup, marked Before restore.") : ""),
         bad: false,
       });
     }
@@ -93,26 +94,31 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
   return (
     <section className="backups">
       <div className="section-head">
-        <h2 className="eyebrow">BACKUPS</h2>
-        <span className="muted small">copies of this title's save folder</span>
+        <h2 className="eyebrow">{tr("BACKUPS")}</h2>
+        <span className="muted small">{tr("copies of this title's save folder")}</span>
         <div className="grow" />
         <button
           type="button"
           className="ghost"
           disabled={busy || closeFirst}
-          title={closeFirst ? "Close the game first" : undefined}
+          title={closeFirst ? tr("Close the game first") : undefined}
           onClick={() => void create()}
         >
-          Back up now
+          {tr("Back up now")}
         </button>
-        <button type="button" className="ghost" onClick={() => void post({ action: "open" })}>Open folder</button>
+        <button type="button" className="ghost" onClick={() => void post({ action: "open" })}>
+          {tr("Open folder")}
+        </button>
       </div>
       {message && <p className={message.bad ? "bad-text small" : "muted small"}>{message.text}</p>}
-      {closeFirst && <p className="muted small">The game is running. Backing up and restoring wait until it closes.</p>}
-      {list === null && <p className="muted">Reading backups…</p>}
+      {closeFirst && (
+        <p className="muted small">{tr("The game is running. Backing up and restoring wait until it closes.")}</p>
+      )}
+      {list === null && <p className="muted">{tr("Reading backups…")}</p>}
       {list?.backups.length === 0 && (
         <p className="muted">
-          No backups yet. {settings?.auto ? "One is taken each time the game closes with characters saved." : ""}
+          {tr("No backups yet.")}{" "}
+          {settings?.auto ? tr("One is taken each time the game closes with characters saved.") : ""}
         </p>
       )}
 
@@ -121,7 +127,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
           {list.backups.map((backup) => (
             <li key={backup.id} className="backup-row">
               <div className="backup-when">
-                <strong>{new Date(backup.createdAt).toLocaleString()}</strong>
+                <strong>{formatDateTime(backup.createdAt)}</strong>
                 <span className="muted small">
                   {relative(backup.createdAt)} · {formatSize(backup.bytes)} · {backup.files}{" "}
                   {backup.files === 1 ? "file" : "files"}
@@ -130,14 +136,14 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
               <span className={`pill backup-reason ${backup.reason}`}>{BACKUP_REASONS[backup.reason]}</span>
               <div className="backup-characters">
                 {backup.characters.length === 0
-                  ? <span className="muted small">No characters</span>
+                  ? <span className="muted small">{tr("No characters")}</span>
                   : backup.characters.map((c) => (
                     <span key={c.name} className="small">
                       {c.name}{" "}
                       <span className="muted">
                         · {c.level} {c.className}
-                        {c.hardcore ? " · HC" : ""}
-                        {c.dead ? " · dead" : ""}
+                        {c.hardcore ? tr(" · HC") : ""}
+                        {c.dead ? tr(" · dead") : ""}
                       </span>
                     </span>
                   ))}
@@ -152,9 +158,11 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
                         disabled={busy}
                         onClick={() => void confirm()}
                       >
-                        {confirming.action === "delete" ? "Delete it" : "Restore it"}
+                        {confirming.action === "delete" ? tr("Delete it") : tr("Restore it")}
                       </button>
-                      <button type="button" className="ghost" onClick={() => setConfirming(null)}>Cancel</button>
+                      <button type="button" className="ghost" onClick={() => setConfirming(null)}>
+                        {tr("Cancel")}
+                      </button>
                     </>
                   )
                   : (
@@ -164,11 +172,11 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
                         className="ghost"
                         disabled={busy || closeFirst}
                         title={closeFirst
-                          ? "Close the game first"
-                          : "Writes these files back; characters made since stay"}
+                          ? tr("Close the game first")
+                          : tr("Writes these files back; characters made since stay")}
                         onClick={() => setConfirming({ id: backup.id, action: "restore" })}
                       >
-                        Restore
+                        {tr("Restore")}
                       </button>
                       <button
                         type="button"
@@ -176,7 +184,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
                         disabled={busy}
                         onClick={() => setConfirming({ id: backup.id, action: "delete" })}
                       >
-                        Delete
+                        {tr("Delete")}
                       </button>
                     </>
                   )}
@@ -187,7 +195,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
       )}
 
       <p className="muted small backup-note">
-        Automatic backups, how many are kept, and where they go are set in Settings → Backups, for every title.
+        {tr("Automatic backups, how many are kept, and where they go are set in Settings → Backups, for every title.")}
       </p>
     </section>
   );

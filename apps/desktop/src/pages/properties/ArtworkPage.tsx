@@ -1,3 +1,4 @@
+import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { TitleIcon } from "../../components/icons.tsx";
 import { ART_ACCEPT, ART_SLOTS, artAsPng, artUrl } from "../../lib/art.ts";
@@ -18,7 +19,7 @@ export function ArtworkPage(
         method: "POST",
         body: await png.arrayBuffer(),
       });
-      if (!response.ok) throw new Error((await response.json()).error ?? "Could not save that image.");
+      if (!response.ok) throw new Error((await response.json()).error ?? tr("Could not save that image."));
       await onChanged();
     } catch (err) {
       setProblem((err as Error).message);
@@ -49,16 +50,16 @@ export function ArtworkPage(
               ? <img src={artUrl(root, t.key, kind, art)} alt="" />
               : kind === "icon"
               ? <TitleIcon t={t} root={root} art={art} size={72} />
-              : <span className="muted small">None</span>}
+              : <span className="muted small">{tr("None")}</span>}
           </div>
           <p className="muted small">
             {kind === "banner" && t.art.banner === "d2se" &&
-              "Showing the D2SE banner from the mod's folder until one is set here."}
-            {kind === "icon" && !t.art.icon && "No icon: the list shows the title's initials."}
+              tr("Showing the D2SE banner from the mod's folder until one is set here.")}
+            {kind === "icon" && !t.art.icon && tr("No icon: the list shows the title's initials.")}
           </p>
           <div className="row-actions">
             <label className={busy === kind ? "ghost disabled" : "ghost"}>
-              {busy === kind ? "Saving…" : "Choose image…"}
+              {busy === kind ? tr("Saving…") : tr("Choose image…")}
               <input
                 type="file"
                 accept={ART_ACCEPT}
@@ -78,15 +79,16 @@ export function ArtworkPage(
                 disabled={busy !== null}
                 onClick={() => void reset(kind)}
               >
-                Remove
+                {tr("Remove")}
               </button>
             )}
           </div>
         </section>
       ))}
       <p className="muted small">
-        Artwork is kept in Exordium's library; the mod's folder is never changed. The icon reaches Game.exe the next
-        time the title starts.
+        {tr(
+          "Artwork is kept in Exordium's library; the mod's folder is never changed. The icon reaches Game.exe the next time the title starts.",
+        )}
       </p>
     </div>
   );

@@ -77,13 +77,37 @@ const RESYNC_MS = 60_000;
 const RETRY_MS = [2_000, 5_000, 15_000];
 const REPLY_MS = 5_000;
 
+/** A connection to Discord's IPC: a named pipe on Windows, a Unix socket elsewhere. */
+type IpcStream = Pick<Deno.FsFile, "read" | "write" | "close">;
+
+/**
+ * Where Discord listens for client `i`. On Windows a named pipe. Elsewhere a Unix socket in the
+ * runtime folder (`XDG_RUNTIME_DIR`, else `TMPDIR`, else `/tmp`), or in the folder a Flatpak or Snap
+ * Discord exposes it from.
+ */
+export function discordIpcPaths(i: number): string[] {
+  if (Deno.build.os === "windows") return [`\\\\.\\pipe\\discord-ipc-${i}`];
+  const bases = new Set(
+    [Deno.env.get("XDG_RUNTIME_DIR"), Deno.env.get("TMPDIR"), Deno.env.get("TMP"), Deno.env.get("TEMP"), "/tmp"]
+      .filter((base): base is string => !!base)
+      .map((base) => base.replace(/\/+$/, "")),
+  );
+  const subfolders = ["", "app/com.discordapp.Discord/", "snap.discord/", ".flatpak/dev.vencord.Vesktop/xdg-run/"];
+  return [...bases].flatMap((base) => subfolders.map((sub) => `${base}/${sub}discord-ipc-${i}`));
+}
+
+async function openIpc(path: string): Promise<IpcStream> {
+  if (path.startsWith("\\\\.\\pipe\\")) return await Deno.open(path, { read: true, write: true });
+  return await Deno.connect({ transport: "unix", path });
+}
+
 /**
  * Exordium's own presence. `set` says what should show (null: nothing); the connection follows,
  * connecting when Discord is there and re-sending every minute, which also restores it after Discord
  * restarts. Failures are quiet: no Discord means no presence, never an error.
  */
 export class DiscordPresence {
-  #pipe: Deno.FsFile | null = null;
+  #pipe: IpcStream | null = null;
   #want: Activity | null = null;
   #queue: Promise<void> = Promise.resolve();
   #timer: number | undefined;
@@ -94,7 +118,7 @@ export class DiscordPresence {
 
   constructor(
     readonly clientId = DISCORD_CLIENT_ID,
-    readonly pipeName = (i: number) => `\\\\.\\pipe\\discord-ipc-${i}`,
+    readonly pipeNames: (i: number) => string[] = discordIpcPaths,
   ) {}
 
   get connected(): boolean {
@@ -154,10 +178,10 @@ export class DiscordPresence {
   }
 
   async #connect(): Promise<boolean> {
-    for (let i = 0; i < 10; i++) {
-      let pipe: Deno.FsFile;
+    for (const path of Array.from({ length: 10 }, (_, i) => this.pipeNames(i)).flat()) {
+      let pipe: IpcStream;
       try {
-        pipe = await Deno.open(this.pipeName(i), { read: true, write: true });
+        pipe = await openIpc(path);
       } catch {
         continue;
       }

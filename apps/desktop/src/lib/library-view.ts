@@ -1,3 +1,4 @@
+import { tr } from "../lib/i18n.ts";
 import type { Filter, Scan, SidebarSection, Status, Title } from "../types.ts";
 
 /**
@@ -48,7 +49,7 @@ export function libraryView(
   const byKey = new Map(titles.map((t) => [t.key, t]));
   const sections: SidebarSection[] = [
     ...(sectionsOn && pinned.length > 0
-      ? [{ id: "favorites", label: "FAVORITES", name: "Favorites", titles: pinned }]
+      ? [{ id: "favorites", label: tr("FAVORITES"), name: tr("Favorites"), titles: pinned }]
       : []),
     ...(sectionsOn
       ? collections.map((c) => ({
@@ -59,9 +60,11 @@ export function libraryView(
         collection: c,
       }))
       : []),
-    ...(sectionsOn && recent.length > 0 ? [{ id: "recent", label: "RECENT", name: "Recent", titles: recent }] : []),
-    ...(scan && filter !== "cores" ? [{ id: "mods", label: "MODS", name: "Mods", titles: modList }] : []),
-    ...(scan && filter !== "mods" ? [{ id: "cores", label: "CORES", name: "Cores", titles: coreList }] : []),
+    ...(sectionsOn && recent.length > 0
+      ? [{ id: "recent", label: tr("RECENT"), name: tr("Recent"), titles: recent }]
+      : []),
+    ...(scan && filter !== "cores" ? [{ id: "mods", label: tr("MODS"), name: tr("Mods"), titles: modList }] : []),
+    ...(scan && filter !== "mods" ? [{ id: "cores", label: tr("CORES"), name: tr("Cores"), titles: coreList }] : []),
   ];
   const soloSection = solo ? sections.find((section) => section.id === solo) ?? null : null;
   const coreNames = new Set((scan?.cores ?? []).map((c) => (c.core ?? c.folder).toLowerCase()));

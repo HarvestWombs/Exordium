@@ -26,16 +26,35 @@ export function canExtract(file: string): boolean {
   return EXTRACTABLE.test(file);
 }
 
-function tarPath(): string {
-  return `${Deno.env.get("SystemRoot") ?? "C:\\Windows"}\\System32\\tar.exe`;
+const isWindows = Deno.build.os === "windows";
+
+/** The first of `names` found in a `PATH` folder, off Windows; null when none is. */
+async function onPath(names: readonly string[]): Promise<string | null> {
+  for (const name of names) {
+    for (const dir of (Deno.env.get("PATH") ?? "").split(":").filter(Boolean)) {
+      if ((await Deno.stat(`${dir}/${name}`).catch(() => null))?.isFile) return `${dir}/${name}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The last-resort unpacker: Windows' own `tar.exe`, else bsdtar (macOS's `tar` is bsdtar), which
+ * reads zip. GNU tar, Linux's usual `tar`, reads no zip, so there it is the plain-tar fallback only.
+ */
+async function tarPath(): Promise<string> {
+  if (isWindows) return `${Deno.env.get("SystemRoot") ?? "C:\\Windows"}\\System32\\tar.exe`;
+  return await onPath(["bsdtar"]) ?? "tar";
 }
 
 /**
  * 7-Zip's console program: Exordium's own copy first (beside the packaged exe in `native/7zip`, or
  * the repository's `native/7zip` in development), then an installed 7-Zip from its registry key or
- * the usual folders; null when there is none.
+ * the usual folders; null when there is none. Off Windows the bundled copy cannot run: 7-Zip's own
+ * `7zz`, or p7zip's `7z`/`7za`, from `PATH`.
  */
 export async function sevenZipPath(): Promise<string | null> {
+  if (!isWindows) return await onPath(["7zz", "7z", "7za"]);
   const candidates: string[] = [];
   const exe = Deno.execPath().replaceAll("\\", "/");
   const packaged = !/(^|\/)deno(\.exe)?$/i.test(exe);
@@ -64,7 +83,7 @@ export async function sevenZipPath(): Promise<string | null> {
   return null;
 }
 
-const win = (path: string) => path.replace(/\//g, "\\");
+const win = (path: string) => isWindows ? path.replace(/\//g, "\\") : path;
 
 /** Extracts `archive` into `into` (created), with 7-Zip when installed, else Windows' tar. */
 export async function extract(archive: string, into: string): Promise<void> {
@@ -79,10 +98,19 @@ export async function extract(archive: string, into: string): Promise<void> {
   }
   if (/\.7z$/i.test(archive)) {
     throw new InstallError(
-      `${name} is a 7z archive, which needs 7-Zip: Windows' own unpacker cannot read LZMA. Install 7-Zip (7-zip.org) and try again.`,
+      isWindows
+        ? `${name} is a 7z archive, which needs 7-Zip: Windows' own unpacker cannot read LZMA. Install 7-Zip (7-zip.org) and try again.`
+        : `${name} is a 7z archive, which needs 7-Zip. Install 7zip (7zz) or p7zip (7z) and try again.`,
     );
   }
-  const code = await runHidden(tarPath(), ["-xf", win(archive), "-C", win(into)]);
+  if (!isWindows && /\.zip$/i.test(archive) && !(await onPath(["bsdtar"])) && Deno.build.os !== "darwin") {
+    const unzip = await onPath(["unzip"]);
+    if (!unzip) throw new InstallError(`${name} is a zip archive, which needs 7-Zip, bsdtar or unzip installed.`);
+    const code = await runHidden(unzip, ["-q", "-o", archive, "-d", into]);
+    if (code !== 0) throw new InstallError(`Could not unpack ${name} (unzip exited with ${code}).`);
+    return;
+  }
+  const code = await runHidden(await tarPath(), ["-xf", win(archive), "-C", win(into)]);
   if (code !== 0) throw new InstallError(`Could not unpack ${name} (tar exited with ${code}).`);
 }
 

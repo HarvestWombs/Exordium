@@ -1,3 +1,4 @@
+import { formatTime, tr } from "../../lib/i18n.ts";
 import { JobResult } from "./JobResult.tsx";
 import { ACTIVE, baseName, formatBytes, formatDuration, formatRate, jobLabel, jobProgress } from "./browse-util.ts";
 import type { Job, Throughput } from "./types.ts";
@@ -31,35 +32,37 @@ export function Downloads(
         <dl className="dl-stats">
           <div>
             <dt>
-              <span className="swatch net" /> NETWORK
+              <span className="swatch net" /> {tr("NETWORK")}
             </dt>
             <dd>{formatRate(current.net)}</dd>
-            <span className="muted small">peak {formatRate(rates?.peakNet ?? 0)}</span>
+            <span className="muted small">{tr("peak {rate}", { rate: formatRate(rates?.peakNet ?? 0) })}</span>
           </div>
           <div>
-            <dt>TOTAL DOWNLOADED</dt>
-            <dd>{formatBytes(rates?.totalNet ?? 0) || "0 KB"}</dd>
-            <span className="muted small">this session</span>
+            <dt>{tr("TOTAL DOWNLOADED")}</dt>
+            <dd>{formatBytes(rates?.totalNet ?? 0) || tr("0 KB")}</dd>
+            <span className="muted small">{tr("this session")}</span>
           </div>
           <div>
             <dt>
-              <span className="swatch disk" /> DISK USAGE
+              <span className="swatch disk" /> {tr("DISK USAGE")}
             </dt>
             <dd>{formatRate(current.disk)}</dd>
-            <span className="muted small">peak {formatRate(rates?.peakDisk ?? 0)}</span>
+            <span className="muted small">{tr("peak {rate}", { rate: formatRate(rates?.peakDisk ?? 0) })}</span>
           </div>
           <div>
-            <dt>TOTAL WRITTEN</dt>
-            <dd>{formatBytes(rates?.totalDisk ?? 0) || "0 KB"}</dd>
-            <span className="muted small">downloads and unpacking</span>
+            <dt>{tr("TOTAL WRITTEN")}</dt>
+            <dd>{formatBytes(rates?.totalDisk ?? 0) || tr("0 KB")}</dd>
+            <span className="muted small">{tr("downloads and unpacking")}</span>
           </div>
         </dl>
       </section>
 
       <div className="dl-head">
-        <h2 className="eyebrow">{active.length ? `IN PROGRESS (${active.length})` : "NOTHING IN PROGRESS"}</h2>
+        <h2 className="eyebrow">
+          {active.length ? tr("IN PROGRESS ({count})", { count: active.length }) : tr("NOTHING IN PROGRESS")}
+        </h2>
         <button type="button" className="link-button" onClick={() => onOpen({ what: "downloads" })}>
-          Open downloads folder
+          {tr("Open downloads folder")}
         </button>
       </div>
       {active.map((job) => (
@@ -72,18 +75,18 @@ export function Downloads(
 
       {waiting.length > 0 && (
         <>
-          <h2 className="eyebrow dl-section">WAITING</h2>
+          <h2 className="eyebrow dl-section">{tr("WAITING")}</h2>
           {waiting.map((job) => (
             <div className="dl-row" key={job.id + job.file}>
               <div className="dl-main">
                 <span className="dl-title">{job.title}</span>
                 <span className="muted small">
                   {baseName(job.file)} · {formatBytes(job.total)} ·{" "}
-                  {job.state === "failed" ? job.error : "downloaded, not installed"}
+                  {job.state === "failed" ? job.error : tr("downloaded, not installed")}
                 </span>
               </div>
               <button type="button" className="download" disabled={!root} onClick={() => onInstall(job)}>
-                {job.state === "failed" && !job.path ? "RETRY" : "INSTALL"}
+                {job.state === "failed" && !job.path ? tr("RETRY") : tr("INSTALL")}
               </button>
             </div>
           ))}
@@ -92,15 +95,15 @@ export function Downloads(
 
       {done.length > 0 && (
         <>
-          <h2 className="eyebrow dl-section">COMPLETED</h2>
+          <h2 className="eyebrow dl-section">{tr("COMPLETED")}</h2>
           {done.map((job) => (
             <div className="dl-row" key={job.id + job.file}>
               <div className="dl-main">
                 <span className="dl-title">{job.title}</span>
                 <span className="muted small">
-                  {formatBytes(job.total)} downloaded
-                  {job.unpackedSize ? ` · ${formatBytes(job.unpackedSize)} unpacked` : ""}
-                  {job.endedAt ? ` · ${new Date(job.endedAt).toLocaleTimeString()}` : ""}
+                  {tr("{size} downloaded", { size: formatBytes(job.total) })}
+                  {job.unpackedSize ? tr(" · {size} unpacked", { size: formatBytes(job.unpackedSize) }) : ""}
+                  {job.endedAt ? ` · ${formatTime(job.endedAt)}` : ""}
                 </span>
               </div>
               <JobResult
@@ -121,8 +124,10 @@ export function DownloadRow({ job, rate }: { job: Job; rate: number }) {
   const phase = job.state === "downloading"
     ? `${formatBytes(job.received)} of ${formatBytes(job.total)}`
     : job.state === "extracting"
-    ? job.unpackedSize ? `${formatBytes(job.extracted)} of ${formatBytes(job.unpackedSize)} unpacked` : "Unpacking…"
-    : `Moving ${job.installing ?? "the mod"} into the library`;
+    ? job.unpackedSize
+      ? tr("{done} of {total} unpacked", { done: formatBytes(job.extracted), total: formatBytes(job.unpackedSize) })
+      : tr("Unpacking…")
+    : tr("Moving {installing} into the library", { installing: job.installing ?? tr("the mod") });
   const left = job.state === "downloading" && rate > 0 ? (job.total - job.received) / rate : null;
   return (
     <div className="dl-row active">
@@ -164,7 +169,7 @@ export function ThroughputGraph({ history }: { history: Throughput["history"] })
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label="Throughput"
+      aria-label={tr("Throughput")}
     >
       {[0.25, 0.5, 0.75].map((f) => (
         <line

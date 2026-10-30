@@ -1,3 +1,4 @@
+import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { Lightbox } from "../../components/Lightbox.tsx";
 import { screenshotUrl } from "../../lib/art.ts";
@@ -25,8 +26,10 @@ export function ScreenshotStrip({ root, t }: { root: string; t: Title }) {
   return (
     <section className="showcase-strip-section">
       <div className="section-head">
-        <h2 className="eyebrow">SCREENSHOTS</h2>
-        <span className="muted small">random picks from {t.screenshots} found</span>
+        <h2 className="eyebrow">{tr("SCREENSHOTS")}</h2>
+        <span className="muted small">
+          {tr("random picks from {screenshots} found", { screenshots: t.screenshots })}
+        </span>
       </div>
       <div className="overview-shot-strip">
         {shots.map((shot, i) => (
@@ -64,13 +67,13 @@ export function WhatsNew({ t, onOpen }: { t: Title; onOpen: () => void }) {
   return (
     <section className="news-card">
       <div className="section-head">
-        <h2 className="eyebrow">WHAT'S NEW</h2>
+        <h2 className="eyebrow">{tr("WHAT'S NEW")}</h2>
         <span className="muted small">{entry.label}</span>
       </div>
       {entry.kind === "html"
-        ? <p className="muted">This changelog is a web page.</p>
-        : <pre className="news-excerpt">{text === null ? "Reading…" : excerptOf(text, 700)}</pre>}
-      <button type="button" className="link-button" onClick={onOpen}>Read the full changelog ›</button>
+        ? <p className="muted">{tr("This changelog is a web page.")}</p>
+        : <pre className="news-excerpt">{text === null ? tr("Reading…") : excerptOf(text, 700)}</pre>}
+      <button type="button" className="link-button" onClick={onOpen}>{tr("Read the full changelog ›")}</button>
     </section>
   );
 }
@@ -93,20 +96,21 @@ export function ActivityFeed({ root, t, running }: { root: string; t: Title; run
       const feed: FeedItem[] = [
         ...runs.map((run) => ({
           at: run.startedAt,
-          text: run.state === "crashed" ? "Played — the game crashed" : "Played",
+          text: run.state === "crashed" ? tr("Played — the game crashed") : tr("Played"),
           detail: playTime(run.seconds),
           bad: run.state === "crashed",
         })),
         ...backups.map((backup) => ({
           at: backup.createdAt,
           text: backup.reason === "manual"
-            ? "Backed up by hand"
+            ? tr("Backed up by hand")
             : backup.reason === "before-restore"
-            ? "Backed up before a restore"
+            ? tr("Backed up before a restore")
             : backup.reason === "before-rebuild"
-            ? "Backed up before a box rebuild"
-            : "Characters backed up",
-          detail: backup.characters.map((c) => c.name).join(", ") || `${backup.files} files`,
+            ? tr("Backed up before a box rebuild")
+            : tr("Characters backed up"),
+          detail: backup.characters.map((c) => c.name).join(", ") ||
+            plural(backup.files, "{count} file", "{count} files"),
           bad: false,
         })),
       ];
@@ -116,14 +120,14 @@ export function ActivityFeed({ root, t, running }: { root: string; t: Title; run
   if (!items || items.length === 0) return null;
   return (
     <section className="activity">
-      <h2 className="eyebrow">RECENT ACTIVITY</h2>
+      <h2 className="eyebrow">{tr("RECENT ACTIVITY")}</h2>
       <ol className="activity-list">
         {items.map((item, i) => (
           <li key={`${item.at}-${i}`} className={item.bad ? "bad" : ""}>
             <span className="activity-dot" />
             <span className="activity-text">{item.text}</span>
             <span className="muted small">{item.detail}</span>
-            <time className="muted small" dateTime={item.at} title={new Date(item.at).toLocaleString()}>
+            <time className="muted small" dateTime={item.at} title={formatDateTime(item.at)}>
               {relative(item.at)}
             </time>
           </li>
@@ -144,7 +148,7 @@ export function DocPanel({ titleKey, entries, empty }: { titleKey: string; entri
     if (!entry || entry.kind === "html") return;
     void (async () => {
       const response = await fetch(docUrl(titleKey, entry.path));
-      if (!response.ok) return setText("Could not read this file.");
+      if (!response.ok) return setText(tr("Could not read this file."));
       const raw = decodeText(await response.arrayBuffer());
       setText(entry.kind === "rtf" ? rtfToText(raw) : raw);
     })();
@@ -172,7 +176,7 @@ export function DocPanel({ titleKey, entries, empty }: { titleKey: string; entri
       <div className="doc-view">
         {entry?.kind === "html"
           ? <iframe className="doc-frame" sandbox="" src={docUrl(titleKey, entry.path)} title={entry.label} />
-          : <pre className="log-text doc-text">{text ?? "Reading…"}</pre>}
+          : <pre className="log-text doc-text">{text ?? tr("Reading…")}</pre>}
       </div>
     </div>
   );
