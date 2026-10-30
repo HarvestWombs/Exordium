@@ -706,12 +706,6 @@ button:disabled {
   color: var(--text-mute);
 }
 
-.statusbar.good {
-  background: var(--good-wash);
-  border-top-color: var(--good-border);
-  color: var(--good);
-}
-
 .statusbar.accent {
   background: var(--accent-wash);
   border-top-color: var(--accent);
@@ -740,46 +734,128 @@ button:disabled {
 
 /* Errors, over the page above the status bar, so nothing moves. */
 .toasts {
+  --toast-width: 620px;
+  --toast-text: 17px;
+  --toast-pad: 18px 20px;
   position: fixed;
   right: 16px;
   bottom: 48px;
   z-index: 100;
-  width: min(420px, calc(100vw - 32px));
+  width: min(var(--toast-width), calc(100vw - 32px));
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: none;
 }
 
+.toasts.medium {
+  --toast-width: 480px;
+  --toast-text: 15px;
+  --toast-pad: 14px 16px;
+}
+
+.toasts.small {
+  --toast-width: 360px;
+  --toast-text: 13px;
+  --toast-pad: 10px 12px;
+}
+
 .toast {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--bad-border);
+  padding: var(--toast-pad);
+  border: 1px solid;
   border-radius: 8px;
-  background: var(--bad-wash);
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.45);
-  color: var(--danger);
-  font-size: 13px;
+  font-size: var(--toast-text);
   line-height: 1.4;
   overflow-wrap: anywhere;
   pointer-events: auto;
   animation: toast-in 0.15s ease-out;
 }
 
-.toast span {
-  flex: 1;
-  min-width: 0;
+.toast.bad {
+  --toast-ground: var(--bad-wash);
+  --toast-tone: var(--bad);
+  border-color: var(--bad-border);
+  background: var(--toast-ground);
+  color: var(--danger);
 }
 
-.toast button {
+.toast.good {
+  --toast-ground: var(--good-wash);
+  --toast-tone: var(--good);
+  border-color: var(--good-border);
+  background: var(--toast-ground);
+  color: var(--good);
+}
+
+.toast.accent {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--text);
+}
+
+.toast.accent strong {
+  color: var(--text-strong);
+}
+
+/* The time left: a bar a step darker than the toast, emptying along a strip lighter than it. */
+.toast-timer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: color-mix(in srgb, var(--toast-ground) 55%, var(--toast-tone));
+}
+
+.toast-timer span {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--toast-ground) 75%, black);
+  transform-origin: left;
+  animation: toast-countdown linear forwards;
+}
+
+@keyframes toast-countdown {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.app.reduce-motion .toast-timer {
+  display: none;
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.toast .ghost {
+  font-size: inherit;
+}
+
+.toast-close {
   flex-shrink: 0;
   padding: 0 2px;
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 16px;
+  font-size: 1.3em;
   line-height: 1.2;
 }
 

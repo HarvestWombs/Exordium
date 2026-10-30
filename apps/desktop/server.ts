@@ -1463,6 +1463,8 @@ interface AppSettings {
     showLatestUploads: boolean;
     /** The Recent section (the titles played last) in the sidebar and on the library home. */
     showRecent: boolean;
+    /** The toast offering to import the install's D2SE mods. */
+    importReminder: boolean;
     extraFolders: string[];
   };
   launch: {
@@ -1510,6 +1512,7 @@ interface AppSettings {
     reduceMotion: boolean;
     /** The interface's language (src/lib/i18n.ts); "system" follows Windows. */
     language: "system" | "en" | "fr" | "es" | "de";
+    toastSize: "small" | "medium" | "large";
   };
 }
 
@@ -1546,6 +1549,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     hideUnsupported: false,
     showLatestUploads: true,
     showRecent: true,
+    importReminder: true,
     extraFolders: [],
   },
   launch: {
@@ -1580,6 +1584,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     theme: "dark",
     reduceMotion: false,
     language: "system",
+    toastSize: "large",
   },
 };
 
@@ -2473,6 +2478,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     hideUnsupported: "boolean",
     showLatestUploads: "boolean",
     showRecent: "boolean",
+    importReminder: "boolean",
     extraFolders: "string[]",
   });
   mergeObject(next.launch, record.launch, {
@@ -2508,6 +2514,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     theme: ["dark", "light", "system"],
     reduceMotion: "boolean",
     language: ["system", "en", "fr", "es", "de"],
+    toastSize: ["small", "medium", "large"],
   });
   return next;
 }

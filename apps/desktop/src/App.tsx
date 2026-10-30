@@ -73,7 +73,8 @@ export function App() {
   // since Play only turns to "Starting" and the box build that follows can take many seconds.
   const [activity, setActivity] = React.useState<string | null>(null);
   const { toasts, toast, dismissToast } = useToasts();
-  const [notice, setNotice] = React.useState<string | null>(null);
+  // The D2SE reminder, closed with ×: back next time Exordium opens.
+  const [reminderClosed, setReminderClosed] = React.useState(false);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
   const [browseStart, setBrowseStart] = React.useState<"archive" | "moddb" | "cores">("archive");
   // What Browse opens filtered to: a Latest uploads card opens its upload.
@@ -157,10 +158,7 @@ export function App() {
 
   const reportError = (err: unknown) => toast((err as Error).message);
 
-  function say(message: string) {
-    setNotice(message);
-    setTimeout(() => setNotice((current) => (current === message ? null : current)), 6000);
-  }
+  const say = (message: string) => toast(message, "good");
 
   function openTitle(key: string) {
     setSelectedKey(key);
@@ -256,6 +254,12 @@ export function App() {
   React.useEffect(() => {
     if (folderImport) setReviewShown(true);
   }, [folderImport]);
+  function openReview() {
+    setFolderImport(null);
+    setConverterOpen(true);
+    setReviewShown(true);
+    setImportPage(null);
+  }
   function openImport(key: string) {
     setReviewShown(false);
     setImportPage(key);
@@ -362,9 +366,7 @@ export function App() {
           onClose={() => setImportOpen(false)}
           onInstall={() => {
             setImportOpen(false);
-            setFolderImport(null);
-            setConverterOpen(true);
-            setReviewShown(true);
+            openReview();
           }}
           onFolder={() => {
             setImportOpen(false);
@@ -597,9 +599,28 @@ export function App() {
         </main>
       </div>
 
-      <Toasts toasts={toasts} onDismiss={dismissToast} />
+      <Toasts
+        toasts={toasts}
+        size={appearance?.toastSize ?? "large"}
+        onDismiss={dismissToast}
+        reminder={view === "library" && !reviewMods && !reminderClosed && scan?.root === root &&
+            scan && scan.importableMods.length > 0 && status?.appSettings.settings.library.importReminder
+          ? {
+            count: scan.importableMods.length,
+            onImport: openReview,
+            onDismiss: () => setReminderClosed(true),
+            onNever: () => {
+              setReminderClosed(true);
+              void fetch("/api/app-settings", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ library: { importReminder: false } }),
+              }).then(refreshStatus).catch(reportError);
+            },
+          }
+          : null}
+      />
       <StatusBar
-        notice={notice}
         update={readyUpdate}
         activity={activity ??
           (scanning

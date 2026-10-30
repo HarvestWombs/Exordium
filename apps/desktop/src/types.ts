@@ -237,6 +237,8 @@ export interface AppPreferences {
     showLatestUploads: boolean;
     /** The Recent section in the sidebar and on the library home. */
     showRecent: boolean;
+    /** The toast offering to import the install's D2SE mods. */
+    importReminder: boolean;
     extraFolders: string[];
   };
   launch: {
@@ -274,6 +276,7 @@ export interface AppPreferences {
     reduceMotion: boolean;
     /** The interface's language; "system" follows Windows, falling back to English. */
     language: "system" | "en" | "fr" | "es" | "de";
+    toastSize: "small" | "medium" | "large";
   };
 }
 

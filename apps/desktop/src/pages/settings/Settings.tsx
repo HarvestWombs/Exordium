@@ -159,6 +159,13 @@ export function SettingsSectionView(
             disabled={busy}
             onChange={(value) => onPatch({ library: { showRecent: value } })}
           />
+          <ToggleRow
+            label={tr("Remind me to import D2SE mods")}
+            hint={tr("A reminder when Exordium opens, while your Diablo II install has mods not in the library.")}
+            checked={s.library.importReminder}
+            disabled={busy}
+            onChange={(value) => onPatch({ library: { importReminder: value } })}
+          />
         </SettingsGroup>
         <SettingsGroup title={tr("Storage")}>
           <PathRow label={tr("Exordium folder")} value={app.paths.data} openKey="data" />
@@ -394,6 +401,14 @@ export function SettingsSectionView(
             // Labels are read as modules load, so a new language takes a reload.
             location.reload();
           }}
+        />
+        <SelectRow
+          label={tr("Notification size")}
+          hint={tr("How large notifications appear.")}
+          value={s.appearance.toastSize}
+          disabled={busy}
+          options={[["small", tr("Small")], ["medium", tr("Medium")], ["large", tr("Large")]]}
+          onChange={(value) => onPatch({ appearance: { toastSize: value } })}
         />
         <ToggleRow
           label={tr("Reduce motion")}

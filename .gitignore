@@ -24,3 +24,6 @@ native/loader/probes/
 
 # Icon drafts and their Affinity sources: kept locally, not published.
 /icon ideas/
+
+# Left behind by deno desktop builds.
+*.tmp-*

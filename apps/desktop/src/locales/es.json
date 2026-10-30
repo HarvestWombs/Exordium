@@ -718,5 +718,13 @@
   "{title} was downloaded, but no mod was installed. Browse, Downloads says why.": "{title} se descargó, pero no se instaló ningún mod. Explorar, Descargas indica el motivo.",
   "Installed {title}.|Installed {count} mods from {title}.": "{title} instalado.|{count} mods de {title} instalados.",
   "Core {core}": "Core {core}",
-  "{count} D2SE mod was found in your install. Use Import… in the library to bring it in, reviewed in the converter first.|{count} D2SE mods were found in your install. Use Import… in the library to bring them in, each reviewed in the converter first.": "Se encontró {count} mod de D2SE en tu instalación. Usa Importar… en la biblioteca para añadirlo, tras revisarlo en el conversor.|Se encontraron {count} mods de D2SE en tu instalación. Usa Importar… en la biblioteca para añadirlos, revisando primero cada uno en el conversor."
+  "{count} D2SE mod was found in your install. Use Import… in the library to bring it in, reviewed in the converter first.|{count} D2SE mods were found in your install. Use Import… in the library to bring them in, each reviewed in the converter first.": "Se encontró {count} mod de D2SE en tu instalación. Usa Importar… en la biblioteca para añadirlo, tras revisarlo en el conversor.|Se encontraron {count} mods de D2SE en tu instalación. Usa Importar… en la biblioteca para añadirlos, revisando primero cada uno en el conversor.",
+  "Import your D2SE mods?": "¿Importar tus mods de D2SE?",
+  "Import mods": "Importar mods",
+  "Never ask again": "No volver a preguntar",
+  "{count} mod is in your Diablo II install. Each is reviewed, then copied into Exordium's library.|{count} mods are in your Diablo II install. Each is reviewed, then copied into Exordium's library.": "Hay {count} mod en tu instalación de Diablo II. Cada uno se revisa y luego se copia a la biblioteca de Exordium.|Hay {count} mods en tu instalación de Diablo II. Cada uno se revisa y luego se copia a la biblioteca de Exordium.",
+  "Remind me to import D2SE mods": "Recordarme importar mods de D2SE",
+  "A reminder when Exordium opens, while your Diablo II install has mods not in the library.": "Un recordatorio al abrir Exordium, mientras tu instalación de Diablo II tenga mods que no están en la biblioteca.",
+  "Notification size": "Tamaño de las notificaciones",
+  "How large notifications appear.": "El tamaño con el que aparecen las notificaciones."
 }
