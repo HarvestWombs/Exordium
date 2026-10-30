@@ -1,8 +1,65 @@
-# Exordium
+<p align="center">
+  <img src="apps/desktop/assets/exordium-icon.png" width="128" alt="">
+</p>
 
-A launcher for Legacy Diablo II and its mods. Exordium keeps its own copy of the game, every patch from 1.00 to 1.13d, and your mods, and runs each mod in its own sealed **box**. Mods never touch each other, your Diablo II install, or your machine's Diablo II settings.
+<h1 align="center">Exordium</h1>
+
+<p align="center">
+  <strong>A modern launcher for Legacy Diablo II and its mods.</strong><br>
+  One library. Every patch from 1.00 to 1.13d. Every mod in its own sealed box.
+</p>
 
 > **Status:** in development, not released yet. Windows only.
+
+## What it does
+
+Exordium is one place to find, install, organize and play Diablo II mods.
+
+Mods are built for specific patches, and they fight over the same game folder and the same settings. Exordium removes that problem. It keeps every patch side by side, works out which one a mod needs, and starts the mod on it. You press Play, and the right version of the game runs with the right files, settings and characters.
+
+Your Diablo II install stays exactly as it is. Mods can't break it, and they can't break each other.
+
+## How it works
+
+**Its own library.** On first launch, Exordium reads your Diablo II install and copies the game archives into a library of its own. It downloads the patches you pick, called **cores**, and checks each one against a published checksum. From then on your install is only read.
+
+**A box for every mod.** Each mod runs from its own folder, built from links to the game, its core and the mod. Fifty mods don't mean fifty copies of the game, and nothing one mod does can reach another.
+
+**A private registry.** Diablo II keeps video and gateway settings in the Windows registry, which every mod normally shares. Exordium gives each box a registry of its own, so one mod's settings stay with that mod and your machine's Diablo II settings are never touched.
+
+**Its own game loader.** Old patches have no `Game.exe` that runs on a modern install. Exordium's loader stands in for it on every core from 1.00 to 1.13d: it opens the mod's MPQs in order, loads PlugY, D2Mod and the mod's own DLLs, then hands over to the game.
+
+## How it differs from D2SE
+
+D2SE is the launcher the Diablo II modding scene was built on, and Exordium owes it a great deal: its loader was worked out by studying what D2SE does, and it reads D2SE's mod format so existing mods carry straight over.
+
+The difference is where the work happens. D2SE runs mods out of your Diablo II install and changes your real settings to suit them. Exordium runs them in isolation.
+
+| | D2SE | Exordium |
+|---|---|---|
+| **Where mods live** | Inside your Diablo II install | In Exordium's own library. Your install is only read |
+| **Game settings** | Written to your real Diablo II registry keys | A private registry per mod. Your machine's is never touched |
+| **Mod MPQs** | Up to 3 | No limit |
+| **Extra plugin DLLs** | Up to 3 | No limit |
+| **Language packs** | Loaded between a mod's MPQs | Loaded above all of them, so the language you pick always wins |
+| **What a mod declares** | `D2SE_SETUP.ini`: how it launches | `exordium.mod.json`: how it launches, plus art, links, documentation and an update feed |
+
+## Why choose Exordium
+
+- **Your mods come with you.** Point it at a D2SE install and it finds your mods, and you review each one before it's copied in. Your original files stay put unless you choose Move.
+- **Nothing can break your game.** A mod can't overwrite your install, another mod, or your machine's settings.
+- **Finding mods is built in.** Browse the Internet Archive and ModDB inside the app, with screenshots and descriptions, and install in one click.
+- **Every patch is one click away.** If a mod needs a core you don't have, its Play button becomes Install core.
+- **Your characters are protected.** Saves are backed up when a game closes, and you can restore any backup in a click.
+- **Official Battle.net stays safe.** Modded games can't reach Blizzard's servers unless a mod declares its own realm.
+- **Run several copies at once.** Press Play again to start another copy, for a TCP/IP game with yourself.
+- **It feels current.** A Steam-style library with collections, favorites, artwork, live download progress, and an interface in English, French, Spanish and German.
+- **Mod authors get more.** One manifest file gives your mod artwork, links, documentation, changelogs and update notices.
+- **Free software.** Licensed under GPL-3.0-or-later.
+
+**When to stay on D2SE:** Exordium doesn't load D2SE's own plugin systems, D2SE_Utility and the D2SE mod DLL, so a mod that depends on them may not work fully. Imported mods are copied into the library, so they use disk space until you remove the original or choose Move. Exordium is also unreleased and Windows only for now.
+
+## Contents
 
 - [Features](#features)
 - [Requirements](#requirements)
@@ -15,16 +72,42 @@ A launcher for Legacy Diablo II and its mods. Exordium keeps its own copy of the
 
 ## Features
 
-- **One library, every version.** First launch links your Diablo II install, copies the game archives into Exordium's own library, and downloads the cores (patches) you pick. After that your install is only ever read.
-- **A box per mod.** Each title runs from its own folder, assembled from links to the game, its core and the mod. Each box also gets a private registry: a mod's video, gateway and Glide settings stay with that mod.
-- **Its own game loader.** `exordium-game.exe` stands in for `Game.exe` on every core from 1.00 to 1.13d. It opens the MPQ stack, loads PlugY, D2Mod and the mod's own DLLs, then hands over to the game. `-skiptobnet`, `-act` and `-seed` work on every core.
-- **D2SE import.** Finds the mods in an existing D2SE install and reviews each one in a converter before copying or moving it into the library. Imports run in the background, one at a time. The converter writes an `exordium.mod.json` the mod carries from then on.
-- **Browse and install.** Mods from the Internet Archive and ModDB, with screenshots, descriptions and one-click install, unpacked with a bundled 7-Zip. The library home shows the latest uploads and updates for mods you have.
+### The library
+
+- **Home and Collections.** A grid of cards with Steam-style menus: hover Library or Browse for its pages. Latest uploads and updates for your mods sit at the top of Home.
+- **Organize your way.** Favorites, collections with drag and drop, foldable sections, hide and uninstall.
+- **Live progress.** Anything importing or downloading gets a card and a sidebar row with a spinner. Hover for its status, or click for its page, which fills in as it lands. Everything can be cancelled while it copies or downloads.
+- **Always in view.** Active downloads show in the middle of the status bar on every page, and clicking them opens Downloads.
+- **A steady layout.** Messages arrive as toasts with a countdown, so nothing on the page moves. You choose their size in Settings.
+
+### Getting mods
+
+- **Browse and install.** Mods from the Internet Archive and ModDB, unpacked with a bundled 7-Zip.
+- **D2SE import.** A converter shows the `exordium.mod.json` it will write, and imports run in the background, one at a time.
+- **Any archive or folder.** Import a `.zip`, `.7z` or `.rar`, or a mod already unpacked somewhere.
 - **Cores catalog.** Every patch from 1.00 to 1.13d, each with all twelve languages, downloaded from [Exordium-Cores](https://github.com/HarvestWombs/Exordium-Cores) and checked against published SHA-256 checksums.
-- **Battle.net stays closed.** Unless a mod declares its own realm, the main-menu Battle.net button is greyed out and every route onto official Battle.net is blocked, on every core. TCP/IP and custom realms are untouched.
+- **Translate descriptions.** A mod written in another language can be translated in place, through Google. It's off in Local-only mode.
+
+### Playing
+
+- **The loader.** `exordium-game.exe` works on every core from 1.00 to 1.13d, so `-skiptobnet`, `-act` and `-seed` do too.
+- **Plugins.** PlugY, D2Mod and a mod's own DLLs load in the order the mod asks for. Exordium ships no PlugY: it uses the mod's, or one you provide.
+- **Newer MPQs on old patches.** An MPQ from the 1.14 installer loads on every core, without being rebuilt.
+- **Battle.net closed by default.** Unless a mod declares its own realm, the Battle.net button is greyed out and every route onto official Battle.net is blocked, on every core. TCP/IP is untouched.
+- **Several copies.** Each copy has its own registry and log.
+
+### Keeping things safe
+
 - **Save backups.** A copy of a title's saves when its last running copy closes, or by hand, with restore.
-- **Library tools:** favorites, collections with drag and drop, foldable sections, hide and uninstall.
-- **And:** several copies of a mod at once, Discord Rich Presence with your character's class and level, light and dark themes, a searchable Help, and an updater that installs only Ed25519-signed releases.
+- **Box checks.** Verify a box's integrity, or rebuild it without touching saves.
+- **Signed updates.** Exordium's updater installs only Ed25519-signed releases.
+- **Local-only mode.** One switch keeps Exordium offline. Games still launch.
+
+### And
+
+- Discord Rich Presence with your character's class and level.
+- Light and dark themes.
+- A searchable Help, in the app.
 
 ## Requirements
 
