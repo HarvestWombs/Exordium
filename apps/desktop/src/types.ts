@@ -335,7 +335,9 @@ export interface CopyJob {
   kind: "game" | "core" | "mod";
   label: string;
   /** `queued`: waiting for the imports ahead of it. */
-  state: "queued" | "copying" | "done" | "failed";
+  state: "queued" | "copying" | "done" | "failed" | "cancelled";
+  /** Cancel was asked for; the copy stops before its next file. */
+  cancelling: boolean;
   copied: number;
   total: number;
   error: string | null;
@@ -363,6 +365,8 @@ export interface ConfirmRequest {
   danger?: boolean;
   /** A checkbox shown ticked; its state is passed to run. */
   checkbox?: string | undefined;
+  /** The button that backs out, when "Cancel" would read as the action itself. */
+  dismiss?: string | undefined;
   run: (checked: boolean) => Promise<void>;
 }
 

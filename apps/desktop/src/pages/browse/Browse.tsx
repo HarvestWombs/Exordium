@@ -24,7 +24,7 @@ import type { ArchiveSort, BrowseView, Group, Item, Job, ModDbItem, ModDbKind, S
  * Installing is one step: download, unpack with progress, move into MODS, delete the archive.
  */
 export function Browse(
-  { initialView, initialSearch, installed, root, onInstalled, onCoreInstalled }: {
+  { initialView, initialSearch, installed, root, onInstalled, onCoreStarted, onDownloadStarted, onExpectDraft }: {
     /** The tab to open on: setup sends players without cores to Cores, a Latest uploads card to its source. */
     initialView?: "archive" | "moddb" | "cores";
     /** What the search box starts with: a Latest uploads card opens on its upload. */
@@ -34,8 +34,12 @@ export function Browse(
     root: string | null;
     /** A mod was installed as MODS\<name>: rescan and show it. */
     onInstalled: (name: string) => void;
-    /** A core was installed into the library's cores folder: rescan and show it. */
-    onCoreInstalled: (core: string) => void;
+    /** A core's install has started, for the library to follow. */
+    onCoreStarted: () => void;
+    /** A download has started, for the library to follow. */
+    onDownloadStarted: () => void;
+    /** Once this download is in, draft its exordium.mod.json. */
+    onExpectDraft: (key: string) => void;
   },
 ) {
   const [data, setData] = React.useState<{ sources: Source[]; groups: Group[]; items: Item[] } | null>(null);
@@ -63,8 +67,6 @@ export function Browse(
       itemKey?: string;
     } | null
   >(null);
-  const [metadataJobs, setMetadataJobs] = React.useState<Set<string>>(new Set());
-  const importedJobs = React.useRef(new Set<string>());
   const [modDb, setModDb] = React.useState<{ items: ModDbItem[]; fetchedAt: string | null } | null>(null);
   const [modDbLoading, setModDbLoading] = React.useState(false);
   const [modDbError, setModDbError] = React.useState<string | null>(null);
@@ -209,24 +211,6 @@ export function Browse(
   const labels = new Map(data?.groups.flatMap((group) => group.keywords.map((k) => [k.id, k.label] as const)) ?? []);
   const openPlace = (body: unknown) => void post("/api/browse/open", body).catch(() => {});
 
-  React.useEffect(() => {
-    if (!root || metadataJobs.size === 0) return;
-    for (const job of jobs) {
-      const key = `${job.id}/${job.file}`;
-      if (!metadataJobs.has(key) || importedJobs.current.has(key) || job.state !== "installed") continue;
-      const folders = job.result?.installed.map((mod) => mod.name) ?? [];
-      if (folders.length === 0) continue;
-      importedJobs.current.add(key);
-      void post("/api/import-d2se-metadata", { root, folders }).finally(() => {
-        setMetadataJobs((current) => {
-          const next = new Set(current);
-          next.delete(key);
-          return next;
-        });
-      });
-    }
-  }, [jobs, metadataJobs, root]);
-
   async function install(request: NonNullable<typeof installRequest>, installRoot: string, importMetadata: boolean) {
     const response = await post(request.mode === "downloaded" ? "/api/browse/install" : "/api/browse/download", {
       id: request.id,
@@ -235,10 +219,8 @@ export function Browse(
       title: request.item?.title ?? request.title,
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? tr("It did not start."));
-    if (importMetadata) {
-      const key = `${request.id}/${request.file}`;
-      setMetadataJobs((current) => new Set(current).add(key));
-    }
+    if (importMetadata) onExpectDraft(`${request.id}/${request.file}`);
+    onDownloadStarted();
     await refreshJobs();
   }
 
@@ -252,10 +234,8 @@ export function Browse(
     if (!response.ok) throw new Error(body.error ?? tr("It did not start."));
     const itemKey = request.itemKey;
     if (itemKey && typeof body.id === "string") setUrlJobs((current) => ({ ...current, [itemKey]: body.id }));
-    if (importMetadata) {
-      const key = `${body.id ?? request.id}/${body.file ?? request.file}`;
-      setMetadataJobs((current) => new Set(current).add(key));
-    }
+    if (importMetadata) onExpectDraft(`${body.id ?? request.id}/${body.file ?? request.file}`);
+    onDownloadStarted();
     await refreshJobs();
   }
 
@@ -512,7 +492,7 @@ export function Browse(
           )}
         </nav>
 
-        {view === "cores" && <Cores root={root} onInstalled={onCoreInstalled} />}
+        {view === "cores" && <Cores root={root} onStarted={onCoreStarted} />}
         {view === "moddb" && (
           <div className="browse-list">
             {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}

@@ -1,6 +1,7 @@
 import { plural, tr } from "../lib/i18n.ts";
 import type * as React from "react";
 import type { ReactNode } from "react";
+import type { Incoming } from "../lib/incoming.ts";
 import type { Title } from "../types.ts";
 import { TitleIcon } from "./icons.tsx";
 
@@ -29,6 +30,29 @@ export function ListSection(
       </button>
       {!collapsed && <div className="list-items">{children}</div>}
     </section>
+  );
+}
+
+/** A mod on its way into the library. Its status replaces its name on hover; folded to icons, it is a tooltip. */
+export function ImportRow(
+  { item, rail, selected, onOpen }: {
+    item: Incoming;
+    rail: boolean;
+    selected: boolean;
+    onOpen: () => void;
+  },
+) {
+  return (
+    <button
+      type="button"
+      className={selected ? "row importing on" : "row importing"}
+      title={rail ? `${item.title} · ${item.status}` : item.title}
+      onClick={onOpen}
+    >
+      <span className="spinner small" aria-hidden="true" />
+      <span className="row-title">{item.title}</span>
+      <span className="row-status">{item.status}</span>
+    </button>
   );
 }
 

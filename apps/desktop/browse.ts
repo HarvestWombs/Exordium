@@ -984,6 +984,20 @@ export interface Job {
 }
 
 const jobs = new Map<string, Job>();
+/** The downloads under way, so they can be stopped. Unpacking can't be: it runs to its end. */
+const aborts = new Map<Job, AbortController>();
+
+function forgetJob(job: Job) {
+  for (const [key, each] of jobs) if (each === job) jobs.delete(key);
+}
+
+/** Stops a download and forgets it; its `.part` file is removed as it stops. False if it is past that. */
+export function cancelJob(id: string, file: string): boolean {
+  const job = [...jobs.values()].find((each) => each.id === id && (each.source === "url" || each.file === file));
+  if (job?.state !== "downloading") return false;
+  aborts.get(job)?.abort();
+  return true;
+}
 
 export function urlDownloadId(url: string): string {
   const bytes = new TextEncoder().encode(url.trim());
@@ -1068,14 +1082,20 @@ export function modDbDownloadLinks(html: string, base = "https://www.moddb.com/"
   return [...direct, ...details, ...indexes];
 }
 
-async function openDownload(url: string): Promise<{ response: Response; name: string; finalUrl: string }> {
+async function openDownload(
+  url: string,
+  signal?: AbortSignal,
+): Promise<{ response: Response; name: string; finalUrl: string }> {
   let current = new URL(url);
   if (current.protocol !== "http:" && current.protocol !== "https:") throw new Error("Only http and https URLs work.");
   const seen = new Set<string>();
   for (let attempt = 0; attempt < 5; attempt++) {
     if (seen.has(current.href)) break;
     seen.add(current.href);
-    const response = await fetch(current.href, { headers: { "user-agent": "Exordium" } });
+    const response = await fetch(current.href, {
+      headers: { "user-agent": "Exordium" },
+      ...(signal ? { signal } : {}),
+    });
     const finalUrl = new URL(response.url || current.href);
     if (!response.ok || !response.body) {
       throw new Error(`${finalUrl.hostname} answered ${response.status}.`);
@@ -1286,9 +1306,11 @@ export async function startJob(
     const partial = `${dir}/${name}.part`;
     const existing = await downloadedFile(folder, id, file);
     if (existing) return await runInstall(job, existing, folder, target, settings);
+    const abort = new AbortController();
+    aborts.set(job, abort);
     try {
       await Deno.mkdir(dir, { recursive: true });
-      const response = await fetch(downloadUrl(id, file));
+      const response = await fetch(downloadUrl(id, file), { signal: abort.signal });
       if (!response.ok || !response.body) throw new Error(`archive.org answered ${response.status}`);
       job.total = Number(response.headers.get("content-length")) || job.total;
       const out = await Deno.open(partial, { write: true, create: true, truncate: true });
@@ -1304,17 +1326,20 @@ export async function startJob(
             },
           }),
         )
-        .pipeTo(out.writable);
+        .pipeTo(out.writable, { signal: abort.signal });
       if (settings.verifyAfterDownload && job.total > 0 && job.received !== job.total) {
         throw new Error(`Downloaded ${job.received} bytes, expected ${job.total}.`);
       }
       await Deno.rename(partial, `${dir}/${name}`);
     } catch (error) {
+      await Deno.remove(partial).catch(() => {});
+      if (abort.signal.aborted) return forgetJob(job);
       job.state = "failed";
       job.error = (error as Error).message;
       job.endedAt = new Date().toISOString();
-      await Deno.remove(partial).catch(() => {});
       return;
+    } finally {
+      aborts.delete(job);
     }
     await runInstall(job, `${dir}/${name}`, folder, target, settings);
   })();
@@ -1359,8 +1384,10 @@ export function startUrlJob(
 
   void (async () => {
     let partial = "";
+    const abort = new AbortController();
+    aborts.set(job, abort);
     try {
-      const opened = await openDownload(trimmed);
+      const opened = await openDownload(trimmed, abort.signal);
       job.file = opened.name;
       job.total = Number(opened.response.headers.get("content-length")) || 0;
       await Deno.mkdir(dir, { recursive: true });
@@ -1379,17 +1406,21 @@ export function startUrlJob(
             },
           }),
         )
-        .pipeTo(out.writable);
+        .pipeTo(out.writable, { signal: abort.signal });
       if (settings.verifyAfterDownload && job.total > 0 && job.received !== job.total) {
         throw new Error(`Downloaded ${job.received} bytes, expected ${job.total}.`);
       }
       await Deno.rename(partial, archive);
+      aborts.delete(job);
       await runInstall(job, archive, folder, target, settings);
     } catch (error) {
+      if (partial) await Deno.remove(partial).catch(() => {});
+      if (abort.signal.aborted) return forgetJob(job);
       job.state = "failed";
       job.error = (error as Error).message;
       job.endedAt = new Date().toISOString();
-      if (partial) await Deno.remove(partial).catch(() => {});
+    } finally {
+      aborts.delete(job);
     }
   })();
   return job;

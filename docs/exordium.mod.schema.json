@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://exordium.local/exordium.mod.schema.json",
   "title": "exordium.mod.json",
-  "description": "An Exordium mod's own description of itself, in the root of its folder in MODS. Used when the folder has no D2SE_SETUP.ini. Read by apps/desktop/server.ts (readExordiumMod).",
+  "description": "An Exordium mod's own description of itself, in the root of its folder. It wins over a D2SE_SETUP.ini when a mod has both. Read by apps/desktop/server.ts (readExordiumMod).",
   "type": "object",
   "required": ["core"],
   "properties": {
@@ -21,7 +21,7 @@
     },
     "core": {
       "type": ["string", "null"],
-      "description": "The core the mod runs on: a D2SE core, as its folder in D2SE\\CORES is named, or 1.14d when the install itself is 1.14d. A 1.14d mod runs Blizzard's own Game.exe, so D2Mod, Nefex, D2Extra and the D2SE DLLs cannot load; PlugY (11 or later) and plain DLLs can.",
+      "description": "The core the mod runs on, spelled as the cores are: 1.00, 1.01, 1.02, 1.03, 1.04b, 1.04c, 1.05, 1.05b, 1.06, 1.06b, 1.07, 1.08, 1.09, 1.09b, 1.09d, 1.10f, 1.11, 1.11b, 1.12a, 1.13c or 1.13d.",
       "examples": ["1.10f", "1.13c", "1.09d", "1.14d"]
     },
     "author": {
@@ -54,8 +54,16 @@
           "enum": ["stable", "testing", "local", null],
           "default": "stable"
         },
-        "automatic": { "type": ["boolean", "null"], "default": false },
-        "background": { "type": ["boolean", "null"], "default": true }
+        "automatic": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "Fills in the Automatic updates switch in Properties. Nothing acts on it yet."
+        },
+        "background": {
+          "type": ["boolean", "null"],
+          "default": true,
+          "description": "Fills in the Allow background downloads switch in Properties. Nothing acts on it yet."
+        }
       },
       "additionalProperties": false
     },
@@ -71,7 +79,7 @@
         },
         "icon": {
           "type": ["string", "null"],
-          "description": "The library list, the game's taskbar icon (Game.exe) and desktop shortcuts. PNG only (it is embedded as PNG-in-ICO), 256×256.",
+          "description": "The library list, the game window and desktop shortcuts. PNG only, 256×256.",
           "examples": ["art/icon.png"]
         },
         "portrait": {
@@ -120,7 +128,7 @@
         "plugY": {
           "type": ["boolean", "null"],
           "default": false,
-          "description": "Load PlugY (the mod's own PlugY.dll, else the install's)."
+          "description": "Load PlugY: the mod's own PlugY.dll, else one in its core's folder, else the PlugY folder in Settings. Without any, the game starts without PlugY."
         },
         "language": {
           "type": ["string", "null"],
@@ -170,7 +178,7 @@
     },
     "realm": {
       "type": ["object", "null"],
-      "description": "Private realm settings carried from D2SE_SETUP.ini. Null fields are ignored.",
+      "description": "Private realm settings. A gateway keeps Battle.net open for the mod; Exordium does not write these values into the game yet. Every value is a string, so timezone and port keep their quotes.",
       "properties": {
         "gateway": { "type": ["string", "null"] },
         "timezone": { "type": ["string", "null"] },

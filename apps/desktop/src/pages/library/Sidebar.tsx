@@ -2,7 +2,8 @@ import { plural, tr } from "../../lib/i18n.ts";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import { SearchIcon } from "../../components/icons.tsx";
-import { ListSection } from "../../components/sidebar.tsx";
+import { ImportRow, ListSection } from "../../components/sidebar.tsx";
+import type { Incoming } from "../../lib/incoming.ts";
 import type { Collection, Filter, Scan, SidebarSection, Title } from "../../types.ts";
 
 /**
@@ -29,6 +30,9 @@ export function Sidebar(
     onSectionMenu,
     collectionHead,
     row,
+    incoming,
+    importPage,
+    onOpenImport,
   }: {
     rail: boolean;
     onToggleRail: () => void;
@@ -50,6 +54,11 @@ export function Sidebar(
     /** A collection's header: its drag and drop. */
     collectionHead: (c: Collection) => React.ButtonHTMLAttributes<HTMLButtonElement>;
     row: (t: Title, prefix: string, collection: Collection | null) => ReactNode;
+    /** Mods on their way in, above the sections until they land. */
+    incoming: Incoming[];
+    /** The import whose page is open. */
+    importPage: string | null;
+    onOpenImport: (key: string) => void;
   },
 ) {
   return (
@@ -118,6 +127,23 @@ export function Sidebar(
             <span>{tr("Only {name}", { name: soloSection.name })}</span>
             <button type="button" className="link-button" onClick={onClearSolo}>{tr("View all")}</button>
           </div>
+        )}
+        {incoming.length > 0 && (
+          <ListSection
+            label={tr("IN PROGRESS ({count})", { count: incoming.length })}
+            collapsed={collapsed.has("incoming")}
+            onToggle={() => onToggleSection("incoming")}
+          >
+            {incoming.map((item) => (
+              <ImportRow
+                key={item.key}
+                item={item}
+                rail={rail}
+                selected={item.key === importPage}
+                onOpen={() => onOpenImport(item.key)}
+              />
+            ))}
+          </ListSection>
         )}
         {sections.map((section) => {
           const c = section.collection;

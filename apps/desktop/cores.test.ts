@@ -1,9 +1,11 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
+  cancelCoreInstall,
   catalog,
   coreEntries,
   type CoreEntry,
   CoreInstallError,
+  coreJobs,
   directUrl,
   parseCatalog,
   startCoreInstall,
@@ -103,6 +105,46 @@ Deno.test("installs a core into the library from the catalog, and never over one
 
     await assertRejects(() => startCoreInstall(root, "1.13c", `${dir}/downloads`), CoreInstallError, "already");
     await assertRejects(() => startCoreInstall(root, "1.14d", `${dir}/downloads`), CoreInstallError, "install itself");
+  } finally {
+    if (previous === undefined) Deno.env.delete("EXORDIUM_CORES_URL");
+    else Deno.env.set("EXORDIUM_CORES_URL", previous);
+    await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("cancelling a core's download forgets it and installs nothing", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const root = `${dir}/Diablo II`;
+  await Deno.mkdir(`${root}/cores`, { recursive: true });
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen() {} }, (request) => {
+    if (new URL(request.url).pathname === "/cores.json") {
+      return Response.json({
+        cores: [{ version: "1.12a", core: "1.12a", file: "1.12a.zip", size: 10_000_000, sha256: SHA }],
+      });
+    }
+    return new Response(
+      new ReadableStream({
+        async pull(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          controller.enqueue(new Uint8Array(1024));
+        },
+      }),
+    );
+  });
+  const previous = Deno.env.get("EXORDIUM_CORES_URL");
+  const running = () => coreJobs().find((job) => job.core === "1.12a");
+  try {
+    Deno.env.set("EXORDIUM_CORES_URL", `http://127.0.0.1:${server.addr.port}/cores.json`);
+    await catalog(true);
+    await startCoreInstall(root, "1.12a", `${dir}/downloads`);
+    for (let i = 0; i < 400 && !running()?.received; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(running()!.received > 0);
+    assertEquals(cancelCoreInstall("1.12A"), true);
+    for (let i = 0; i < 400 && running(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    assertEquals(running(), undefined);
+    assertEquals(await Deno.stat(`${root}/cores/1.12a`).then(() => true, () => false), false);
+    assertEquals(cancelCoreInstall("1.12a"), false);
   } finally {
     if (previous === undefined) Deno.env.delete("EXORDIUM_CORES_URL");
     else Deno.env.set("EXORDIUM_CORES_URL", previous);

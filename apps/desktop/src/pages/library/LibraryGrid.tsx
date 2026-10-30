@@ -2,6 +2,7 @@ import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
 import { HeartIcon, PlayIcon, TitleIcon } from "../../components/icons.tsx";
+import type { Incoming } from "../../lib/incoming.ts";
 import { artUrl } from "../../lib/art.ts";
 import { readStored, writeStored } from "../../lib/util.ts";
 import type { Title } from "../../types.ts";
@@ -20,18 +21,85 @@ export function savedCapsuleSize(): CapsuleSize {
   return "medium";
 }
 
+/** A mod on its way into the library: a spinner, and its progress when hovered. */
+function ImportCapsule(
+  { item, onOpen, onCancel }: { item: Incoming; onOpen: () => void; onCancel: () => void },
+) {
+  return (
+    <div
+      className="capsule importing"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <div className="capsule-art">
+        <div className="capsule-fallback mod">
+          <span className="spinner" aria-hidden="true" />
+          <span>{item.title}</span>
+        </div>
+        <div className="capsule-status">
+          <strong>{item.status}</strong>
+          {item.percent !== null && (
+            <div className="update-progress">
+              <span style={{ width: `${item.percent}%` }} />
+            </div>
+          )}
+          <button
+            type="button"
+            className="link-button"
+            disabled={!item.cancellable}
+            onClick={(event) => {
+              event.stopPropagation();
+              onCancel();
+            }}
+          >
+            {item.kind === "download" ? tr("Cancel download") : tr("Cancel import")}
+          </button>
+        </div>
+      </div>
+      <div className="capsule-name">{item.title}</div>
+      <div className="capsule-sub">{item.subtitle}</div>
+    </div>
+  );
+}
+
 /**
  * The library as Steam shows it in grid view: the whole main area, a shelf per group, a 2:3 capsule
  * per title. The portrait art when a title has one; otherwise its icon and name over its banner,
  * dimmed (a wide banner cropped to 2:3 is usually just sky). Click opens the title's page; Play is on the capsule; right-click is the title's menu.
  */
 export function LibraryGrid(
-  { shelves, before, onImport, root, art, running, favorites, starting, onOpen, onPlay, onMenu }: {
+  {
+    shelves,
+    before,
+    onImport,
+    incoming,
+    onOpenImport,
+    onCancelImport,
+    root,
+    art,
+    running,
+    favorites,
+    starting,
+    onOpen,
+    onPlay,
+    onMenu,
+  }: {
     /** One per sidebar section, by the section's id; a shelf folds on its own, apart from the sidebar. */
     shelves: { id: string; label: string; titles: Title[] }[];
     /** Shown above the shelves: the Latest uploads row. */
     before: ReactNode;
     onImport: () => void;
+    /** Mods on their way in, on their own shelf until they land. */
+    incoming: Incoming[];
+    onOpenImport: (key: string) => void;
+    onCancelImport: (item: Incoming) => void;
     root: string | null;
     art: number;
     running: Set<string>;
@@ -88,7 +156,22 @@ export function LibraryGrid(
         </div>
       </div>
       {before}
-      {total === 0 && <p className="muted">{tr("Nothing matches these filters.")}</p>}
+      {incoming.length > 0 && (
+        <section className="shelf">
+          <h2 className="eyebrow">{tr("IN PROGRESS ({count})", { count: incoming.length })}</h2>
+          <div className="capsules">
+            {incoming.map((item) => (
+              <ImportCapsule
+                key={item.key}
+                item={item}
+                onOpen={() => onOpenImport(item.key)}
+                onCancel={() => onCancelImport(item)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      {total === 0 && incoming.length === 0 && <p className="muted">{tr("Nothing matches these filters.")}</p>}
       {shelves.filter((shelf) => shelf.titles.length > 0).map((shelf) => (
         <section key={shelf.id} className="shelf">
           <h2 className="eyebrow">

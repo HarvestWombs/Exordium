@@ -2,9 +2,9 @@ import { plural, tr } from "./lib/i18n.ts";
 import * as React from "react";
 import { Browse } from "./pages/browse/Browse.tsx";
 import { titleKey } from "./pages/browse/browse-util.ts";
-import { Banners } from "./components/Banners.tsx";
+import { StatusBar } from "./components/StatusBar.tsx";
+import { Toasts } from "./components/Toasts.tsx";
 import { ConfirmDialog, NameDialog } from "./components/dialogs.tsx";
-import { followCopy } from "./components/progress.tsx";
 import { TitleMenu } from "./components/menus.tsx";
 import { SectionMenu } from "./components/SectionMenu.tsx";
 import { TitleRow } from "./components/sidebar.tsx";
@@ -12,9 +12,13 @@ import { type AppView, TopBar } from "./components/TopBar.tsx";
 import { ResizeHandles } from "./components/WindowChrome.tsx";
 import { useAppWindow, usePageHousekeeping } from "./hooks/useAppWindow.ts";
 import { useCollections } from "./hooks/useCollections.ts";
+import { useConversions } from "./hooks/useConversions.ts";
+import { useCoreDownloads } from "./hooks/useCoreDownloads.ts";
+import { useDownloads } from "./hooks/useDownloads.ts";
 import { useImports } from "./hooks/useImports.ts";
 import { useSidebarLayout } from "./hooks/useSidebarLayout.ts";
 import { useTitleActions } from "./hooks/useTitleActions.ts";
+import { useToasts } from "./hooks/useToasts.ts";
 import { loadUploads } from "./lib/latest-uploads.ts";
 import { libraryView } from "./lib/library-view.ts";
 import { runningSummary } from "./lib/util.ts";
@@ -27,12 +31,13 @@ import { Sidebar } from "./pages/library/Sidebar.tsx";
 import { Properties } from "./pages/properties/Properties.tsx";
 import { AppSettings } from "./pages/settings/Settings.tsx";
 import { SetupPage } from "./pages/Setup.tsx";
+import { ImportPage } from "./pages/title/ImportPage.tsx";
 import { TitlePage } from "./pages/title/TitlePage.tsx";
 import { applyUpdate } from "./pages/Updates.tsx";
+import type { Incoming } from "./lib/incoming.ts";
 import type {
   Collection,
   ConfirmRequest,
-  CopyJob,
   DialogPage,
   Filter,
   NameRequest,
@@ -67,20 +72,17 @@ export function App() {
   // A short line in the status bar for what Exordium is doing right now (e.g. a launch in progress),
   // since Play only turns to "Starting" and the box build that follows can take many seconds.
   const [activity, setActivity] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const { toasts, toast, dismissToast } = useToasts();
   const [notice, setNotice] = React.useState<string | null>(null);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
   const [browseStart, setBrowseStart] = React.useState<"archive" | "moddb" | "cores">("archive");
   // What Browse opens filtered to: a Latest uploads card opens its upload.
   const [browseSearch, setBrowseSearch] = React.useState("");
-  const [dismissedImportRoot, setDismissedImportRoot] = React.useState<string | null>(() => {
-    try {
-      return localStorage.getItem("exordium.convertDismissed");
-    } catch {
-      return null;
-    }
-  });
   const [converterOpen, setConverterOpen] = React.useState(false);
+  // The converter is a page of the library: left for another page, it stays open behind it.
+  const [reviewShown, setReviewShown] = React.useState(false);
+  // The import whose page is open, until the mod's own page can replace it.
+  const [importPage, setImportPage] = React.useState<string | null>(null);
   const [importOpen, setImportOpen] = React.useState(false);
   // The title menu, and the collection it was opened in (its row there), which it can be removed from.
   const [menu, setMenu] = React.useState<{ x: number; y: number; t: Title; from?: Collection } | null>(null);
@@ -105,7 +107,6 @@ export function App() {
 
   const load = React.useCallback(async (installRoot: string): Promise<boolean> => {
     setScanning(true);
-    setError(null);
     try {
       const response = await fetch(`/api/scan-d2se?root=${encodeURIComponent(installRoot)}`);
       const body = await response.json();
@@ -118,12 +119,12 @@ export function App() {
       });
       return true;
     } catch (err) {
-      setError((err as Error).message);
+      toast((err as Error).message);
       return false;
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [toast]);
 
   // Start where the player left off: the saved library, and the title played last.
   React.useEffect(() => {
@@ -154,7 +155,7 @@ export function App() {
     return () => source.close();
   }, [refreshStatus]);
 
-  const reportError = (err: unknown) => setError((err as Error).message);
+  const reportError = (err: unknown) => toast((err as Error).message);
 
   function say(message: string) {
     setNotice(message);
@@ -164,12 +165,13 @@ export function App() {
   function openTitle(key: string) {
     setSelectedKey(key);
     setGridHome(false);
+    setReviewShown(false);
+    setImportPage(null);
   }
 
   async function play(title: Title) {
     if (!root) return;
     setStarting(title.key);
-    setError(null);
     setActivity(tr("Starting {title} — preparing its box…", { title: title.title }));
     try {
       const response = await fetch("/api/play", {
@@ -185,7 +187,7 @@ export function App() {
       setActivity(launched);
       setTimeout(() => setActivity((current) => (current === launched ? null : current)), 4000);
     } catch (err) {
-      setError((err as Error).message);
+      reportError(err);
       setActivity(null);
       if (status?.appSettings.settings.launch.showLogsOnFailure) {
         openTitle(title.key);
@@ -211,13 +213,74 @@ export function App() {
     reportError,
     setNameDialog,
   });
-  const { folderImport, setFolderImport, coreJob, importArchive, importFolder, installCore } = useImports({
+  const { folderImport, setFolderImport, importArchive, importFolder, installCore } = useImports({
     root,
     load,
     openTitle,
     say,
     reportError,
+    onCoreStarted: () => void refreshCores(),
   });
+  // An open page follows its mod: on to the real page as it lands, back to the library if it doesn't.
+  const openImportPage = React.useRef(importPage);
+  openImportPage.current = importPage;
+  function incomingSettled(key: string, titleKey: string | null) {
+    if (openImportPage.current !== key) return;
+    setImportPage(null);
+    if (titleKey) setSelectedKey(titleKey);
+    setGridHome(titleKey === null);
+  }
+  const { conversions, incoming: imports, add: addConversion, forgetSettled } = useConversions({
+    root,
+    load,
+    say,
+    reportError,
+    onSettled: incomingSettled,
+  });
+  const { incoming: downloads, refresh: refreshDownloads, expectDraft } = useDownloads({
+    root,
+    load,
+    say,
+    reportError,
+    onSettled: incomingSettled,
+  });
+  const { incoming: cores, jobs: coreJobs, refresh: refreshCores } = useCoreDownloads({
+    root,
+    load,
+    say,
+    reportError,
+    onSettled: incomingSettled,
+  });
+  const incoming = [...imports, ...downloads, ...cores];
+  const reviewMods = folderImport ?? (converterOpen ? scan?.importableMods ?? null : null);
+  React.useEffect(() => {
+    if (folderImport) setReviewShown(true);
+  }, [folderImport]);
+  function openImport(key: string) {
+    setReviewShown(false);
+    setImportPage(key);
+  }
+  function askCancel(item: Incoming) {
+    const download = item.kind === "download";
+    setConfirmBox({
+      title: download
+        ? tr("Cancel the download of {title}?", { title: item.title })
+        : tr("Cancel the import of {title}?", { title: item.title }),
+      body: download
+        ? tr("What was downloaded so far is removed.")
+        : tr("What was copied so far is removed. Your Diablo II install isn't changed."),
+      action: download ? tr("Cancel download") : tr("Cancel import"),
+      dismiss: download ? tr("Keep downloading") : tr("Keep importing"),
+      danger: true,
+      run: item.cancel,
+    });
+  }
+  const viewedItem = incoming.find((item) => item.key === importPage);
+  React.useEffect(() => {
+    if (!importPage || viewedItem) return;
+    setImportPage(null);
+    setGridHome(true);
+  }, [importPage, viewedItem]);
   const titleAction = useTitleActions({
     root,
     favorites,
@@ -227,7 +290,7 @@ export function App() {
     refreshStatus,
     load,
     say,
-    setError,
+    reportError,
     confirm: setConfirmBox,
     onProperties: (t) => {
       setSelectedKey(t.key);
@@ -243,7 +306,7 @@ export function App() {
       t={t}
       root={root}
       art={artVersion}
-      selected={t.key === selectedKey && !gridHome}
+      selected={t.key === selectedKey && !gridHome && !reviewShown && !importPage}
       running={runningKeys.has(t.key)}
       favorite={favorites.has(t.key)}
       onSelect={openTitle}
@@ -254,7 +317,11 @@ export function App() {
 
   function showView(next: AppView) {
     // From a title's page, Library goes back to the library home; Browse opens unfiltered.
-    if (next === "library") setGridHome(true);
+    if (next === "library") {
+      setGridHome(true);
+      setReviewShown(false);
+      setImportPage(null);
+    }
     if (next === "browse") {
       setBrowseStart("archive");
       setBrowseSearch("");
@@ -266,31 +333,6 @@ export function App() {
       updateLater !== status.update.version
     ? { version: status.update.version, current: status.version }
     : null;
-  const importCount = view === "library" && root && scan?.root === root && dismissedImportRoot !== root
-    ? scan.importableMods.length
-    : 0;
-  const onConverted = async (message: string) => {
-    if (root) await load(root);
-    say(message);
-  };
-  // Imports still copying when the converter closes: followed here, and the library read again as each
-  // one lands, as the converter would have.
-  function followImports(running: CopyJob[]) {
-    for (const job of running) {
-      void followCopy(job, () => {}).then((done) => {
-        if (done.state === "done") {
-          void onConverted(tr("Imported {label} into Exordium's library.", { label: done.label }));
-        } else if (done.state === "failed") {
-          setError(
-            tr("{label} was not imported: {error}.", {
-              label: done.label,
-              error: done.error ?? tr("the copy stopped"),
-            }),
-          );
-        }
-      });
-    }
-  }
 
   const appearance = status?.appSettings.settings.appearance;
   const resolvedTheme = appearance?.theme === "system" ? (systemLight ? "light" : "dark") : appearance?.theme ?? "dark";
@@ -313,54 +355,16 @@ export function App() {
         onMaximized={setMaximized}
         onToggleMaximize={() => void toggleMaximize()}
       />
-      <Banners
-        error={error}
-        notice={notice}
-        update={readyUpdate}
-        importCount={importCount}
-        onDismissError={() => setError(null)}
-        onRestart={() => void applyUpdate().catch((e) => setError(e.message))}
-        onLater={() => setUpdateLater(status?.update.version ?? null)}
-        onImport={() => setConverterOpen(true)}
-        onNotNow={() => {
-          setDismissedImportRoot(root);
-          try {
-            if (root) localStorage.setItem("exordium.convertDismissed", root);
-          } catch {
-            // Storage unavailable: hidden for this session only.
-          }
-        }}
-      />
 
-      {converterOpen && root && scan && (
-        <D2SEConverter
-          root={root}
-          mods={scan.importableMods}
-          onClose={(running) => {
-            setConverterOpen(false);
-            followImports(running);
-          }}
-          onSaved={onConverted}
-        />
-      )}
-      {folderImport && root && (
-        <D2SEConverter
-          root={root}
-          mods={folderImport}
-          onClose={(running) => {
-            setFolderImport(null);
-            followImports(running);
-          }}
-          onSaved={onConverted}
-        />
-      )}
       {importOpen && root && (
         <ImportDialog
           installMods={scan?.importableMods.length ?? 0}
           onClose={() => setImportOpen(false)}
           onInstall={() => {
             setImportOpen(false);
+            setFolderImport(null);
             setConverterOpen(true);
+            setReviewShown(true);
           }}
           onFolder={() => {
             setImportOpen(false);
@@ -429,16 +433,14 @@ export function App() {
           initialSearch={browseSearch}
           installed={new Set(titles.flatMap((t) => [titleKey(t.title), titleKey(t.folder)]))}
           root={root}
+          onDownloadStarted={() => void refreshDownloads()}
+          onExpectDraft={expectDraft}
           onInstalled={(name) => {
             // A new mod in the library: read it again and open the mod on its page.
             setView("library");
             if (root) void load(root).then(() => openTitle(`mod:${name}`));
           }}
-          onCoreInstalled={(core) => {
-            // A new core: read the library again so mods built on it can run. The page stays on the
-            // Cores tab, where several are often installed in a row.
-            if (root && core) void load(root);
-          }}
+          onCoreStarted={() => void refreshCores()}
         />
       )}
       {view === "settings" && status && <AppSettings status={status} onChanged={refreshStatus} />}
@@ -482,10 +484,40 @@ export function App() {
           onSectionMenu={(x, y, section) => setSectionMenu({ x, y, section })}
           collectionHead={headDnd}
           row={row}
+          incoming={incoming}
+          importPage={importPage}
+          onOpenImport={openImport}
         />
 
         <main className="main">
-          {gridHome && scan
+          {reviewMods && root && (
+            <D2SEConverter
+              root={root}
+              mods={reviewMods}
+              hidden={!reviewShown}
+              queued={conversions}
+              onQueued={addConversion}
+              onClose={() => {
+                setConverterOpen(false);
+                setFolderImport(null);
+                setReviewShown(false);
+                setGridHome(true);
+                forgetSettled();
+              }}
+            />
+          )}
+          {reviewShown ? null : viewedItem
+            ? (
+              <ImportPage
+                item={viewedItem}
+                onBack={() => {
+                  setImportPage(null);
+                  setGridHome(true);
+                }}
+                onCancel={() => askCancel(viewedItem)}
+              />
+            )
+            : gridHome && scan
             ? (
               <LibraryGrid
                 shelves={shownSections.map((section) => ({
@@ -513,6 +545,9 @@ export function App() {
                   )
                   : null}
                 onImport={() => setImportOpen(true)}
+                incoming={incoming}
+                onOpenImport={openImport}
+                onCancelImport={askCancel}
                 root={root}
                 art={artVersion}
                 running={runningKeys}
@@ -541,11 +576,9 @@ export function App() {
                 onProperties={() => setDialog("general")}
                 onBack={() => setGridHome(true)}
                 missingCore={missingCore(selected)}
-                coreJob={coreJob}
-                onInstallCore={(core) => {
-                  setError(null);
-                  void installCore(core);
-                }}
+                coreJob={coreJobs.find((job) => job.core.toLowerCase() === missingCore(selected)?.toLowerCase()) ??
+                  null}
+                onInstallCore={(core) => void installCore(core)}
               />
             )
             : (
@@ -564,28 +597,26 @@ export function App() {
         </main>
       </div>
 
-      <footer className="statusbar">
-        <span className={activity || scanning || status?.running.length ? "dot live" : "dot"} />
-        <span>
-          {activity ??
-            (scanning
-              ? tr("Reading the install…")
-              : status?.running.length
-              ? runningSummary(status.running)
-              : tr("Nothing running"))}
-        </span>
-        <div className="grow" />
-        <span>{tr("Registry: private per title")}</span>
-        <span>·</span>
-        <span>
-          {scan
-            ? tr("Library: {mods}, {cores}", {
-              mods: plural(scan.mods.length, "{count} mod", "{count} mods"),
-              cores: plural(scan.cores.length, "{count} core", "{count} cores"),
-            })
-            : tr("Library: not read yet")}
-        </span>
-      </footer>
+      <Toasts toasts={toasts} onDismiss={dismissToast} />
+      <StatusBar
+        notice={notice}
+        update={readyUpdate}
+        activity={activity ??
+          (scanning
+            ? tr("Reading the install…")
+            : status?.running.length
+            ? runningSummary(status.running)
+            : tr("Nothing running"))}
+        live={Boolean(activity || scanning || status?.running.length)}
+        library={scan
+          ? tr("Library: {mods}, {cores}", {
+            mods: plural(scan.mods.length, "{count} mod", "{count} mods"),
+            cores: plural(scan.cores.length, "{count} core", "{count} cores"),
+          })
+          : tr("Library: not read yet")}
+        onRestart={() => void applyUpdate().catch(reportError)}
+        onLater={() => setUpdateLater(status?.update.version ?? null)}
+      />
 
       {dialog && selected && root && (
         <Properties

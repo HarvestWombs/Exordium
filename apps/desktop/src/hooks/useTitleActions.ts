@@ -27,7 +27,7 @@ export function useTitleActions(
     refreshStatus,
     load,
     say,
-    setError,
+    reportError,
     confirm,
     onProperties,
     onPlay,
@@ -40,7 +40,7 @@ export function useTitleActions(
     refreshStatus: () => Promise<Status>;
     load: (root: string) => Promise<boolean>;
     say: (message: string) => void;
-    setError: (message: string | null) => void;
+    reportError: (err: unknown) => void;
     confirm: (request: ConfirmRequest) => void;
     onProperties: (t: Title) => void;
     onPlay: (t: Title) => void;
@@ -60,7 +60,7 @@ export function useTitleActions(
             }
           );
           library("favorite", { key: t.key, on }).catch((err) => {
-            setError((err as Error).message);
+            reportError(err);
             void refreshStatus();
           });
           break;
@@ -139,7 +139,7 @@ export function useTitleActions(
           break;
       }
     } catch (err) {
-      setError((err as Error).message);
+      reportError(err);
     }
   };
 }

@@ -59,6 +59,7 @@ import {
   archiveItem,
   archiveList,
   browseImage,
+  cancelJob,
   downloadedFile,
   installDownloaded,
   type InstallTarget,
@@ -73,7 +74,7 @@ import {
   throughput,
 } from "./browse.ts";
 import { appLog, type Heartbeat, heartbeat, startAppLog } from "./applog.ts";
-import { catalog, coreEntries, CoreInstallError, startCoreInstall } from "./cores.ts";
+import { cancelCoreInstall, catalog, coreEntries, CoreInstallError, coreJobs, startCoreInstall } from "./cores.ts";
 import {
   BackupError,
   type Character,
@@ -100,6 +101,7 @@ import { runHidden } from "./native.ts";
 import { pickFolderNative, pickOpenFilesNative } from "./native-dialog.ts";
 import { exordiumRoot, userDataFolder } from "./paths.ts";
 import {
+  cancelCopy,
   checkInstall,
   copyJob,
   copyJobs,
@@ -191,6 +193,13 @@ async function handleRequest(request: Request): Promise<Response> {
   }
   if (url.pathname === "/api/backups") return await backups(request, url);
   if (url.pathname === "/api/discord") return await discordRoute(request);
+  // Not under Local-only's guard: these ask nothing of the network.
+  if (url.pathname === "/api/cores/jobs") return Response.json({ jobs: coreJobs() });
+  if (url.pathname === "/api/cores/cancel" && request.method === "POST") {
+    const body = await request.json().catch(() => null) as { core?: unknown } | null;
+    const cancelled = cancelCoreInstall(String(body?.core ?? ""));
+    return Response.json({ ok: cancelled }, { status: cancelled ? 200 : 409 });
+  }
   if (url.pathname === "/api/update") return await updateRoute(request);
   if (localOnlyGuarded(url.pathname)) {
     const refusal = await localOnlyRefusal();
@@ -612,7 +621,10 @@ async function scanD2SE(url: URL): Promise<Response> {
   if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
   const cores = new Map(imported.cores.map((core) => [core.version.toLowerCase(), core]));
   const importableMods = await installMods(state, imported.mods.map((mod) => mod.folder));
-  const mods = await Promise.all(imported.mods.map(async (mod) => {
+  // A folder still copying is half a mod (startCopy's `.partial`): the library shows its import, not a
+  // title that could be played.
+  const landed = imported.mods.filter((mod) => !mod.folder.endsWith(".partial"));
+  const mods = await Promise.all(landed.map(async (mod) => {
     const folder = `${layoutPath(imported.layout.root, imported.layout.folders.mods, mod.folder)}`;
     // exordium.mod.json wins over D2SE_SETUP.ini (readTitleSetup).
     const native = await readExordiumMod(folder);
@@ -971,6 +983,9 @@ async function setupRoute(request: Request): Promise<Response> {
   const action = typeof body?.action === "string" ? body.action : "";
   if (action === "job") {
     return Response.json({ job: typeof body?.job === "string" ? copyJob(body.job) : null });
+  }
+  if (action === "cancel") {
+    return Response.json({ job: typeof body?.job === "string" ? cancelCopy(body.job) : null });
   }
   if (action === "check" || action === "start") {
     const install = typeof body?.install === "string"
@@ -3509,6 +3524,12 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           ? await startJob(downloadsFolder, browseCache, id, file, title, target, downloadSettings)
           : await installDownloaded(downloadsFolder, browseCache, id, file, title, target, downloadSettings);
         return Response.json(job);
+      }
+      case "/api/browse/cancel": {
+        if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+        const body = await request.json().catch(() => null) as { id?: unknown; file?: unknown } | null;
+        const cancelled = cancelJob(String(body?.id ?? ""), String(body?.file ?? ""));
+        return Response.json({ ok: cancelled }, { status: cancelled ? 200 : 409 });
       }
       case "/api/browse/url-download": {
         if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });

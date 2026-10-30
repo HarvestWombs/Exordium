@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { findD2SE } from "@exordium/d2se";
-import { checkInstall, copyJob, createLibrary, isLibrary, startCopy } from "./library-setup.ts";
+import { cancelCopy, checkInstall, copyJob, createLibrary, isLibrary, startCopy } from "./library-setup.ts";
 
 async function until(id: string) {
   for (let i = 0; i < 200; i++) {
@@ -113,6 +113,44 @@ Deno.test("startCopy move puts the folder in place and removes the source", asyn
     assertEquals(await Deno.readTextFile(`${to}/exordium.mod.json`), "{}");
     // The source is gone (moved, not copied).
     assertEquals(await Deno.stat(from).then(() => true, () => false), false);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a cancelled copy leaves no partial folder and never touches its source", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const from = `${dir}/src/Big Mod`;
+  const to = `${dir}/lib/mods/Big Mod`;
+  try {
+    await Deno.mkdir(from, { recursive: true });
+    for (let i = 0; i < 200; i++) await Deno.writeTextFile(`${from}/${i}.txt`, "data");
+    const job = startCopy("mod", "cancel-running", [{ from, to }], { move: true });
+    cancelCopy(job.id);
+    assertEquals((await until(job.id)).state, "cancelled");
+    assertEquals(await Deno.stat(`${to}.partial`).then(() => true, () => false), false);
+    assertEquals(await Deno.stat(to).then(() => true, () => false), false);
+    assertEquals(await Deno.readTextFile(`${from}/199.txt`), "data");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a cancelled queued copy never starts, and the queue moves on", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  try {
+    for (const mod of ["First", "Second", "Third"]) {
+      await Deno.mkdir(`${dir}/src/${mod}`, { recursive: true });
+      await Deno.writeTextFile(`${dir}/src/${mod}/data.txt`, mod);
+    }
+    const [first, second, third] = ["First", "Second", "Third"].map((mod) =>
+      startCopy("mod", `cancel-${mod}`, [{ from: `${dir}/src/${mod}`, to: `${dir}/library/${mod}` }], { queue: true })
+    );
+    assertEquals(cancelCopy(second!.id)!.state, "cancelled");
+    assertEquals((await until(first!.id)).state, "done");
+    assertEquals((await until(third!.id)).state, "done");
+    assertEquals(await Deno.stat(`${dir}/library/Second`).then(() => true, () => false), false);
+    assertEquals(copyJob(second!.id)!.state, "cancelled");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

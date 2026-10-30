@@ -29,14 +29,10 @@ function formatMB(bytes: number): string {
  * installed into the library's cores folder under the name mods ask for.
  */
 export function Cores(
-  { root, onInstalled }: { root: string | null; onInstalled: (core: string) => void },
+  { root, onStarted }: { root: string | null; onStarted: () => void },
 ) {
   const [list, setList] = React.useState<{ configured: boolean; cores: CoreEntry[]; error?: string } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const reported = React.useRef(new Set<string>());
-  // The library's callback changes every render; the catalog is read only when the install changes.
-  const installedRef = React.useRef(onInstalled);
-  installedRef.current = onInstalled;
 
   const load = React.useCallback(async (refresh = false) => {
     const query = new URLSearchParams();
@@ -45,13 +41,6 @@ export function Cores(
     const response = await fetch(`/api/cores?${query}`);
     const body = await response.json();
     setList(body);
-    // A core that finished installing since the last look: the library reads it in.
-    for (const entry of body.cores as CoreEntry[]) {
-      if (entry.job?.state === "installed" && !reported.current.has(entry.core)) {
-        reported.current.add(entry.core);
-        installedRef.current(entry.core);
-      }
-    }
   }, [root]);
 
   React.useEffect(() => {
@@ -73,6 +62,7 @@ export function Cores(
       body: JSON.stringify({ root, core }),
     });
     if (!response.ok) setError((await response.json()).error ?? tr("Could not start the install."));
+    else onStarted();
     await load();
   }
 

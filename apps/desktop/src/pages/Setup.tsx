@@ -143,6 +143,7 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
             kind: "core",
             label: running.core,
             state: "copying",
+            cancelling: false,
             copied: running.received,
             total: running.total,
             error: null,
@@ -337,8 +338,8 @@ export function SetupPage(
                 {check && check.mods.length > 0
                   ? plural(
                     check.mods.length,
-                    "{count} D2SE mod was found in your install. The library offers to import it, reviewed in the converter first.",
-                    "{count} D2SE mods were found in your install. The library offers to import them, each reviewed in the converter first.",
+                    "{count} D2SE mod was found in your install. Use Import… in the library to bring it in, reviewed in the converter first.",
+                    "{count} D2SE mods were found in your install. Use Import… in the library to bring them in, each reviewed in the converter first.",
                   )
                   : tr("Install mods from Browse, or import a mod archive from disk.")}
               </p>

@@ -95,7 +95,9 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
         )}
         {problem && <p className="bad-text small">{problem}</p>}
         <div className="row-actions">
-          <button type="button" className="ghost" disabled={busy} onClick={onClose}>{tr("Cancel")}</button>
+          <button type="button" className="ghost" disabled={busy} onClick={onClose}>
+            {request.dismiss ?? tr("Cancel")}
+          </button>
           <button
             type="button"
             className={request.danger ? "ghost danger" : "ghost primary"}

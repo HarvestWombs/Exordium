@@ -12,6 +12,17 @@ export interface HelpSection {
   steps?: string[];
   /** A preformatted example: JSON, a folder layout. */
   code?: string;
+  /** A table of a file's fields. */
+  fields?: HelpField[];
+}
+
+export interface HelpField {
+  name: string;
+  type: string;
+  /** What applies when the field is left out; "required" when it can't be. */
+  default?: string;
+  example: string;
+  text: string;
 }
 
 export interface HelpTopicContent {
@@ -112,7 +123,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "The converter",
         paragraphs: [
-          "The converter shows the exordium.mod.json it will write: the fields on top, the JSON below, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move.",
+          "The converter shows the exordium.mod.json it will write: the fields on top, the JSON below, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move. Imports queue up and run one at a time in the background, so you can leave the converter while they finish: each mod shows in the library with a spinner, and hovering it shows its progress.",
         ],
       },
       {
@@ -210,7 +221,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Mod realms",
         paragraphs: [
-          "A mod that runs its own server names it in its exordium.mod.json (a realm with a gateway address). For that mod, Battle.net stays open and connects to the mod's realm.",
+          "A mod that runs its own server names it in its exordium.mod.json (a realm with a gateway address). For that mod, Battle.net stays open. Exordium does not point the game at the realm yet, so players set the gateway themselves for now.",
         ],
       },
       {
@@ -328,8 +339,16 @@ export const TOPICS: HelpTopicContent[] = [
     sections: [
       {
         paragraphs: [
-          "Put an exordium.mod.json in the mod's top folder. A mod with only a D2SE_SETUP.ini still works: the converter drafts a manifest from it on import, and the player reviews it there. Every field is optional except core, and every path is relative to the mod's folder.",
+          "Put a file named exordium.mod.json in the mod's top folder, beside its MPQs. It wins over a D2SE_SETUP.ini when a mod has both. A mod with only a D2SE_SETUP.ini still works: the converter drafts a manifest from it on import, and the player reviews it there.",
+          "Only core is required, so this is a complete manifest:",
         ],
+        code: `{
+  "core": "1.10f"
+}`,
+      },
+      {
+        heading: "A fuller one",
+        paragraphs: ["Leave out anything you don't need. Every field below is explained further down."],
         code: `{
   "title": "The Black Soul",
   "version": "0.9.0",
@@ -337,26 +356,439 @@ export const TOPICS: HelpTopicContent[] = [
   "author": "HarvestLabs",
   "description": "A darker Diablo II.",
   "readme": "Documentation/ReadMe.txt",
-  "art": { "banner": "art/banner.png", "icon": "art/icon.png", "portrait": "art/portrait.png" },
-  "links": [{ "label": "Discord", "url": "https://discord.gg/your-invite" }],
+  "art": {
+    "banner": "art/banner.png",
+    "icon": "art/icon.png",
+    "portrait": "art/portrait.png"
+  },
+  "links": [
+    { "label": "Discord", "url": "https://discord.gg/your-invite" }
+  ],
   "update": { "endpoint": "updates.json", "channel": "stable" },
-  "launch": { "renderer": "glide", "windowed": true, "direct": true, "txt": true, "plugY": false },
-  "loads": { "d2mod": true, "mpqs": ["BlackSoul.mpq"], "dlls": [] },
-  "realm": null
+  "launch": {
+    "renderer": "glide",
+    "windowed": true,
+    "direct": true,
+    "txt": true
+  },
+  "loads": {
+    "d2mod": true,
+    "mpqs": ["BlackSoul.mpq"],
+    "dlls": []
+  }
 }`,
       },
       {
-        heading: "The fields",
+        heading: "How to write the values",
+        paragraphs: [
+          "The file is JSON. Every field has a type, and the wrong type is usually ignored without a word, so check the Type column below.",
+        ],
+        fields: [
+          {
+            name: "text (string)",
+            type: "In double quotes",
+            example: `"1.10f"`,
+            text: 'Anything in quotes, numbers too: a version is "1.2", not 1.2. Without quotes it is ignored.',
+          },
+          {
+            name: "true or false (boolean)",
+            type: "No quotes",
+            example: "true",
+            text: 'Lower case, no quotes. "true" in quotes is text, and is ignored.',
+          },
+          {
+            name: "number",
+            type: "No quotes",
+            example: "3",
+            text: "Digits only.",
+          },
+          {
+            name: "list (array)",
+            type: "Square brackets",
+            example: `["One.mpq", "Two.mpq"]`,
+            text: "Values with commas between them. A list of one still needs its brackets, and [] is an empty list.",
+          },
+          {
+            name: "group (object)",
+            type: "Curly braces",
+            example: `{ "windowed": true }`,
+            text: "Named fields with commas between them.",
+          },
+          {
+            name: "null",
+            type: "No quotes",
+            example: "null",
+            text: "Not set, the same as leaving the field out.",
+          },
+        ],
         list: [
-          "**title**, **version**, **author**, **description**: what the library and the mod's page show. version is also what update checks compare against.",
-          "**core**: the patch the mod runs on, spelled as the cores are: 1.00 to 1.13d, such as 1.10f or 1.13c.",
-          "**readme**: the documentation page to list first (see Documentation).",
-          "**art**: the banner, icon and portrait (see Art & links).",
-          "**links**: buttons on the mod's page (see Art & links).",
-          "**update**: where to look for new versions (see Updates).",
-          "**launch**: how the game starts: renderer (glide, ddraw, d3d or opengl), windowed, noSound, direct, txt, hardcore, plugY, language, skipToBNet, seed and startAct. These are the mod's defaults; players can change them in Properties.",
-          "**loads**: what is loaded into the game: d2mod (D2Mod.dll), mpqs (your MPQs, lowest priority first) and dlls (other plugin DLLs, in load order).",
-          "**realm**: the mod's own server, if it has one (see Realms).",
+          "Double quotes only, and a comma between entries but none after the last.",
+          "No comments: JSON has none.",
+          "Paths are relative to the mod's folder and use forward slashes: art/icon.png.",
+          "A line break inside text is written \\n.",
+          "If the file isn't valid JSON, the mod's page says so and Play stays off until it's fixed.",
+        ],
+      },
+      {
+        heading: "Top-level fields",
+        fields: [
+          {
+            name: "core",
+            type: "text",
+            default: "required",
+            example: `"1.10f"`,
+            text:
+              "The patch the mod runs on, spelled exactly as the cores are: 1.00, 1.01, 1.02, 1.03, 1.04b, 1.04c, 1.05, 1.05b, 1.06, 1.06b, 1.07, 1.08, 1.09, 1.09b, 1.09d, 1.10f, 1.11, 1.11b, 1.12a, 1.13c or 1.13d.",
+          },
+          {
+            name: "title",
+            type: "text",
+            default: "the folder's name",
+            example: `"The Black Soul"`,
+            text: "The name the library shows.",
+          },
+          {
+            name: "version",
+            type: "text",
+            default: "none",
+            example: `"0.9.0"`,
+            text: "Shown under the title, and compared against your update feed. Keep the quotes.",
+          },
+          {
+            name: "author",
+            type: "text",
+            default: "none",
+            example: `"HarvestLabs"`,
+            text: "Shown as BY at the top of the mod's page.",
+          },
+          {
+            name: "description",
+            type: "text",
+            default: "none",
+            example: `"A darker Diablo II."`,
+            text: "Shown as About this mod on the mod's page. Line breaks are kept.",
+          },
+          {
+            name: "readme",
+            type: "text",
+            default: "none",
+            example: `"Documentation/ReadMe.txt"`,
+            text: "The file to list first under Documentation, or a web address (see Documentation).",
+          },
+          { name: "art", type: "group", default: "none", example: "see art", text: "The mod's pictures." },
+          {
+            name: "links",
+            type: "list of groups",
+            default: "[]",
+            example: "see links",
+            text: "Buttons on the mod's page.",
+          },
+          {
+            name: "update",
+            type: "group",
+            default: "none",
+            example: "see update",
+            text: "Where to look for new versions.",
+          },
+          { name: "launch", type: "group", default: "none", example: "see launch", text: "How the game starts." },
+          {
+            name: "loads",
+            type: "group",
+            default: "none",
+            example: "see loads",
+            text: "What is loaded into the game.",
+          },
+          {
+            name: "realm",
+            type: "group",
+            default: "none",
+            example: "see realm",
+            text: "The mod's own server, if it has one.",
+          },
+        ],
+      },
+      {
+        heading: "art",
+        paragraphs: ["Paths to images in the mod's folder. Sizes are on the Art & links page."],
+        code: `"art": {
+  "banner": "art/banner.png",
+  "icon": "art/icon.png",
+  "portrait": "art/portrait.png"
+}`,
+        fields: [
+          {
+            name: "banner",
+            type: "text",
+            default: "none",
+            example: `"art/banner.png"`,
+            text: "The header of the mod's page. PNG, JPEG, WebP, GIF or BMP.",
+          },
+          {
+            name: "icon",
+            type: "text",
+            default: "none",
+            example: `"art/icon.png"`,
+            text: "The sidebar, the game window and desktop shortcuts. PNG only: any other format is ignored.",
+          },
+          {
+            name: "portrait",
+            type: "text",
+            default: "none",
+            example: `"art/portrait.png"`,
+            text: "The card on the library home. PNG, JPEG, WebP, GIF or BMP.",
+          },
+        ],
+      },
+      {
+        heading: "links",
+        paragraphs: ["A list of groups, one per button. Square brackets around it, even for a single link."],
+        code: `"links": [
+  { "label": "Discord", "url": "https://discord.gg/your-invite" },
+  { "label": "Website", "url": "https://example.com" }
+]`,
+        fields: [
+          {
+            name: "url",
+            type: "text",
+            default: "required",
+            example: `"https://example.com"`,
+            text: "A web address starting with http:// or https://. Anything else is dropped.",
+          },
+          {
+            name: "label",
+            type: "text",
+            default: "the site's name",
+            example: `"Discord"`,
+            text: "The button's text.",
+          },
+        ],
+      },
+      {
+        heading: "update",
+        paragraphs: ["The feed's own format is on the Updates page."],
+        code: `"update": {
+  "endpoint": "https://example.com/mymod/updates.json",
+  "channel": "stable"
+}`,
+        fields: [
+          {
+            name: "endpoint",
+            type: "text",
+            default: "none",
+            example: `"updates.json"`,
+            text: "Your update feed: a web address, or a file path relative to the mod's folder.",
+          },
+          {
+            name: "channel",
+            type: "text",
+            default: `"stable"`,
+            example: `"testing"`,
+            text: "stable, testing or local. Anything else is ignored, with a warning. Players can change it.",
+          },
+          {
+            name: "automatic",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Fills in the Automatic updates switch in Properties. It does nothing else yet.",
+          },
+          {
+            name: "background",
+            type: "true or false",
+            default: "true",
+            example: "false",
+            text: "Fills in the Allow background downloads switch in Properties. It does nothing else yet.",
+          },
+        ],
+      },
+      {
+        heading: "launch",
+        paragraphs: ["The mod's defaults. Players can change them in Properties."],
+        code: `"launch": {
+  "renderer": "glide",
+  "windowed": true,
+  "direct": true,
+  "txt": true,
+  "plugY": false,
+  "language": "MOD",
+  "startAct": 1
+}`,
+        fields: [
+          {
+            name: "renderer",
+            type: "text",
+            default: `"glide"`,
+            example: `"ddraw"`,
+            text:
+              "glide, ddraw (DirectDraw), d3d (Direct3D) or opengl. Anything else falls back to glide, with a warning.",
+          },
+          {
+            name: "windowed",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Start in a window instead of full screen.",
+          },
+          {
+            name: "noSound",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Start without sound (-ns).",
+          },
+          {
+            name: "direct",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Read loose files from the mod's data folder before the MPQs (-direct). Always on with PlugY.",
+          },
+          {
+            name: "txt",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Compile data\\global\\excel\\*.txt into .bin at startup (-txt).",
+          },
+          {
+            name: "hardcore",
+            type: "true or false",
+            default: "true",
+            example: "false",
+            text: "Allow hardcore characters.",
+          },
+          {
+            name: "plugY",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Load PlugY (see Plugins and PlugY below).",
+          },
+          {
+            name: "language",
+            type: "text",
+            default: `"MOD"`,
+            example: `"DEU"`,
+            text:
+              "MOD uses the mod's own text and no language folder. Otherwise one of ENG, DEU, FRA, ESP, ITA, POR, POL, RUS, CHI, JPN, KOR or SIN.",
+          },
+          {
+            name: "skipToBNet",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Start at the Battle.net login (-skiptobnet). Needs a realm.",
+          },
+          {
+            name: "seed",
+            type: "number or text",
+            default: "none",
+            example: "12345",
+            text: "A map seed (-seed), digits only, up to 10 of them. Anything else is ignored.",
+          },
+          {
+            name: "startAct",
+            type: "number",
+            default: "none",
+            example: "2",
+            text: "New single-player characters start in this act: 1 to 5 (-act2 and so on).",
+          },
+        ],
+      },
+      {
+        heading: "loads",
+        paragraphs: [
+          "What the game loads besides its own files. A file named here that the mod doesn't ship is an error, and Play stays off.",
+        ],
+        code: `"loads": {
+  "d2mod": true,
+  "mpqs": ["BlackSoul.mpq", "BlackSoulPatch.mpq"],
+  "dlls": ["MyPlugin.dll"]
+}`,
+        fields: [
+          {
+            name: "mpqs",
+            type: "list of text",
+            default: "[]",
+            example: `["BlackSoul.mpq"]`,
+            text: "Your MPQs. The first has the lowest priority, the last wins. There is no limit on how many.",
+          },
+          {
+            name: "dlls",
+            type: "list of text",
+            default: "[]",
+            example: `["MyPlugin.dll"]`,
+            text: "Other plugin DLLs, loaded in this order.",
+          },
+          {
+            name: "d2mod",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Load D2Mod.dll from the mod's top folder.",
+          },
+          {
+            name: "nefex",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Load Nefex.dll from the mod's top folder.",
+          },
+          {
+            name: "d2extra",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Load D2Extra.dll from the mod's top folder.",
+          },
+        ],
+      },
+      {
+        heading: "realm",
+        paragraphs: ["Leave this out unless the mod has its own server. See Realms for what it does today."],
+        code: `"realm": {
+  "gateway": "realm.example.com",
+  "gatewayName": "My Realm",
+  "selected": "My Realm",
+  "timezone": "-5",
+  "port": "6112"
+}`,
+        fields: [
+          {
+            name: "gateway",
+            type: "text",
+            default: "none",
+            example: `"realm.example.com"`,
+            text: "The server's address. Setting it leaves Battle.net open for this mod.",
+          },
+          {
+            name: "gatewayName",
+            type: "text",
+            default: "none",
+            example: `"My Realm"`,
+            text: "The realm's name.",
+          },
+          {
+            name: "selected",
+            type: "text",
+            default: "none",
+            example: `"My Realm"`,
+            text: "The gateway to select.",
+          },
+          {
+            name: "timezone",
+            type: "text",
+            default: "none",
+            example: `"-5"`,
+            text: "Hours from UTC. Keep the quotes.",
+          },
+          {
+            name: "port",
+            type: "text",
+            default: "none",
+            example: `"6112"`,
+            text: "The server's port. Keep the quotes.",
+          },
         ],
       },
       {
@@ -452,7 +884,7 @@ export const TOPICS: HelpTopicContent[] = [
           "**portrait**: the card on the library home. 600x900 (2:3).",
         ],
         paragraphs: [
-          "Name them under art in exordium.mod.json, as paths in the mod's folder. PNG, JPEG, WebP, GIF, BMP and ICO all work. A mod without a portrait shows its icon and name over its banner; without either, its initials. Players can replace any of them in Properties, Artwork, without touching the mod.",
+          "Name them under art in exordium.mod.json, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, its initials. Players can replace any of them in Properties, Artwork, without touching the mod.",
         ],
       },
       {
@@ -513,7 +945,8 @@ export const TOPICS: HelpTopicContent[] = [
     sections: [
       {
         paragraphs: [
-          "Exordium closes official Battle.net for every mod, unless the mod names its own server. Give realm a gateway address, and Battle.net stays open for your mod and connects there; -skiptobnet goes straight to it.",
+          "Exordium closes official Battle.net for every mod, unless the mod names its own server. Give realm a gateway address, and Battle.net stays open for your mod; -skiptobnet goes straight to the login.",
+          "**Not done yet:** Exordium doesn't put these values into the game. It only checks that gateway is set, so the game still uses whichever gateway its registry already holds. Players have to point it at your server themselves for now.",
         ],
         code: `"realm": {
   "gateway": "realm.example.com",

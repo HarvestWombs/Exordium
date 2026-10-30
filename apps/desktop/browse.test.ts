@@ -1,9 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   archiveItemFromDoc,
+  cancelJob,
   cleanDescription,
   contentKeywords,
   executableInstallWarning,
+  jobList,
   keywordsFor,
   latestUploads,
   modDbBytes,
@@ -14,6 +16,7 @@ import {
   modDbItemsFromRss,
   modDbNextPage,
   parseArchiveListing,
+  startUrlJob,
 } from "./browse.ts";
 
 Deno.test("keywords come from the entry's own words", () => {
@@ -282,5 +285,42 @@ Deno.test("latest uploads come from the caches, newest first, one card per same-
     assertEquals(uploads[0]!.sourceLabel, "ModDB · Files");
   } finally {
     await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("cancelling a download stops it, leaves no .part file and forgets the job", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  let stopped = false;
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, () =>
+    new Response(
+      new ReadableStream({
+        async pull(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          controller.enqueue(new Uint8Array(1024));
+        },
+        cancel() {
+          stopped = true;
+        },
+      }),
+      { headers: { "content-type": "application/zip" } },
+    ));
+  try {
+    const url = `http://127.0.0.1:${server.addr.port}/Slow%20Mod.zip`;
+    const job = startUrlJob(dir, url, "Slow Mod", { modsDir: `${dir}/mods`, stagingDir: `${dir}/staging` });
+    for (let i = 0; i < 400 && job.received === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(job.received > 0);
+    assertEquals(cancelJob(job.id, job.file), true);
+    for (let i = 0; i < 400 && (await jobList(dir)).length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assertEquals(await jobList(dir), []);
+    const left = [...Deno.readDirSync(`${dir}/url/${job.id}`)].map((entry) => entry.name);
+    assertEquals(left, []);
+    assertEquals(cancelJob(job.id, job.file), false);
+    for (let i = 0; i < 400 && !stopped; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(stopped);
+  } finally {
+    await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
   }
 });

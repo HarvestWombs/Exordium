@@ -132,6 +132,21 @@ export async function catalog(refresh = false): Promise<Catalog | null> {
 }
 
 const jobs = new Map<string, CoreJob>();
+/** The downloads under way, so they can be stopped. Verifying and installing run to their end. */
+const aborts = new Map<CoreJob, AbortController>();
+
+/** The cores installing or installed this session. Asks nothing of the network, unlike the catalog. */
+export function coreJobs(): CoreJob[] {
+  return [...jobs.values()].map((job) => ({ ...job }));
+}
+
+/** Stops a core's download and forgets it. False once it is past downloading. */
+export function cancelCoreInstall(core: string): boolean {
+  const job = jobs.get(core.toLowerCase());
+  if (job?.state !== "downloading") return false;
+  aborts.get(job)?.abort();
+  return true;
+}
 
 async function isDir(path: string): Promise<boolean> {
   return (await Deno.stat(path).catch(() => null))?.isDirectory ?? false;
@@ -195,9 +210,11 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 async function runInstall(job: CoreJob, entry: CatalogCore, url: string, root: string, target: string, folder: string) {
   const archive = `${folder}/${entry.file}`;
   const staging = `${root}/.exordium-staging/core-${entry.core}`;
+  const abort = new AbortController();
+  aborts.set(job, abort);
   try {
     await Deno.mkdir(folder, { recursive: true });
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: abort.signal });
     if (!response.ok || !response.body) throw new Error(`The download failed (${response.status}).`);
     const chunks: Uint8Array[] = [];
     for await (const chunk of response.body) {
@@ -227,9 +244,14 @@ async function runInstall(job: CoreJob, entry: CatalogCore, url: string, root: s
     job.state = "installed";
     await Deno.remove(archive).catch(() => {});
   } catch (error) {
-    job.state = "failed";
-    job.error = (error as Error).message;
+    if (abort.signal.aborted) {
+      jobs.delete(job.core.toLowerCase());
+    } else {
+      job.state = "failed";
+      job.error = (error as Error).message;
+    }
   } finally {
+    aborts.delete(job);
     await Deno.remove(staging, { recursive: true }).catch(() => {});
     // The shared staging folder goes too once empty; a mod being unpacked keeps it.
     await Deno.remove(`${root}/.exordium-staging`).catch(() => {});

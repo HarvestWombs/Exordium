@@ -87,7 +87,7 @@ Use **Library, Import** or **Browse**: either way, the mod ends up in the librar
 - **From an archive**: a `.zip`, `.7z` or `.rar` as downloaded, unpacked into the library.
 - **From Browse**: Install downloads a mod, unpacks it and adds it to the library. Click a mod's picture to open its page on the site.
 
-**The converter** shows the `exordium.mod.json` it will write: the fields on top, and below them the JSON, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move. Imports queue up and run one at a time in the background, so you can close the converter while they finish.
+**The converter** shows the `exordium.mod.json` it will write: the fields on top, and below them the JSON, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move. Imports queue up and run one at a time in the background, so you can leave the converter while they finish: each mod shows in the library with a spinner, and hovering it shows its progress.
 
 **Plugins and PlugY.** Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY. A title with PlugY on uses the mod's own `PlugY.dll`; failing that, one you put in its core's folder (`library\cores\<core>`); failing that, the PlugY folder set in Settings, Launching. With none of those it starts without PlugY, with a warning. Some D2SE mods turn PlugY on without shipping it, because D2SE supplied one: give those a PlugY that way, or turn PlugY off in the title's Properties. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
 
@@ -116,7 +116,7 @@ If a box ever looks wrong, **Properties, Files, Rebuild Box** brings its links a
 ### Multiplayer and Battle.net
 
 - **TCP/IP** works as it always has: one player hosts, the others join by address. Every player needs the same mod at the same version.
-- **Mod realms.** A mod that runs its own server names it in its `exordium.mod.json`, as a realm with a gateway address. For that mod, Battle.net stays open and connects to the mod's realm.
+- **Mod realms.** A mod that runs its own server names it in its `exordium.mod.json`, as a realm with a gateway address. For that mod, Battle.net stays open. Exordium doesn't point the game at the realm yet, so players set the gateway themselves for now.
 - **Official Battle.net.** For every other mod, Exordium does not connect to Blizzard's Battle.net. The Battle.net button is greyed out, and every other way onto Battle.net is blocked. Modded games do not belong on Blizzard's servers.
 
 ### Video and windowed mode
@@ -226,7 +226,17 @@ Exordium starts games in an unusual way, which some antivirus software mistakes 
 
 ### The manifest
 
-A mod describes itself in `exordium.mod.json`, in its top folder. A mod with only a `D2SE_SETUP.ini` still works: the converter drafts a manifest from it on import, and the player reviews it there. Every field is optional except `core`, and every path is relative to the mod's folder.
+A mod describes itself in `exordium.mod.json`, in its top folder, beside its MPQs. It wins over a `D2SE_SETUP.ini` when a mod has both. A mod with only a `D2SE_SETUP.ini` still works: the converter drafts a manifest from it on import, and the player reviews it there.
+
+Only `core` is required, so this is a complete manifest:
+
+```json
+{
+  "core": "1.10f"
+}
+```
+
+A fuller one:
 
 ```json
 {
@@ -236,28 +246,127 @@ A mod describes itself in `exordium.mod.json`, in its top folder. A mod with onl
   "author": "HarvestLabs",
   "description": "A darker Diablo II.",
   "readme": "Documentation/ReadMe.txt",
-  "art": { "banner": "art/banner.png", "icon": "art/icon.png", "portrait": "art/portrait.png" },
-  "links": [{ "label": "Discord", "url": "https://discord.gg/your-invite" }],
+  "art": {
+    "banner": "art/banner.png",
+    "icon": "art/icon.png",
+    "portrait": "art/portrait.png"
+  },
+  "links": [
+    { "label": "Discord", "url": "https://discord.gg/your-invite" }
+  ],
   "update": { "endpoint": "updates.json", "channel": "stable" },
-  "launch": { "renderer": "glide", "windowed": true, "direct": true, "txt": true, "plugY": false },
-  "loads": { "d2mod": true, "mpqs": ["BlackSoul.mpq"], "dlls": [] },
-  "realm": null
+  "launch": {
+    "renderer": "glide",
+    "windowed": true,
+    "direct": true,
+    "txt": true
+  },
+  "loads": {
+    "d2mod": true,
+    "mpqs": ["BlackSoul.mpq"],
+    "dlls": []
+  }
 }
 ```
 
-The full schema is [`docs/exordium.mod.schema.json`](docs/exordium.mod.schema.json), with an example beside it.
+The machine-readable schema is [`docs/exordium.mod.schema.json`](docs/exordium.mod.schema.json), with an example beside it.
 
-| Field | What it is |
-|---|---|
-| `title`, `version`, `author`, `description` | What the library and the mod's page show. `version` is also what update checks compare against. |
-| `core` | The patch the mod runs on, spelled as the cores are: 1.00 to 1.13d, such as `1.10f` or `1.13c`. |
-| `readme` | The documentation page to list first ([Documentation](#documentation)). |
-| `art` | The banner, icon and portrait ([Art and links](#art-screenshots-and-links)). |
-| `links` | Buttons on the mod's page ([Art and links](#art-screenshots-and-links)). |
-| `update` | Where to look for new versions ([Updates](#updates)). |
-| `launch` | How the game starts: `renderer` (`glide`, `ddraw`, `d3d` or `opengl`), `windowed`, `noSound`, `direct`, `txt`, `hardcore`, `plugY`, `language`, `skipToBNet`, `seed` and `startAct`. These are the mod's defaults; players can change them in Properties. |
-| `loads` | What is loaded into the game: `d2mod` (D2Mod.dll), `mpqs` (your MPQs, lowest priority first) and `dlls` (other plugin DLLs, in load order). |
-| `realm` | The mod's own server, if it has one ([Realms](#realms)). |
+**How to write the values.** The file is JSON, and the wrong type is usually ignored without a word.
+
+| Type | Looks like | Notes |
+|---|---|---|
+| text (string) | `"1.10f"` | In double quotes, numbers too: a version is `"1.2"`, not `1.2`. |
+| true or false (boolean) | `true` | Lower case, no quotes. |
+| number | `3` | Digits only, no quotes. |
+| list (array) | `["One.mpq", "Two.mpq"]` | A list of one still needs its brackets. `[]` is empty. |
+| group (object) | `{ "windowed": true }` | Named fields with commas between them. |
+| null | `null` | Not set, the same as leaving the field out. |
+
+Use double quotes only, a comma between entries but none after the last, and no comments. Paths are relative to the mod's folder and use forward slashes. A line break inside text is written `\n`. If the file isn't valid JSON, the mod's page says so and Play stays off until it's fixed.
+
+**Top-level fields**
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `core` | text | required | `"1.10f"` | The patch the mod runs on, spelled exactly as the cores are: 1.00, 1.01, 1.02, 1.03, 1.04b, 1.04c, 1.05, 1.05b, 1.06, 1.06b, 1.07, 1.08, 1.09, 1.09b, 1.09d, 1.10f, 1.11, 1.11b, 1.12a, 1.13c or 1.13d. |
+| `title` | text | the folder's name | `"The Black Soul"` | The name the library shows. |
+| `version` | text | none | `"0.9.0"` | Shown under the title, and compared against your update feed. Keep the quotes. |
+| `author` | text | none | `"HarvestLabs"` | Shown as BY at the top of the mod's page. |
+| `description` | text | none | `"A darker Diablo II."` | Shown as About this mod on the mod's page. Line breaks are kept. |
+| `readme` | text | none | `"Documentation/ReadMe.txt"` | The file to list first under Documentation, or a web address ([Documentation](#documentation)). |
+| `art` | group | none | see below | The mod's pictures. |
+| `links` | list of groups | `[]` | see below | Buttons on the mod's page. |
+| `update` | group | none | see below | Where to look for new versions. |
+| `launch` | group | none | see below | How the game starts. |
+| `loads` | group | none | see below | What is loaded into the game. |
+| `realm` | group | none | see below | The mod's own server, if it has one. |
+
+**`art`** holds paths to images in the mod's folder. Sizes are under [Art and links](#art-screenshots-and-links).
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `banner` | text | none | `"art/banner.png"` | The header of the mod's page. PNG, JPEG, WebP, GIF or BMP. |
+| `icon` | text | none | `"art/icon.png"` | The sidebar, the game window and desktop shortcuts. PNG only: any other format is ignored. |
+| `portrait` | text | none | `"art/portrait.png"` | The card on the library home. PNG, JPEG, WebP, GIF or BMP. |
+
+**`links`** is a list of groups, one per button. Square brackets around it, even for a single link.
+
+```json
+"links": [
+  { "label": "Discord", "url": "https://discord.gg/your-invite" },
+  { "label": "Website", "url": "https://example.com" }
+]
+```
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `url` | text | required | `"https://example.com"` | A web address starting with `http://` or `https://`. Anything else is dropped. |
+| `label` | text | the site's name | `"Discord"` | The button's text. |
+
+**`update`** points at your feed. Its format is under [Updates](#updates).
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `endpoint` | text | none | `"updates.json"` | Your update feed: a web address, or a file path relative to the mod's folder. |
+| `channel` | text | `"stable"` | `"testing"` | `stable`, `testing` or `local`. Anything else is ignored, with a warning. Players can change it. |
+| `automatic` | true or false | `false` | `true` | Fills in the Automatic updates switch in Properties. It does nothing else yet. |
+| `background` | true or false | `true` | `false` | Fills in the Allow background downloads switch in Properties. It does nothing else yet. |
+
+**`launch`** holds the mod's defaults. Players can change them in Properties.
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `renderer` | text | `"glide"` | `"ddraw"` | `glide`, `ddraw` (DirectDraw), `d3d` (Direct3D) or `opengl`. Anything else falls back to `glide`, with a warning. |
+| `windowed` | true or false | `false` | `true` | Start in a window instead of full screen. |
+| `noSound` | true or false | `false` | `true` | Start without sound (`-ns`). |
+| `direct` | true or false | `false` | `true` | Read loose files from the mod's `data` folder before the MPQs (`-direct`). Always on with PlugY. |
+| `txt` | true or false | `false` | `true` | Compile `data\global\excel\*.txt` into `.bin` at startup (`-txt`). |
+| `hardcore` | true or false | `true` | `false` | Allow hardcore characters. |
+| `plugY` | true or false | `false` | `true` | Load PlugY (see below). |
+| `language` | text | `"MOD"` | `"DEU"` | `MOD` uses the mod's own text and no language folder. Otherwise one of ENG, DEU, FRA, ESP, ITA, POR, POL, RUS, CHI, JPN, KOR or SIN. |
+| `skipToBNet` | true or false | `false` | `true` | Start at the Battle.net login (`-skiptobnet`). Needs a realm. |
+| `seed` | number or text | none | `12345` | A map seed (`-seed`), digits only, up to 10 of them. Anything else is ignored. |
+| `startAct` | number | none | `2` | New single-player characters start in this act: 1 to 5 (`-act2` and so on). |
+
+**`loads`** is what the game loads besides its own files. A file named here that the mod doesn't ship is an error, and Play stays off.
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `mpqs` | list of text | `[]` | `["BlackSoul.mpq"]` | Your MPQs. The first has the lowest priority, the last wins. There is no limit on how many. |
+| `dlls` | list of text | `[]` | `["MyPlugin.dll"]` | Other plugin DLLs, loaded in this order. |
+| `d2mod` | true or false | `false` | `true` | Load `D2Mod.dll` from the mod's top folder. |
+| `nefex` | true or false | `false` | `true` | Load `Nefex.dll` from the mod's top folder. |
+| `d2extra` | true or false | `false` | `true` | Load `D2Extra.dll` from the mod's top folder. |
+
+**`realm`** is only for a mod with its own server ([Realms](#realms)). Every value is text, so `timezone` and `port` keep their quotes.
+
+| Field | Type | If left out | Example | What it does |
+|---|---|---|---|---|
+| `gateway` | text | none | `"realm.example.com"` | The server's address. Setting it leaves Battle.net open for this mod. |
+| `gatewayName` | text | none | `"My Realm"` | The realm's name. |
+| `selected` | text | none | `"My Realm"` | The gateway to select. |
+| `timezone` | text | none | `"-5"` | Hours from UTC. |
+| `port` | text | none | `"6112"` | The server's port. |
 
 **Plugins and PlugY.** If the mod uses PlugY, ship `PlugY.dll` at the mod's root, or in a `PlugY` folder as D2SE mods do. Exordium does not provide one. Without it, a player's own PlugY (in the core's folder, or the PlugY folder in Settings) is used if they have one; otherwise the game starts without PlugY, with a warning. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.
 
@@ -313,7 +422,7 @@ Two layouts that work:
 | `icon` | The sidebar, and the game's own icon in the taskbar and on desktop shortcuts. | Square, 256x256 |
 | `portrait` | The card on the library home. | 600x900 (2:3) |
 
-Name them under `art` in `exordium.mod.json`, as paths in the mod's folder. PNG, JPEG, WebP, GIF, BMP and ICO all work. A mod without a portrait shows its icon and name over its banner; without either, it shows its initials. Players can replace any of them in Properties, Artwork, without touching the mod.
+Name them under `art` in `exordium.mod.json`, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, it shows its initials. Players can replace any of them in Properties, Artwork, without touching the mod.
 
 **Screenshots.** Images (`.png`, `.jpg`, `.gif`, `.bmp`, `.webp`) in a `Screenshots` folder at the mod's root show in the mod's Screenshots tab, and a few of them on its Overview.
 
@@ -351,7 +460,9 @@ See [`docs/exordium.update.example.json`](docs/exordium.update.example.json).
 
 ### Realms
 
-Exordium closes official Battle.net for every mod, unless the mod names its own server. Give `realm` a gateway address, and Battle.net stays open for your mod and connects there; `-skiptobnet` goes straight to it.
+Exordium closes official Battle.net for every mod, unless the mod names its own server. Give `realm` a gateway address, and Battle.net stays open for your mod; `-skiptobnet` goes straight to the login.
+
+**Not done yet:** Exordium doesn't put these values into the game. It only checks that `gateway` is set, so the game still uses whichever gateway its registry already holds. Players have to point it at your server themselves for now.
 
 ```json
 "realm": {

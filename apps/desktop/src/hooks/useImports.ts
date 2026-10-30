@@ -1,23 +1,24 @@
 import { tr } from "../lib/i18n.ts";
 import * as React from "react";
-import type { CatalogCore, Scan } from "../types.ts";
+import type { Scan } from "../types.ts";
 
 /**
  * Bringing things into the library from the library itself: a mod from an archive or a folder
- * (Library → Import), and a missing core from a mod's page (Install core), with its download progress.
+ * (Library → Import), and a missing core from a mod's page (Install core).
  */
 export function useImports(
-  { root, load, openTitle, say, reportError }: {
+  { root, load, openTitle, say, reportError, onCoreStarted }: {
     root: string | null;
     load: (root: string) => Promise<boolean>;
     openTitle: (key: string) => void;
     say: (message: string) => void;
     reportError: (err: unknown) => void;
+    /** A core's install has started, for the library to follow. */
+    onCoreStarted: () => void;
   },
 ) {
   // Import folder: one folder chosen anywhere on disk, reviewed in the converter.
   const [folderImport, setFolderImport] = React.useState<Scan["importableMods"] | null>(null);
-  const [coreJob, setCoreJob] = React.useState<{ core: string; received: number; total: number } | null>(null);
 
   /** An archive (.zip, .7z, .rar…) unpacked into the library; its page opens once it is in. */
   async function importArchive(): Promise<boolean> {
@@ -68,7 +69,6 @@ export function useImports(
 
   async function installCore(core: string) {
     if (!root) return;
-    setCoreJob({ core, received: 0, total: 0 });
     try {
       const response = await fetch("/api/cores", {
         method: "POST",
@@ -77,24 +77,11 @@ export function useImports(
       });
       const started = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(started.error ?? tr("Core {core} could not be installed.", { core }));
-      // Follow the download until the core is in the library, then read the library again.
-      for (;;) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        const list = await (await fetch(`/api/cores?root=${encodeURIComponent(root)}`)).json();
-        const entry = ((list.cores ?? []) as CatalogCore[]).find((c) => c.core.toLowerCase() === core.toLowerCase());
-        const job = entry?.job;
-        if (job) setCoreJob({ core, received: job.received, total: job.total });
-        if (entry?.status === "installed" || !job || job.state === "installed") break;
-        if (job.state === "failed") throw new Error(job.error ?? tr("The download failed."));
-      }
-      await load(root);
-      say(tr("Core {core} is installed.", { core }));
+      onCoreStarted();
     } catch (err) {
       reportError(err);
-    } finally {
-      setCoreJob(null);
     }
   }
 
-  return { folderImport, setFolderImport, coreJob, importArchive, importFolder, installCore };
+  return { folderImport, setFolderImport, importArchive, importFolder, installCore };
 }

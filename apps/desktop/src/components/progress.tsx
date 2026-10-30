@@ -34,8 +34,10 @@ export function CopyProgress({ job, label }: { job: CopyJob; label?: string | un
       <span className="muted small">
         {job.state === "failed"
           ? job.error
-          : `${label ?? (job.state === "done" ? tr("Copied") : tr("Copying"))} — ${formatSize(job.copied)} of ${
-            formatSize(job.total)
+          : `${label ?? (job.state === "done" ? tr("Copied") : tr("Copying"))}${
+            job.total > 0
+              ? ` — ${tr("{done} of {total}", { done: formatSize(job.copied), total: formatSize(job.total) })}`
+              : ""
           }`}
       </span>
     </div>

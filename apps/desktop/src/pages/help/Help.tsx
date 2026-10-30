@@ -3,7 +3,7 @@ import * as React from "react";
 import type { ReactNode } from "react";
 import { SettingsHead } from "../../components/settings-rows.tsx";
 import { About } from "./About.tsx";
-import { FAQ, type FaqEntry, type HelpSection, TOPICS } from "./content.ts";
+import { FAQ, type FaqEntry, type HelpField, type HelpSection, TOPICS } from "./content.ts";
 
 type Page = string; // a topic id, "faq" or "about"
 
@@ -42,6 +42,7 @@ function sectionText(section: HelpSection): string[] {
     ...(section.list ?? []),
     ...(section.steps ?? []),
     ...(section.code ? [section.code] : []),
+    ...(section.fields ?? []).flatMap((field) => [field.name, field.text]),
   ];
 }
 
@@ -103,7 +104,40 @@ function Section({ section, id }: { section: HelpSection; id: string }) {
         </ol>
       )}
       {section.code && <pre className="help-code">{section.code}</pre>}
+      {section.fields && <FieldTable fields={section.fields} />}
     </section>
+  );
+}
+
+function FieldTable({ fields }: { fields: HelpField[] }) {
+  const defaults = fields.some((field) => field.default !== undefined);
+  return (
+    <table className="help-fields">
+      <thead>
+        <tr>
+          <th>{tr("Field")}</th>
+          <th>{tr("Type")}</th>
+          {defaults && <th>{tr("If left out")}</th>}
+          <th>{tr("Example")}</th>
+          <th>{tr("What it does")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {fields.map((field) => (
+          <tr key={field.name}>
+            <td>
+              <code>{field.name}</code>
+            </td>
+            <td>{field.type}</td>
+            {defaults && <td className={field.default === "required" ? "required" : undefined}>{field.default}</td>}
+            <td>
+              <code>{field.example}</code>
+            </td>
+            <td>{rich(field.text)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

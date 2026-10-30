@@ -137,12 +137,16 @@ export interface CopyJob {
   /** What is copied: "Game files", a core's version, a mod's folder. */
   label: string;
   /** `queued`: waiting for the copies ahead of it (startCopy's `queue`). */
-  state: "queued" | "copying" | "done" | "failed";
+  state: "queued" | "copying" | "done" | "failed" | "cancelled";
+  /** Cancel was asked for: the copy stops before its next file and removes what it wrote. */
+  cancelling: boolean;
   copied: number;
   total: number;
   error: string | null;
   startedAt: string;
 }
+
+class CopyCancelled extends Error {}
 
 const jobs = new Map<string, CopyJob>();
 /** Queued copies run one after another, so several large mods do not fight over the disk. */
@@ -157,10 +161,23 @@ export function copyJob(id: string): CopyJob | null {
   return job ? { ...job } : null;
 }
 
+/**
+ * Stops a copy: one still waiting never starts, and one running stops before its next file (a file
+ * under way finishes first). Only the `.partial` copy is removed, so the source is never touched.
+ */
+export function cancelCopy(id: string): CopyJob | null {
+  const job = jobs.get(id);
+  if (!job) return null;
+  if (job.state === "queued") job.state = "cancelled";
+  else if (job.state === "copying") job.cancelling = true;
+  return { ...job };
+}
+
 async function copyTree(from: string, to: string, job: CopyJob): Promise<void> {
   const info = await Deno.lstat(from);
   if (info.isSymlink) return;
   if (info.isFile) {
+    if (job.cancelling) throw new CopyCancelled();
     // The OS copy (CopyFileW on Windows): far faster than a userspace read/write loop, and it keeps
     // the file's timestamps. Progress is per file rather than per chunk, which is fine for mod files.
     await Deno.copyFile(from, to);
@@ -199,6 +216,7 @@ export function startCopy(
     kind,
     label,
     state: options.queue ? "queued" : "copying",
+    cancelling: false,
     copied: 0,
     total: 0,
     error: null,
@@ -206,6 +224,7 @@ export function startCopy(
   };
   jobs.set(job.id, job);
   const run = async () => {
+    if (job.state === "cancelled") return;
     job.state = "copying";
     const todo: { from: string; to: string; bytes: number }[] = [];
     try {
@@ -221,6 +240,7 @@ export function startCopy(
         todo.push({ from, to, bytes });
       }
       for (const { from, to, bytes } of todo) {
+        if (job.cancelling) throw new CopyCancelled();
         await Deno.mkdir(to.replace(/\/[^/]+$/, ""), { recursive: true });
         if (options.move && await Deno.rename(from, to).then(() => true, () => false)) {
           // Same drive: an instant rename moved it in one step, no bytes streamed.
@@ -238,6 +258,10 @@ export function startCopy(
       job.state = "done";
     } catch (error) {
       for (const { to } of todo) await Deno.remove(`${to}.partial`, { recursive: true }).catch(() => {});
+      if (error instanceof CopyCancelled) {
+        job.state = "cancelled";
+        return;
+      }
       job.state = "failed";
       job.error = (error as Error).message;
     }
