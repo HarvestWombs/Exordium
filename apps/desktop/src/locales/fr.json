@@ -240,8 +240,6 @@
   "Files, addons, and mods": "Fichiers, addons et mods",
   "Install game versions": "Installer des versions du jeu",
   "Downloads": "Téléchargements",
-  " · active": " · actif",
-  "Queue and installs": "File d'attente et installations",
   "FILTERS": "FILTRES",
   "Reading ModDB…": "Lecture de ModDB…",
   "Reading sources…": "Lecture des sources…",
@@ -726,5 +724,9 @@
   "Remind me to import D2SE mods": "Me rappeler d'importer les mods D2SE",
   "A reminder when Exordium opens, while your Diablo II install has mods not in the library.": "Un rappel à l'ouverture d'Exordium, tant que votre installation de Diablo II contient des mods absents de la bibliothèque.",
   "Notification size": "Taille des notifications",
-  "How large notifications appear.": "La taille d'affichage des notifications."
+  "How large notifications appear.": "La taille d'affichage des notifications.",
+  "Home": "Accueil",
+  "Collections": "Collections",
+  "{count} download|{count} downloads": "{count} téléchargement|{count} téléchargements",
+  "No titles in a collection yet. Right-click a title and choose Add to.": "Aucun titre dans une collection pour l'instant. Faites un clic droit sur un titre et choisissez Ajouter à."
 }

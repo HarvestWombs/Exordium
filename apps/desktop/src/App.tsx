@@ -8,7 +8,7 @@ import { ConfirmDialog, NameDialog } from "./components/dialogs.tsx";
 import { TitleMenu } from "./components/menus.tsx";
 import { SectionMenu } from "./components/SectionMenu.tsx";
 import { TitleRow } from "./components/sidebar.tsx";
-import { type AppView, TopBar } from "./components/TopBar.tsx";
+import { type AppView, type LibraryPage, TopBar } from "./components/TopBar.tsx";
 import { ResizeHandles } from "./components/WindowChrome.tsx";
 import { useAppWindow, usePageHousekeeping } from "./hooks/useAppWindow.ts";
 import { useCollections } from "./hooks/useCollections.ts";
@@ -35,6 +35,7 @@ import { ImportPage } from "./pages/title/ImportPage.tsx";
 import { TitlePage } from "./pages/title/TitlePage.tsx";
 import { applyUpdate } from "./pages/Updates.tsx";
 import type { Incoming } from "./lib/incoming.ts";
+import type { BrowseView } from "./pages/browse/types.ts";
 import type {
   Collection,
   ConfirmRequest,
@@ -76,7 +77,8 @@ export function App() {
   // The D2SE reminder, closed with ×: back next time Exordium opens.
   const [reminderClosed, setReminderClosed] = React.useState(false);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
-  const [browseStart, setBrowseStart] = React.useState<"archive" | "moddb" | "cores">("archive");
+  const [browsePage, setBrowsePage] = React.useState<BrowseView>("archive");
+  const [libraryPage, setLibraryPage] = React.useState<LibraryPage>("home");
   // What Browse opens filtered to: a Latest uploads card opens its upload.
   const [browseSearch, setBrowseSearch] = React.useState("");
   const [converterOpen, setConverterOpen] = React.useState(false);
@@ -250,6 +252,16 @@ export function App() {
     onSettled: incomingSettled,
   });
   const incoming = [...imports, ...downloads, ...cores];
+  const downloading = [...downloads, ...cores];
+  const measured = downloading.flatMap((item) => item.percent === null ? [] : [item.percent]);
+  const overall = measured.length ? Math.floor(measured.reduce((sum, each) => sum + each) / measured.length) : null;
+  const downloadStatus = downloading.length === 0 ? null : {
+    text: downloading.length === 1
+      ? `${downloading[0]!.title} · ${downloading[0]!.status}`
+      : plural(downloading.length, "{count} download", "{count} downloads") +
+        (overall === null ? "" : ` · ${overall}%`),
+    percent: overall,
+  };
   const reviewMods = folderImport ?? (converterOpen ? scan?.importableMods ?? null : null);
   React.useEffect(() => {
     if (folderImport) setReviewShown(true);
@@ -326,11 +338,16 @@ export function App() {
       setReviewShown(false);
       setImportPage(null);
     }
-    if (next === "browse") {
-      setBrowseStart("archive");
-      setBrowseSearch("");
-    }
     setView(next);
+  }
+  function openLibrary(page: LibraryPage) {
+    setLibraryPage(page);
+    showView("library");
+  }
+  function openBrowse(page: BrowseView) {
+    setBrowsePage(page);
+    setBrowseSearch("");
+    showView("browse");
   }
 
   const readyUpdate = status?.update.phase === "ready" && status.update.version &&
@@ -352,10 +369,14 @@ export function App() {
       {desktop && !maximized && <ResizeHandles />}
       <TopBar
         view={view}
+        libraryPage={libraryPage}
+        browsePage={browsePage}
         libraryReady={root !== null}
         desktop={desktop}
         maximized={maximized}
         onView={showView}
+        onLibrary={openLibrary}
+        onBrowse={openBrowse}
         onMaximized={setMaximized}
         onToggleMaximize={() => void toggleMaximize()}
       />
@@ -431,7 +452,9 @@ export function App() {
 
       {view === "browse" && (
         <Browse
-          initialView={browseStart}
+          view={browsePage}
+          onView={setBrowsePage}
+          cores={cores}
           initialSearch={browseSearch}
           installed={new Set(titles.flatMap((t) => [titleKey(t.title), titleKey(t.folder)]))}
           root={root}
@@ -459,7 +482,7 @@ export function App() {
                 await load(fresh.root);
               }
               if (next === "cores") {
-                setBrowseStart("cores");
+                setBrowsePage("cores");
                 setView("browse");
               }
             })();
@@ -522,12 +545,15 @@ export function App() {
             : gridHome && scan
             ? (
               <LibraryGrid
-                shelves={shownSections.map((section) => ({
+                shelves={shownSections.filter((section) => libraryPage === "home" || section.collection).map((
+                  section,
+                ) => ({
                   id: section.id,
                   label: section.label,
                   titles: section.titles,
                 }))}
-                before={sectionsOn && !soloSection && status?.appSettings.settings.library.showLatestUploads !== false
+                before={libraryPage === "home" && sectionsOn && !soloSection &&
+                    status?.appSettings.settings.library.showLatestUploads !== false
                   ? (
                     <LatestUploads
                       updates={pendingUpdates(titles, hidden, root, artVersion)}
@@ -539,7 +565,7 @@ export function App() {
                           }
                           return;
                         }
-                        setBrowseStart(upload.source);
+                        setBrowsePage(upload.source);
                         setBrowseSearch(upload.title);
                         setView("browse");
                       }}
@@ -547,7 +573,9 @@ export function App() {
                   )
                   : null}
                 onImport={() => setImportOpen(true)}
-                incoming={incoming}
+                collectionsPage={libraryPage === "collections"}
+                onNewCollection={() => newCollection()}
+                incoming={libraryPage === "home" ? incoming : []}
                 onOpenImport={openImport}
                 onCancelImport={askCancel}
                 root={root}
@@ -622,6 +650,8 @@ export function App() {
       />
       <StatusBar
         update={readyUpdate}
+        download={downloadStatus}
+        onDownloads={() => openBrowse("downloads")}
         activity={activity ??
           (scanning
             ? tr("Reading the install…")

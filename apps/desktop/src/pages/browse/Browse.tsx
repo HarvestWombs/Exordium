@@ -16,6 +16,7 @@ import {
   titleFromUrl,
   titleKey,
 } from "./browse-util.ts";
+import type { Incoming } from "../../lib/incoming.ts";
 import type { ArchiveSort, BrowseView, Group, Item, Job, ModDbItem, ModDbKind, Source, Throughput } from "./types.ts";
 
 /**
@@ -24,28 +25,31 @@ import type { ArchiveSort, BrowseView, Group, Item, Job, ModDbItem, ModDbKind, S
  * Installing is one step: download, unpack with progress, move into MODS, delete the archive.
  */
 export function Browse(
-  { initialView, initialSearch, installed, root, onInstalled, onCoreStarted, onDownloadStarted, onExpectDraft }: {
-    /** The tab to open on: setup sends players without cores to Cores, a Latest uploads card to its source. */
-    initialView?: "archive" | "moddb" | "cores";
-    /** What the search box starts with: a Latest uploads card opens on its upload. */
-    initialSearch?: string;
-    installed: Set<string>;
-    /** The D2SE install mods are installed into (its MODS folder). */
-    root: string | null;
-    /** A mod was installed as MODS\<name>: rescan and show it. */
-    onInstalled: (name: string) => void;
-    /** A core's install has started, for the library to follow. */
-    onCoreStarted: () => void;
-    /** A download has started, for the library to follow. */
-    onDownloadStarted: () => void;
-    /** Once this download is in, draft its exordium.mod.json. */
-    onExpectDraft: (key: string) => void;
-  },
+  { view, onView, initialSearch, installed, root, cores, onInstalled, onCoreStarted, onDownloadStarted, onExpectDraft }:
+    {
+      /** The page showing, which the top bar's menus choose too. */
+      view: BrowseView;
+      onView: (view: BrowseView) => void;
+      /** What the search box starts with: a Latest uploads card opens on its upload. */
+      initialSearch?: string;
+      installed: Set<string>;
+      /** The D2SE install mods are installed into (its MODS folder). */
+      root: string | null;
+      /** Cores on their way in, for Downloads to list. */
+      cores: Incoming[];
+      /** A mod was installed as MODS\<name>: rescan and show it. */
+      onInstalled: (name: string) => void;
+      /** A core's install has started, for the library to follow. */
+      onCoreStarted: () => void;
+      /** A download has started, for the library to follow. */
+      onDownloadStarted: () => void;
+      /** Once this download is in, draft its exordium.mod.json. */
+      onExpectDraft: (key: string) => void;
+    },
 ) {
   const [data, setData] = React.useState<{ sources: Source[]; groups: Group[]; items: Item[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [view, setView] = React.useState<BrowseView>(initialView ?? "archive");
   const [archiveSort, setArchiveSort] = React.useState<ArchiveSort>("all");
   const [search, setSearch] = React.useState(initialSearch ?? "");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -288,13 +292,13 @@ export function Browse(
               : startInstall(installRequest, installRoot, importMetadata)}
         />
       )}
-      <aside className="browse-filters">
+      <aside className="browse-filters" hidden={view === "downloads"}>
         <section className="source-switch">
           <h2 className="filters-title">{tr("SOURCES")}</h2>
           <button
             type="button"
             className={view === "archive" ? "source-card on" : "source-card"}
-            onClick={() => setView("archive")}
+            onClick={() => onView("archive")}
           >
             <span>Internet Archive</span>
             <small>
@@ -308,7 +312,7 @@ export function Browse(
           <button
             type="button"
             className={view === "moddb" ? "source-card on" : "source-card"}
-            onClick={() => setView("moddb")}
+            onClick={() => onView("moddb")}
           >
             <span>ModDB</span>
             <small>{tr("Files, addons, and mods")}</small>
@@ -316,18 +320,10 @@ export function Browse(
           <button
             type="button"
             className={view === "cores" ? "source-card on" : "source-card"}
-            onClick={() => setView("cores")}
+            onClick={() => onView("cores")}
           >
             <span>{tr("Cores")}</span>
             <small>{tr("Install game versions")}</small>
-          </button>
-          <button
-            type="button"
-            className={view === "downloads" ? "source-card on" : "source-card"}
-            onClick={() => setView("downloads")}
-          >
-            <span>{tr("Downloads")}{busy ? tr(" · active") : ""}</span>
-            <small>{tr("Queue and installs")}</small>
           </button>
         </section>
 
@@ -540,6 +536,7 @@ export function Browse(
         {view === "cores" || view === "moddb" ? null : view === "downloads"
           ? (
             <Downloads
+              cores={cores}
               jobs={jobs}
               rates={rates}
               root={root}

@@ -27,3 +27,4 @@ native/loader/probes/
 
 # Left behind by deno desktop builds.
 *.tmp-*
+/apps/desktop/Exordium.dll

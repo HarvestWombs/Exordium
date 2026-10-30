@@ -1,4 +1,5 @@
 import { formatTime, tr } from "../../lib/i18n.ts";
+import type { Incoming } from "../../lib/incoming.ts";
 import { JobResult } from "./JobResult.tsx";
 import { ACTIVE, baseName, formatBytes, formatDuration, formatRate, jobLabel, jobProgress } from "./browse-util.ts";
 import type { Job, Throughput } from "./types.ts";
@@ -8,8 +9,10 @@ import type { Job, Throughput } from "./types.ts";
  * the numbers beside it, the job running now, then everything finished this session.
  */
 export function Downloads(
-  { jobs, rates, root, onInstall, onInstalled, onOpen }: {
+  { jobs, cores, rates, root, onInstall, onInstalled, onOpen }: {
     jobs: Job[];
+    /** Cores on their way in, which are not jobs of this list. */
+    cores: Incoming[];
     rates: Throughput | null;
     root: string | null;
     onInstall: (job: Job) => void;
@@ -20,6 +23,7 @@ export function Downloads(
   const history = rates?.history ?? [];
   const current = history[history.length - 1] ?? { net: 0, disk: 0 };
   const active = jobs.filter((job) => ACTIVE.includes(job.state));
+  const inProgress = active.length + cores.length;
   const waiting = jobs.filter((job) => job.state === "downloaded" || job.state === "failed");
   const done = jobs.filter((job) => job.state === "installed").sort((a, b) =>
     (b.endedAt ?? "").localeCompare(a.endedAt ?? "")
@@ -59,7 +63,7 @@ export function Downloads(
 
       <div className="dl-head">
         <h2 className="eyebrow">
-          {active.length ? tr("IN PROGRESS ({count})", { count: active.length }) : tr("NOTHING IN PROGRESS")}
+          {inProgress ? tr("IN PROGRESS ({count})", { count: inProgress }) : tr("NOTHING IN PROGRESS")}
         </h2>
         <button type="button" className="link-button" onClick={() => onOpen({ what: "downloads" })}>
           {tr("Open downloads folder")}
@@ -71,6 +75,21 @@ export function Downloads(
           job={job}
           rate={job.state === "downloading" ? current.net : current.disk}
         />
+      ))}
+
+      {cores.map((core) => (
+        <div className="dl-row active" key={core.key}>
+          <div className="dl-main">
+            <span className="dl-title">{core.title}</span>
+            <span className="muted small">{core.detail ? `${core.status} — ${core.detail}` : core.status}</span>
+            <span className="progress wide">
+              <span
+                className={core.percent === null ? "indeterminate" : undefined}
+                style={{ width: `${core.percent ?? 100}%` }}
+              />
+            </span>
+          </div>
+        </div>
       ))}
 
       {waiting.length > 0 && (

@@ -240,8 +240,6 @@
   "Files, addons, and mods": "Archivos, addons y mods",
   "Install game versions": "Instalar versiones del juego",
   "Downloads": "Descargas",
-  " · active": " · activo",
-  "Queue and installs": "Cola e instalaciones",
   "FILTERS": "FILTROS",
   "Reading ModDB…": "Leyendo ModDB…",
   "Reading sources…": "Leyendo las fuentes…",
@@ -421,7 +419,7 @@
   "{files} files of its own · archives load in this order, highest priority last.": "{files} archivos propios · los MPQ se cargan en este orden, la prioridad más alta al final.",
   "Priority": "Prioridad",
   "Kind": "Tipo",
-  "Archive": "Archivo MPQ",
+  "Archive": "Archivo",
   "ACTIONS": "ACCIONES",
   "Create Backup": "Crear copia de seguridad",
   "Rebuilding…": "Reconstruyendo…",
@@ -726,5 +724,9 @@
   "Remind me to import D2SE mods": "Recordarme importar mods de D2SE",
   "A reminder when Exordium opens, while your Diablo II install has mods not in the library.": "Un recordatorio al abrir Exordium, mientras tu instalación de Diablo II tenga mods que no están en la biblioteca.",
   "Notification size": "Tamaño de las notificaciones",
-  "How large notifications appear.": "El tamaño con el que aparecen las notificaciones."
+  "How large notifications appear.": "El tamaño con el que aparecen las notificaciones.",
+  "Home": "Inicio",
+  "Collections": "Colecciones",
+  "{count} download|{count} downloads": "{count} descarga|{count} descargas",
+  "No titles in a collection yet. Right-click a title and choose Add to.": "Aún no hay títulos en ninguna colección. Haz clic derecho en un título y elige Añadir a."
 }

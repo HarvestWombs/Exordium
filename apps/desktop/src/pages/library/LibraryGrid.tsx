@@ -82,6 +82,8 @@ export function LibraryGrid(
     incoming,
     onOpenImport,
     onCancelImport,
+    collectionsPage,
+    onNewCollection,
     root,
     art,
     running,
@@ -100,6 +102,9 @@ export function LibraryGrid(
     incoming: Incoming[];
     onOpenImport: (key: string) => void;
     onCancelImport: (item: Incoming) => void;
+    /** The Collections page: the same shelves, the player's collections only. */
+    collectionsPage: boolean;
+    onNewCollection: () => void;
     root: string | null;
     art: number;
     running: Set<string>;
@@ -136,11 +141,19 @@ export function LibraryGrid(
   return (
     <div className="library-grid" style={{ "--capsule": `${CAPSULE_SIZES[size]}px` } as React.CSSProperties}>
       <div className="grid-head">
-        <h1>{tr("Library")}</h1>
+        <h1>{collectionsPage ? tr("Collections") : tr("Library")}</h1>
         <div className="grow" />
-        <button type="button" className="ghost compact" onClick={onImport}>
-          {tr("Import…")}
-        </button>
+        {collectionsPage
+          ? (
+            <button type="button" className="ghost compact" onClick={onNewCollection}>
+              {tr("New collection…")}
+            </button>
+          )
+          : (
+            <button type="button" className="ghost compact" onClick={onImport}>
+              {tr("Import…")}
+            </button>
+          )}
         <div className="segmented" role="group" aria-label={tr("Card size")}>
           {(Object.keys(CAPSULE_SIZES) as CapsuleSize[]).map((s) => (
             <button
@@ -171,7 +184,13 @@ export function LibraryGrid(
           </div>
         </section>
       )}
-      {total === 0 && incoming.length === 0 && <p className="muted">{tr("Nothing matches these filters.")}</p>}
+      {total === 0 && incoming.length === 0 && (
+        <p className="muted">
+          {collectionsPage
+            ? tr("No titles in a collection yet. Right-click a title and choose Add to.")
+            : tr("Nothing matches these filters.")}
+        </p>
+      )}
       {shelves.filter((shelf) => shelf.titles.length > 0).map((shelf) => (
         <section key={shelf.id} className="shelf">
           <h2 className="eyebrow">

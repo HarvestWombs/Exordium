@@ -313,8 +313,58 @@ button:disabled {
 }
 
 .topnav {
+  align-self: stretch;
   display: flex;
+  align-items: center;
   gap: 4px;
+}
+
+/* Full height, so the pointer stays on it on the way down to its menu. */
+.topnav-group {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.topnav-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 500;
+  min-width: 180px;
+  padding: 6px;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--chrome);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.45);
+}
+
+.topnav-group.open .topnav-menu,
+.topnav-group:has(:focus-visible) .topnav-menu {
+  display: flex;
+}
+
+.topnav-menu button {
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  text-align: left;
+}
+
+.topnav-menu button:hover {
+  background: var(--raised);
+  color: var(--text-strong);
+}
+
+.topnav-menu button.on {
+  color: var(--accent);
 }
 
 .topnav-item {
@@ -706,6 +756,57 @@ button:disabled {
   color: var(--text-mute);
 }
 
+/* Either side of the middle, each taking the same room so the middle is the bar's own. */
+.statusbar-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.statusbar-side.end {
+  justify-content: flex-end;
+}
+
+.statusbar-download {
+  flex-shrink: 0;
+  max-width: 40%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.statusbar-download:hover {
+  background: var(--raised);
+  color: var(--text-strong);
+}
+
+.statusbar-download .spinner.small {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.statusbar-download-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar-download .update-progress {
+  flex-shrink: 0;
+  width: 80px;
+}
+
 .statusbar.accent {
   background: var(--accent-wash);
   border-top-color: var(--accent);
@@ -723,6 +824,10 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.browse-filters[hidden] {
+  display: none;
 }
 
 .statusbar .ghost {
