@@ -1,6 +1,9 @@
 import { tr } from "../lib/i18n.ts";
 import * as React from "react";
+import type { HelpPageId } from "../pages/help/Help.tsx";
+import { SETTINGS_SECTIONS } from "../pages/settings/Settings.tsx";
 import type { BrowseView } from "../pages/browse/types.ts";
+import type { SettingsSection } from "../types.ts";
 import { WindowControls } from "./WindowChrome.tsx";
 
 export type AppView = "library" | "browse" | "settings" | "help";
@@ -16,26 +19,32 @@ export function TopBar(
     view,
     libraryPage,
     browsePage,
+    settingsSection,
+    helpPage,
     libraryReady,
     desktop,
     maximized,
-    onView,
     onLibrary,
     onBrowse,
+    onSettings,
+    onHelp,
     onMaximized,
     onToggleMaximize,
   }: {
     view: AppView;
     libraryPage: LibraryPage;
     browsePage: BrowseView;
+    settingsSection: SettingsSection;
+    helpPage: HelpPageId;
     /** Setup has made the library; Browse installs into it, so it waits until then. */
     libraryReady: boolean;
     desktop: boolean;
     maximized: boolean;
-    onView: (view: AppView) => void;
     onLibrary: (page: LibraryPage) => void;
     /** Downloads is listed under Library, as Steam's is, and is a page of Browse. */
     onBrowse: (page: BrowseView) => void;
+    onSettings: (section: SettingsSection) => void;
+    onHelp: (page: HelpPageId) => void;
     onMaximized: (maximized: boolean) => void;
     onToggleMaximize: () => void;
   },
@@ -92,6 +101,13 @@ export function TopBar(
     disabled: !libraryReady,
     title: libraryReady ? undefined : tr("Finish setting up Exordium first"),
   });
+  const settingsTop = item("settings", tr("SETTINGS"), () => onSettings("library"));
+  const helpTop = item("help", tr("HELP"), () => onHelp("start"));
+  const helpSection = helpPage === "faq" || helpPage === "about"
+    ? helpPage
+    : helpPage.startsWith("authors")
+    ? "authors"
+    : "general";
   return (
     <header
       className="topbar"
@@ -125,8 +141,21 @@ export function TopBar(
             [tr("Cores"), view === "browse" && browsePage === "cores", () => onBrowse("cores")],
           ])
           : browseTop}
-        {item("settings", tr("SETTINGS"), () => onView("settings"))}
-        {item("help", tr("HELP"), () => onView("help"))}
+        {menu(
+          "settings",
+          settingsTop,
+          SETTINGS_SECTIONS.map((entry) => [
+            entry.label,
+            view === "settings" && settingsSection === entry.id,
+            () => onSettings(entry.id),
+          ]),
+        )}
+        {menu("help", helpTop, [
+          [tr("General"), view === "help" && helpSection === "general", () => onHelp("start")],
+          [tr("For Authors"), view === "help" && helpSection === "authors", () => onHelp("authors")],
+          ["FAQ", view === "help" && helpSection === "faq", () => onHelp("faq")],
+          [tr("About"), view === "help" && helpSection === "about", () => onHelp("about")],
+        ])}
       </nav>
       <div className="grow" />
       {desktop && <WindowControls maximized={maximized} onToggleMaximize={onToggleMaximize} />}

@@ -84,7 +84,7 @@ export function ModDbCard(
         </p>
         <div className="mod-under">
           {description.length > 280 && (
-            <button type="button" className="link-button" onClick={onExpand}>
+            <button type="button" className="small-button" onClick={onExpand}>
               {expanded ? tr("Less") : tr("More")}
             </button>
           )}
@@ -93,7 +93,7 @@ export function ModDbCard(
             <button
               type="button"
               key={link.url}
-              className="link-button"
+              className="small-button"
               title={link.url}
               onClick={() => openLink(link.url)}
             >
@@ -151,7 +151,7 @@ export function ModDbCard(
 
       <div className="mod-bar">
         <span className="source-badge">ModDB · {item.sourceLabel}</span>
-        <button type="button" className="link-button" onClick={() => openLink(item.page)}>{tr("Page ↗")}</button>
+        <button type="button" className="small-button" onClick={() => openLink(item.page)}>{tr("Page ↗")}</button>
         <div className="grow" />
         {detailsError && <span className="bad-text small">{detailsError}</span>}
         {job && <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job)} />}

@@ -25,6 +25,8 @@ struct Plan {
     std::string commandLine;
     // The title's icon (PNG or .ico), put on the game window once it exists.
     std::string icon;
+    // The game window's title, put on it with the icon. Empty leaves D2Gfx's "Diablo II".
+    std::string windowTitle;
     bool handoff = false;
     bool graphics = false;
     bool graphicsInit = false;
@@ -310,6 +312,7 @@ Plan read_plan(Log& log) {
     plan.registryFile = json_string(text, "registryFile");
     plan.commandLine = json_string(text, "commandLine");
     plan.icon = json_string(text, "icon");
+    plan.windowTitle = json_string(text, "windowTitle");
     plan.handoff = json_bool(text, "handoff", false);
     plan.graphics = json_bool(text, "graphics", false);
     plan.graphicsInit = json_bool(text, "graphicsInit", false);
@@ -1966,6 +1969,30 @@ void set_title_icon(Log& log, const std::string& icon) {
     log.line("Window icon: the title's, on " + std::to_string(icons.windows) + " window(s).");
 }
 
+// The game window's title, for the caption, the taskbar and Alt+Tab. D2Gfx calls every game "Diablo
+// II"; the window class keeps that name, which is how D2Gfx and outside tools look the game up.
+// Straight to the default window procedure: D2Gfx's window is ANSI, so SetWindowTextW would take the
+// title through the system code page and lose anything outside it.
+struct WindowTitle {
+    std::wstring text;
+    int windows = 0;
+};
+
+BOOL CALLBACK set_window_title(HWND hwnd, LPARAM param) {
+    auto* title = reinterpret_cast<WindowTitle*>(param);
+    if (GetWindow(hwnd, GW_OWNER)) return TRUE;
+    DefWindowProcW(hwnd, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(title->text.c_str()));
+    ++title->windows;
+    return TRUE;
+}
+
+void set_game_title(Log& log, const std::string& text) {
+    if (text.empty()) return;
+    WindowTitle title{widen(text)};
+    EnumThreadWindows(GetCurrentThreadId(), set_window_title, reinterpret_cast<LPARAM>(&title));
+    log.line("Window title: " + text + ", on " + std::to_string(title.windows) + " window(s).");
+}
+
 int run_loader() {
     if (__argc == 4 && std::strcmp(__argv[1], "--dump-hive") == 0) return dump_hive(__argv[2], __argv[3]);
     if (__argc >= 2 && std::strcmp(__argv[1], "--detach") == 0) {
@@ -2052,6 +2079,7 @@ int run_loader() {
         return 8;
     }
     set_title_icon(log, plan.icon);
+    set_game_title(log, plan.windowTitle);
     probe_mpqs(log, plan);
 
     SoundBootstrap sound;

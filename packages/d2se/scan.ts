@@ -92,6 +92,8 @@ export interface ScanOptions {
    * the folder whole rather than file by file; its files never need listing or hashing.
    */
   linkData?: boolean;
+  /** Byte progress while an uncached file is being hashed. Cached files do not call this. */
+  onHash?: (read: number, total: number) => void;
 }
 
 async function hashOrReuse(full: string, source: string, size: number, mtime: number | null, options: ScanOptions) {
@@ -103,7 +105,7 @@ async function hashOrReuse(full: string, source: string, size: number, mtime: nu
   if (cached && mtime !== null && cached.mtime === mtime && cached.size === size) {
     return { hash: cached.hash, read: false };
   }
-  const hash = await hashFile(full);
+  const hash = await hashFile(full, options.onHash ? (read) => options.onHash!(read, size) : undefined);
   if (mtime !== null) options.cache?.set(key, { size, mtime, hash });
   return { hash, read: true };
 }
@@ -181,9 +183,12 @@ export async function scanNamed(root: string, names: readonly string[], options:
   const wanted = new Set(names.map((n) => n.toLowerCase()));
   const files: ScannedFile[] = [];
   for await (const entry of Deno.readDir(root)) {
-    if (!entry.isFile || !wanted.has(entry.name.toLowerCase())) continue;
+    // These are explicit, trusted top-level game filenames. Follow their file symlinks so an
+    // Exordium library can reference the source install without allowing links while walking mods.
+    if ((!entry.isFile && !entry.isSymlink) || !wanted.has(entry.name.toLowerCase())) continue;
     const full = `${root}/${entry.name}`;
     const info = await Deno.stat(full);
+    if (!info.isFile) continue;
     const mtime = info.mtime?.getTime() ?? null;
     const { hash } = await hashOrReuse(full, entry.name, info.size, mtime, options);
     files.push({ path: entry.name, source: entry.name, size: info.size, mtime, hash });
@@ -220,10 +225,19 @@ export function toLayer(id: string, role: FileLayerRole, files: readonly Scanned
   return { id, role, entries };
 }
 
-export async function hashFile(path: string): Promise<string> {
+export async function hashFile(path: string, onProgress?: (read: number) => void): Promise<string> {
   // The stream closes the file when it has been read to the end.
   const file = await Deno.open(path, { read: true });
-  const digest = await crypto.subtle.digest("SHA-256", file.readable);
+  let read = 0;
+  async function* counted(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+    for await (const chunk of file.readable) {
+      read += chunk.byteLength;
+      onProgress!(read);
+      // Deno's file stream may be backed by ArrayBufferLike; digest requires an owned ArrayBuffer.
+      yield new Uint8Array(chunk);
+    }
+  }
+  const digest = await crypto.subtle.digest("SHA-256", onProgress ? counted() : file.readable);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 

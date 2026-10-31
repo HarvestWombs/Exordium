@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { parseIni, readModSetup } from "@exordium/d2se";
 import { resolve } from "@exordium/layers";
 import type { FileLayer } from "@exordium/layers";
-import { buildLoaderPlan, gameCommandLine, gameVersion } from "./mod.ts";
+import { buildLoaderPlan, gameCommandLine, gameVersion, gameWindowTitle } from "./mod.ts";
 
 const H = "0".repeat(64);
 
@@ -191,6 +191,14 @@ Deno.test("the core names the version Game.exe gives Fog's error manager", () =>
   assertEquals(gameVersion("1.09d"), "v1.09");
   assertEquals(gameVersion(null), null);
   assertEquals(gameVersion("Debug Logs"), null);
+});
+
+Deno.test("the window title names the core, the mod and its version", () => {
+  assertEquals(gameWindowTitle("1.10f", "Eastern Sun", "3.2"), "Diablo II 1.10f Eastern Sun 3.2");
+  assertEquals(gameWindowTitle("1.10f", "Eastern Sun 3.2", "3.2"), "Diablo II 1.10f Eastern Sun 3.2");
+  assertEquals(gameWindowTitle("1.13c", " Eastern\n Sun ", ""), "Diablo II 1.13c Eastern Sun");
+  assertEquals(gameWindowTitle("1.10f", null, null), "Diablo II 1.10f");
+  assertEquals(gameWindowTitle(null, "Eastern Sun", null), "Diablo II Eastern Sun");
 });
 
 Deno.test("a core whose Game.exe version is unknown is warned about, not guessed", () => {

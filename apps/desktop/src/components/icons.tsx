@@ -42,6 +42,25 @@ export function SearchIcon() {
   );
 }
 
+export function RefreshIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+      <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+    </svg>
+  );
+}
+
 export function FolderIcon() {
   return (
     <svg

@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { findD2SE } from "@exordium/d2se";
+import { findD2SE, scanNamed } from "@exordium/d2se";
 import { cancelCopy, checkInstall, copyJob, createLibrary, isLibrary, startCopy } from "./library-setup.ts";
 
 async function until(id: string) {
@@ -83,6 +83,40 @@ Deno.test("the library is a D2SE layout with a marker, and copies never replace 
     assert(!(await Deno.stat(`${library}/cores/1.10f.partial`).then(() => true, () => false)));
     // The install was only read.
     assertEquals(await Deno.readTextFile(`${install}/D2SE/CORES/1.10f/D2Game.dll`), "game");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("automatic game setup links when possible and always leaves readable files", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const from = `${dir}/install/d2data.mpq`;
+  const to = `${dir}/library/game/d2data.mpq`;
+  try {
+    await Deno.mkdir(`${dir}/install`, { recursive: true });
+    await Deno.writeTextFile(from, "archive");
+    const done = await until(startCopy("game", "Automatic game", [{ from, to }], { mode: "auto" }).id);
+    assertEquals(done.state, "done");
+    assertEquals(done.methods.symlink + done.methods.hardlink + done.methods.copy, 1);
+    assertEquals(await Deno.readTextFile(to), "archive");
+    assertEquals((await scanNamed(`${dir}/library/game`, ["d2data.mpq"], { hash: false })).length, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("hardlink game setup shares the file on the same volume", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const from = `${dir}/install/d2data.mpq`;
+  const to = `${dir}/library/game/d2data.mpq`;
+  try {
+    await Deno.mkdir(`${dir}/install`, { recursive: true });
+    await Deno.writeTextFile(from, "before");
+    const done = await until(startCopy("game", "Hardlinked game", [{ from, to }], { mode: "hardlink" }).id);
+    assertEquals(done.state, "done");
+    assertEquals(done.methods.hardlink, 1);
+    await Deno.writeTextFile(to, "after");
+    assertEquals(await Deno.readTextFile(from), "after");
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

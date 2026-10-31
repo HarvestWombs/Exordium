@@ -132,7 +132,7 @@ export function UpdatesPanel({ status }: { status: Status }) {
               </p>
             )}
             {update.notes && <p className="update-notes-text">{update.notes}</p>}
-            <button type="button" className="link-button" onClick={() => openLink(update.url)}>
+            <button type="button" className="small-button" onClick={() => openLink(update.url)}>
               {tr("Release page ↗")}
             </button>
           </div>

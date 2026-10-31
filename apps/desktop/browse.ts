@@ -976,6 +976,8 @@ export interface Job {
   extracted: number;
   /** Unpacked size, when the listing gave it: extraction progress is `extracted / unpackedSize`. */
   unpackedSize: number;
+  /** The download is held: no more of it is read until this clears. */
+  paused?: boolean;
   installing: string | null;
   result: InstallResult | null;
   error?: string;
@@ -991,10 +993,27 @@ function forgetJob(job: Job) {
   for (const [key, each] of jobs) if (each === job) jobs.delete(key);
 }
 
+function downloading(id: string, file: string): Job | null {
+  const job = [...jobs.values()].find((each) => each.id === id && (each.source === "url" || each.file === file));
+  return job?.state === "downloading" ? job : null;
+}
+
+/** Holds a download or lets it go on. False if it is past downloading. */
+export function pauseJob(id: string, file: string, paused: boolean): boolean {
+  const job = downloading(id, file);
+  if (job) job.paused = paused;
+  return job !== null;
+}
+
+/** Reading stops here while a download is held, so the connection stays open to carry on. */
+async function whilePaused(job: Job, signal: AbortSignal) {
+  while (job.paused && !signal.aborted) await new Promise((resolve) => setTimeout(resolve, 200));
+}
+
 /** Stops a download and forgets it; its `.part` file is removed as it stops. False if it is past that. */
 export function cancelJob(id: string, file: string): boolean {
-  const job = [...jobs.values()].find((each) => each.id === id && (each.source === "url" || each.file === file));
-  if (job?.state !== "downloading") return false;
+  const job = downloading(id, file);
+  if (!job) return false;
   aborts.get(job)?.abort();
   return true;
 }
@@ -1210,6 +1229,8 @@ export interface InstallTarget {
   modsDir: string;
   /** A folder on the same drive as MODS, for unpacking: the final move is then a rename. */
   stagingDir: string;
+  /** Warms launch metadata after installed folders have reached their final paths. */
+  afterInstall?: (folders: string[]) => Promise<void>;
 }
 
 export interface DownloadSettings {
@@ -1244,6 +1265,7 @@ async function runInstall(
         job.installing = name;
       },
     });
+    await target.afterInstall?.(result.installed.map((mod) => mod.name));
     job.result = result;
     job.state = "installed";
     if (!settings.keepArchives) {
@@ -1318,7 +1340,8 @@ export async function startJob(
       await response.body
         .pipeThrough(
           new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, controller) {
+            async transform(chunk, controller) {
+              await whilePaused(job, abort.signal);
               job.received += chunk.length;
               counters.net += chunk.length;
               counters.disk += chunk.length;
@@ -1398,7 +1421,8 @@ export function startUrlJob(
       await opened.response.body!
         .pipeThrough(
           new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, controller) {
+            async transform(chunk, controller) {
+              await whilePaused(job, abort.signal);
               job.received += chunk.length;
               counters.net += chunk.length;
               counters.disk += chunk.length;

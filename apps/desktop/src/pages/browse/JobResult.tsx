@@ -17,7 +17,7 @@ export function JobResult(
         {job.path && (
           <>
             {" · "}
-            <button type="button" className="link-button" onClick={() => onOpen("file")}>{tr("Show archive")}</button>
+            <button type="button" className="small-button" onClick={() => onOpen("file")}>{tr("Show archive")}</button>
           </>
         )}
       </span>
@@ -29,7 +29,7 @@ export function JobResult(
       {job.result.installed.map((mod) => (
         <span key={mod.name} className="good-text small">
           {tr("Installed as MODS\\{name}", { name: mod.name })} ·{" "}
-          <button type="button" className="link-button" onClick={() => onInstalled(mod.name)}>
+          <button type="button" className="small-button" onClick={() => onInstalled(mod.name)}>
             {tr("Open in library")}
           </button>
         </span>
@@ -38,7 +38,7 @@ export function JobResult(
       {job.result.installed.length === 0 && job.result.skipped.length === 0 && (
         <span className="warn-text small">
           {tr("No D2SE mod inside (no D2SE_SETUP.ini) · files unpacked ·")}{" "}
-          <button type="button" className="link-button" onClick={() => onOpen("unpacked")}>{tr("Show files")}</button>
+          <button type="button" className="small-button" onClick={() => onOpen("unpacked")}>{tr("Show files")}</button>
         </span>
       )}
     </>

@@ -1,11 +1,13 @@
 import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { HeartIcon, PlayIcon, TitleIcon } from "../../components/icons.tsx";
 import type { Incoming } from "../../lib/incoming.ts";
-import { artUrl } from "../../lib/art.ts";
-import { readStored, writeStored } from "../../lib/util.ts";
-import type { Title } from "../../types.ts";
+import { artUrl, screenshotUrl } from "../../lib/art.ts";
+import { randomShots } from "../../lib/docs.ts";
+import { playTime, readStored, relative, writeStored } from "../../lib/util.ts";
+import type { Playtime, Screenshot, Title } from "../../types.ts";
 
 export const CAPSULE_SIZES = { small: 132, medium: 170, large: 220 } as const;
 
@@ -21,7 +23,7 @@ export function savedCapsuleSize(): CapsuleSize {
   return "medium";
 }
 
-/** A mod on its way into the library: a spinner, and its progress when hovered. */
+/** A mod on its way into the library: live progress and cancellation in the card footer. */
 function ImportCapsule(
   { item, onOpen, onCancel }: { item: Incoming; onOpen: () => void; onCancel: () => void },
 ) {
@@ -43,7 +45,7 @@ function ImportCapsule(
           <span className="spinner" aria-hidden="true" />
           <span>{item.title}</span>
         </div>
-        <div className="capsule-status">
+        <div className="capsule-import-progress">
           <strong>{item.status}</strong>
           {item.percent !== null && (
             <div className="update-progress">
@@ -52,7 +54,7 @@ function ImportCapsule(
           )}
           <button
             type="button"
-            className="link-button"
+            className="small-button capsule-cancel"
             disabled={!item.cancellable}
             onClick={(event) => {
               event.stopPropagation();
@@ -66,6 +68,60 @@ function ImportCapsule(
       <div className="capsule-name">{item.title}</div>
       <div className="capsule-sub">{item.subtitle}</div>
     </div>
+  );
+}
+
+interface PreviewState {
+  title: Title;
+  rect: DOMRect;
+  image: string | null;
+}
+
+function CapsulePreview(
+  { preview, playedAt, playtime, live, root, art }: {
+    preview: PreviewState;
+    playedAt: string | null;
+    playtime: Playtime | null;
+    live: boolean;
+    root: string;
+    art: number;
+  },
+) {
+  const width = Math.min(320, globalThis.innerWidth - 24);
+  const right = preview.rect.right + 14;
+  const side = right + width <= globalThis.innerWidth - 12 ? "right" : "left";
+  const left = side === "right" ? right : Math.max(12, preview.rect.left - width - 14);
+  const top = Math.max(12, Math.min(preview.rect.top, globalThis.innerHeight - 346));
+  const t = preview.title;
+  return createPortal(
+    <aside
+      className="capsule-preview"
+      data-side={side}
+      style={{ left, top, width }}
+      aria-hidden="true"
+    >
+      <h3>{t.title}</h3>
+      <div className="capsule-preview-media">
+        {preview.image ? <img src={preview.image} alt="" /> : (
+          <div className={`capsule-preview-fallback ${t.kind}`}>
+            <TitleIcon t={t} root={root} art={art} size={64} />
+          </div>
+        )}
+      </div>
+      <div className="capsule-preview-details">
+        <p className={live ? "capsule-preview-state live" : "capsule-preview-state"}>
+          <span className="dot" />
+          {live ? tr("PLAYING") : `${tr("LAST PLAYED")} ${playedAt ? relative(playedAt) : "—"}`}
+        </p>
+        <dl>
+          <dt>{tr("PLAY TIME")}</dt>
+          <dd>{playtime ? playTime(playtime.seconds) : "—"}</dd>
+          <dt>{t.kind === "core" ? tr("CORE") : tr("MOD")}</dt>
+          <dd>{t.core ?? "—"}</dd>
+        </dl>
+      </div>
+    </aside>,
+    document.body,
   );
 }
 
@@ -88,6 +144,8 @@ export function LibraryGrid(
     art,
     running,
     favorites,
+    playedAt,
+    playtime,
     starting,
     onOpen,
     onPlay,
@@ -109,6 +167,8 @@ export function LibraryGrid(
     art: number;
     running: Set<string>;
     favorites: Set<string>;
+    playedAt: Record<string, string>;
+    playtime: Record<string, Playtime>;
     starting: string | null;
     onOpen: (key: string) => void;
     onPlay: (t: Title) => void;
@@ -116,6 +176,44 @@ export function LibraryGrid(
   },
 ) {
   const [size, setSize] = React.useState<CapsuleSize>(savedCapsuleSize);
+  const [preview, setPreview] = React.useState<PreviewState | null>(null);
+  const previewTimer = React.useRef<number | null>(null);
+  const previewImages = React.useRef(new Map<string, string | null>());
+
+  const hidePreview = React.useCallback(() => {
+    if (previewTimer.current !== null) globalThis.clearTimeout(previewTimer.current);
+    previewTimer.current = null;
+    setPreview(null);
+  }, []);
+
+  const showPreview = React.useCallback((t: Title, element: HTMLElement) => {
+    if (!root) return;
+    if (previewTimer.current !== null) globalThis.clearTimeout(previewTimer.current);
+    const rect = element.getBoundingClientRect();
+    previewTimer.current = globalThis.setTimeout(() => {
+      previewTimer.current = null;
+      const fallback = t.art.banner
+        ? artUrl(root, t.key, "banner", art)
+        : t.art.portrait
+        ? artUrl(root, t.key, "portrait", art)
+        : null;
+      const cacheKey = `${root}|${t.key}|${art}`;
+      const cached = previewImages.current.get(cacheKey);
+      setPreview({ title: t, rect, image: cached === undefined ? fallback : cached });
+      if (cached !== undefined || t.screenshots === 0) return;
+      void fetch(`/api/screenshots?root=${encodeURIComponent(root)}&key=${encodeURIComponent(t.key)}`)
+        .then(async (response) => response.ok ? (await response.json()).screenshots as Screenshot[] : [])
+        .then((shots) => {
+          const shot = randomShots(shots, t.key)[0];
+          const image = shot ? screenshotUrl(root, t.key, shot.name) : fallback;
+          previewImages.current.set(cacheKey, image);
+          setPreview((current) => current?.title.key === t.key ? { ...current, image } : current);
+        })
+        .catch(() => previewImages.current.set(cacheKey, fallback));
+    }, 420);
+  }, [art, root]);
+
+  React.useEffect(() => hidePreview, [hidePreview]);
   function changeSize(next: CapsuleSize) {
     setSize(next);
     try {
@@ -214,8 +312,14 @@ export function LibraryGrid(
                   className={live ? "capsule live" : "capsule"}
                   role="button"
                   tabIndex={0}
-                  title={t.title}
-                  onClick={() => onOpen(t.key)}
+                  onPointerEnter={(event) => showPreview(t, event.currentTarget)}
+                  onPointerLeave={hidePreview}
+                  onFocus={(event) => showPreview(t, event.currentTarget)}
+                  onBlur={hidePreview}
+                  onClick={() => {
+                    hidePreview();
+                    onOpen(t.key);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
@@ -277,6 +381,16 @@ export function LibraryGrid(
           </div>
         </section>
       ))}
+      {preview && root && (
+        <CapsulePreview
+          preview={preview}
+          playedAt={playedAt[preview.title.key] ?? null}
+          playtime={playtime[preview.title.key] ?? null}
+          live={running.has(preview.title.key)}
+          root={root}
+          art={art}
+        />
+      )}
     </div>
   );
 }

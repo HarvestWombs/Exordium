@@ -92,7 +92,11 @@ Deno.test("installs a core into the library from the catalog, and never over one
     // 1.14d is a single-exe core: left out of the tab, so it is not in the entries at all.
     assertEquals(status(before), { "1.10f": "available", "1.13c": "installed" });
 
-    await startCoreInstall(root, "1.10f", `${dir}/downloads`);
+    const warmed: string[] = [];
+    await startCoreInstall(root, "1.10f", `${dir}/downloads`, (core) => {
+      warmed.push(core);
+      return Promise.resolve();
+    });
     for (let i = 0; i < 100; i++) {
       const job = (await coreEntries(root, list, null)).find((e) => e.core === "1.10f")!.job!;
       if (job.state === "installed" || job.state === "failed") break;
@@ -102,6 +106,7 @@ Deno.test("installs a core into the library from the catalog, and never over one
     assertEquals(after.job?.error, undefined);
     assertEquals(after.status, "installed");
     assertEquals(await Deno.readTextFile(`${root}/cores/1.10f/Storm.dll`), "storm");
+    assertEquals(warmed, ["1.10f"]);
 
     await assertRejects(() => startCoreInstall(root, "1.13c", `${dir}/downloads`), CoreInstallError, "already");
     await assertRejects(() => startCoreInstall(root, "1.14d", `${dir}/downloads`), CoreInstallError, "install itself");

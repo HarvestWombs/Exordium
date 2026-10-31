@@ -4,6 +4,32 @@ import { CopyProgress, followCopy, setupPost } from "../components/progress.tsx"
 import { formatSize } from "../lib/util.ts";
 import type { AppSettingsState, CatalogCore, CopyJob, InstallCheck } from "../types.ts";
 
+const CLASSIC_CORES = new Set([
+  "1.00",
+  "1.01",
+  "1.02",
+  "1.03",
+  "1.04b",
+  "1.04c",
+  "1.05",
+  "1.05b",
+  "1.06",
+  "1.06b",
+]);
+const LOD_CORES = new Set([
+  "1.07",
+  "1.08",
+  "1.09",
+  "1.09b",
+  "1.09d",
+  "1.10f",
+  "1.11",
+  "1.11b",
+  "1.12a",
+  "1.13c",
+  "1.13d",
+]);
+
 /**
  * Setup's second step: the cores from HarvestLabs' catalog (cores.ts), downloaded into the library
  * one at a time. Cores already in the library show ticked and cannot be chosen again. A failed one is
@@ -90,6 +116,8 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
       else next.add(core);
       return next;
     });
+  const selectFamily = (family: ReadonlySet<string>) =>
+    setChosen(new Set(available.filter((core) => family.has(core.core.toLowerCase())).map((core) => core.core)));
 
   if (error) {
     return (
@@ -124,14 +152,20 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
       </div>
       {available.length > 1 && !busy && (
         <div className="setup-actions">
+          <button type="button" className="small-button" onClick={() => selectFamily(CLASSIC_CORES)}>
+            {tr("Classic (1.00-1.06b)")}
+          </button>
+          <button type="button" className="small-button" onClick={() => selectFamily(LOD_CORES)}>
+            {tr("LOD (1.07-1.13d)")}
+          </button>
           <button
             type="button"
-            className="link-button"
+            className="small-button"
             onClick={() => setChosen(new Set(available.map((c) => c.core)))}
           >
             {tr("Select all")}
           </button>
-          <button type="button" className="link-button" onClick={() => setChosen(new Set())}>
+          <button type="button" className="small-button" onClick={() => setChosen(new Set())}>
             {tr("Select none")}
           </button>
         </div>
@@ -163,7 +197,7 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
       <div className="setup-actions">
         <button
           type="button"
-          className="ghost primary"
+          className="ghost primary action-install"
           disabled={busy || queued.length === 0}
           onClick={() => void download()}
         >
@@ -184,9 +218,9 @@ export function SetupCores({ onDone }: { onDone: () => void }) {
 }
 
 /**
- * First launch: link the Diablo II install, copy its game files into Exordium's own library, copy
- * its D2SE cores (or get them from the Cores tab), then the library, where D2SE mods are imported
- * through the converter. Nothing in the install is changed, and nothing runs from it afterwards.
+ * First launch: link the Diablo II game files into Exordium's library, get cores from the Cores tab,
+ * then open the library, where D2SE mods are imported through the converter. The player can choose
+ * an independent copy instead, or explicitly move the files into Exordium.
  */
 export function SetupPage(
   { app, install, onDone }: {
@@ -201,27 +235,37 @@ export function SetupPage(
   const [busy, setBusy] = React.useState(false);
   const [step, setStep] = React.useState<"install" | "cores" | "done">("install");
   const [gameJob, setGameJob] = React.useState<CopyJob | null>(null);
+  const [transferMode, setTransferMode] = React.useState<"auto" | "symlink" | "hardlink" | "copy" | "move">(
+    "auto",
+  );
   const [symlink, setSymlink] = React.useState<{ ok: boolean; admin: boolean; error: string | null } | null>(null);
+  const inspectSequence = React.useRef(0);
   React.useEffect(() => {
     void fetch("/api/symlink-status").then((response) => response.json()).then(setSymlink).catch(() => {});
   }, []);
 
-  async function inspect(path: string) {
+  async function inspect(path: string): Promise<boolean> {
+    const value = path.trim();
+    const sequence = ++inspectSequence.current;
     setProblem(null);
     setCheck(null);
-    if (!path.trim()) return;
+    if (!value) return false;
     setBusy(true);
-    const { body } = await setupPost({ action: "check", install: path.trim() });
+    const { body } = await setupPost({ action: "check", install: value });
+    if (sequence !== inspectSequence.current) return false;
     setBusy(false);
     if (body.check) {
       setCheck(body.check);
       if (body.check.problem) setProblem(body.check.problem);
-    } else setProblem(body.error ?? tr("Could not read that folder."));
+      return !body.check.problem;
+    }
+    setProblem(body.error ?? tr("Could not read that folder."));
+    return false;
   }
 
   React.useEffect(() => {
     if (install) void inspect(install);
-    // Only the install known at first launch; later checks follow the folder field.
+    // Only inspect an install detected before setup; typed paths wait for explicit submission.
   }, []);
 
   async function choose() {
@@ -236,21 +280,39 @@ export function SetupPage(
     }
   }
 
-  async function copyGame() {
+  async function setupGame(path = folder) {
     setBusy(true);
     setProblem(null);
-    const { ok, body } = await setupPost({ action: "start", install: folder.trim() });
+    const { ok, body } = await setupPost({ action: "start", install: path.trim(), mode: transferMode });
     if (!ok || !body.job) {
       setBusy(false);
-      return setProblem(body.error ?? body.check?.problem ?? tr("Could not start copying."));
+      return setProblem(body.error ?? body.check?.problem ?? tr("Could not set up the game files."));
     }
     const job = await followCopy(body.job, setGameJob);
     setBusy(false);
     if (job.state === "done") setStep("cores");
-    else setProblem(job.error ?? tr("Copying stopped."));
+    else setProblem(job.error ?? tr("Game file setup stopped."));
+  }
+
+  async function submitTypedPath() {
+    const path = folder.trim();
+    if (!path || busy || step !== "install") return;
+    const valid = path === check?.install && !check.problem ? true : await inspect(path);
+    if (valid) await setupGame(path);
   }
 
   const ready = check !== null && !check.problem;
+  const transferProgressLabel = gameJob?.state === "done"
+    ? tr("Game files ready")
+    : transferMode === "copy"
+    ? tr("Copying game files…")
+    : transferMode === "move"
+    ? tr("Moving game files…")
+    : transferMode === "symlink"
+    ? tr("Creating symbolic links…")
+    : transferMode === "hardlink"
+    ? tr("Creating hardlinks…")
+    : tr("Linking game files (copying only when links are unavailable)…");
 
   return (
     <main className="setup-page">
@@ -260,7 +322,7 @@ export function SetupPage(
           <h1>{tr("Set up Exordium")}</h1>
           <p className="muted">
             {tr(
-              "Exordium keeps its own copy of the game files, cores and mods it runs, so your Diablo II folder is only read during setup and is never changed.",
+              "Exordium links to your existing game files by default, avoiding another large copy. Cores and mods remain in Exordium's library.",
             )}
           </p>
         </div>
@@ -275,9 +337,16 @@ export function SetupPage(
                   value={folder}
                   placeholder="C:\Program Files (x86)\Diablo II"
                   disabled={busy || step !== "install"}
-                  onChange={(event) => setFolder(event.currentTarget.value)}
-                  onBlur={() => folder.trim() && folder.trim() !== check?.install && void inspect(folder)}
-                  onKeyDown={(event) => event.key === "Enter" && void inspect(folder)}
+                  onChange={(event) => {
+                    setFolder(event.currentTarget.value);
+                    setCheck(null);
+                    setProblem(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    void submitTypedPath();
+                  }}
                   autoFocus
                 />
                 <button
@@ -307,16 +376,50 @@ export function SetupPage(
                   </li>
                 </ul>
               )}
-              {gameJob && <CopyProgress job={gameJob} />}
+              {gameJob && <CopyProgress job={gameJob} label={transferProgressLabel} />}
               {step === "install" && ready && (
-                <div className="setup-actions">
-                  <button type="button" className="ghost primary" disabled={busy} onClick={() => void copyGame()}>
-                    {busy && gameJob
-                      ? tr("Copying…")
-                      : tr("Copy game files ({gameBytes})", { gameBytes: formatSize(check.gameBytes) })}
-                  </button>
-                  <span className="muted small">{tr("Into {data}\\library", { data: app.paths.data })}</span>
-                </div>
+                <>
+                  <div className="setup-transfer">
+                    <label htmlFor="setup-transfer-mode">{tr("Game file method")}</label>
+                    <select
+                      id="setup-transfer-mode"
+                      value={transferMode}
+                      disabled={busy}
+                      onChange={(event) => setTransferMode(event.currentTarget.value as typeof transferMode)}
+                    >
+                      <option value="auto">{tr("Automatic: symlink, hardlink, then copy")}</option>
+                      <option value="symlink" disabled={symlink?.ok === false}>{tr("Symbolic links")}</option>
+                      <option value="hardlink">{tr("Hardlinks (same drive only)")}</option>
+                      <option value="copy">{tr("Copy (independent)")}</option>
+                      <option value="move">{tr("Move (removes original files)")}</option>
+                    </select>
+                    <span className="muted small">
+                      {transferMode === "auto"
+                        ? tr("Uses no extra space when linking is available.")
+                        : transferMode === "symlink"
+                        ? tr("Works across drives; the original install must remain in place.")
+                        : transferMode === "hardlink"
+                        ? tr("Uses no extra space, but both folders share the same files.")
+                        : transferMode === "copy"
+                        ? tr("Uses {gameBytes} and does not depend on the original install.", {
+                          gameBytes: formatSize(check.gameBytes),
+                        })
+                        : tr("Removes these files from the original install and may prevent it from running.")}
+                    </span>
+                  </div>
+                  <div className="setup-actions">
+                    <button type="button" className="ghost primary" disabled={busy} onClick={() => void setupGame()}>
+                      {busy && gameJob
+                        ? transferProgressLabel
+                        : transferMode === "copy"
+                        ? tr("Copy game files ({gameBytes})", { gameBytes: formatSize(check.gameBytes) })
+                        : transferMode === "move"
+                        ? tr("Move game files ({gameBytes})", { gameBytes: formatSize(check.gameBytes) })
+                        : tr("Link game files")}
+                    </button>
+                    <span className="muted small">{tr("Into {data}\\library", { data: app.paths.data })}</span>
+                  </div>
+                </>
               )}
             </div>
           </li>

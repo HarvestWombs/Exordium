@@ -125,7 +125,7 @@ export function Cores(
                 {c.status === "available" && !running && (
                   <button
                     type="button"
-                    className="ghost primary"
+                    className="ghost primary action-install"
                     disabled={!root}
                     onClick={() => void install(c.core)}
                   >

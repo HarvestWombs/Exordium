@@ -20,7 +20,7 @@ import {
   toLayer,
 } from "@exordium/d2se";
 import { BoxError, Boxes, type LinkMode } from "@exordium/box";
-import { buildLoaderPlan } from "@exordium/launch";
+import { buildLoaderPlan, gameWindowTitle } from "@exordium/launch";
 import {
   type FileLayer,
   type Plan,
@@ -69,12 +69,21 @@ import {
   MODDB_URL,
   modDbDetails,
   modDbList,
+  pauseJob,
   startJob,
   startUrlJob,
   throughput,
 } from "./browse.ts";
 import { appLog, type Heartbeat, heartbeat, startAppLog } from "./applog.ts";
-import { cancelCoreInstall, catalog, coreEntries, CoreInstallError, coreJobs, startCoreInstall } from "./cores.ts";
+import {
+  cancelCoreInstall,
+  catalog,
+  coreEntries,
+  CoreInstallError,
+  coreJobs,
+  pauseCoreInstall,
+  startCoreInstall,
+} from "./cores.ts";
 import {
   BackupError,
   type Character,
@@ -110,7 +119,9 @@ import {
   installModFolders,
   isLibrary,
   libraryFolder,
+  recordLibraryTransfer,
   startCopy,
+  type TransferMode,
 } from "./library-setup.ts";
 import { APP_VERSION, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
@@ -195,6 +206,11 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/discord") return await discordRoute(request);
   // Not under Local-only's guard: these ask nothing of the network.
   if (url.pathname === "/api/cores/jobs") return Response.json({ jobs: coreJobs() });
+  if (url.pathname === "/api/cores/pause" && request.method === "POST") {
+    const body = await request.json().catch(() => null) as { core?: unknown; paused?: unknown } | null;
+    const held = pauseCoreInstall(String(body?.core ?? ""), body?.paused === true);
+    return Response.json({ ok: held }, { status: held ? 200 : 409 });
+  }
   if (url.pathname === "/api/cores/cancel" && request.method === "POST") {
     const body = await request.json().catch(() => null) as { core?: unknown } | null;
     const cancelled = cancelCoreInstall(String(body?.core ?? ""));
@@ -854,7 +870,10 @@ async function d2seConverterWrite(request: Request): Promise<Response> {
   const job = startCopy("mod", source.folder, [{ from: source.dir, to: dest }], {
     move,
     queue: true,
-    then: () => Deno.writeTextFile(`${dest}/${EXORDIUM_MOD_FILE}`, JSON.stringify(parsed, null, 2) + "\n"),
+    then: async () => {
+      await Deno.writeTextFile(`${dest}/${EXORDIUM_MOD_FILE}`, JSON.stringify(parsed, null, 2) + "\n");
+      await warmLaunchHashes(libraryRoot, { mods: [source.folder] });
+    },
   });
   return Response.json({ ok: true, folder: source.folder, job, path: winPath(`${dest}/${EXORDIUM_MOD_FILE}`) });
 }
@@ -963,9 +982,10 @@ async function installMods(state: AppState, inLibrary: string[]) {
 const libraryRoot = libraryFolder(exordiumRoot);
 
 /**
- * GET: the library, the linked install and what it holds, and the copy jobs. POST `{ action }`:
- * "check" an install (read only), "start" (link it, make the library, copy the game files). Cores
- * come from the catalog (`/api/cores`), not the install.
+ * GET: the library, the linked install and what it holds, and the transfer jobs. POST `{ action }`:
+ * "check" an install (read only), "start" (make the library and place the game files). Automatic
+ * placement prefers symlinks, then hardlinks, then copies. Cores come from the catalog
+ * (`/api/cores`), not the install.
  */
 async function setupRoute(request: Request): Promise<Response> {
   const state = await readState();
@@ -978,7 +998,7 @@ async function setupRoute(request: Request): Promise<Response> {
   });
   if (request.method !== "POST") return Response.json(await view());
   const body = await request.json().catch(() => null) as
-    | { action?: unknown; install?: unknown; versions?: unknown; job?: unknown }
+    | { action?: unknown; install?: unknown; versions?: unknown; job?: unknown; mode?: unknown }
     | null;
   const action = typeof body?.action === "string" ? body.action : "";
   if (action === "job") {
@@ -1000,6 +1020,9 @@ async function setupRoute(request: Request): Promise<Response> {
     }
     const check = await checkInstall(install);
     if (action === "check" || check.problem) return Response.json({ check }, { status: check.problem ? 422 : 200 });
+    const mode = typeof body?.mode === "string" && ["auto", "symlink", "hardlink", "copy", "move"].includes(body.mode)
+      ? body.mode as TransferMode
+      : "auto";
     await createLibrary(libraryRoot, install);
     await writeState((s) => void (s.install = install));
     const job = startCopy(
@@ -1011,7 +1034,12 @@ async function setupRoute(request: Request): Promise<Response> {
       })),
       {
         skipExisting: true,
-        then: async () => void await writeState((s) => void (s.root = libraryRoot)),
+        mode,
+        then: async (finished) => {
+          await recordLibraryTransfer(libraryRoot, mode, finished.methods);
+          await warmLaunchHashes(libraryRoot);
+          await writeState((s) => void (s.root = libraryRoot));
+        },
       },
     );
     return Response.json({ check, job });
@@ -1021,6 +1049,28 @@ async function setupRoute(request: Request): Promise<Response> {
 
 /** What a box runs: a mod folder, or a core on its own (vanilla, with the core's own setup). */
 type BoxTarget = { kind: "mod"; folder: string } | { kind: "core"; version: string };
+type LaunchPhase = "checking" | "building" | "registry" | "loader" | "starting";
+
+interface LaunchProgress {
+  key: string;
+  title: string;
+  phase: LaunchPhase;
+  current: number | null;
+  total: number | null;
+}
+
+const preparing = new Map<string, LaunchProgress>();
+
+function reportLaunch(
+  key: string,
+  title: string,
+  phase: LaunchPhase,
+  current: number | null = null,
+  total: number | null = null,
+): void {
+  preparing.set(key, { key, title, phase, current, total });
+  notify("status");
+}
 
 /** A library core's folder: `cores/<version>`; for a 1.14 install, the install root itself. */
 function coreFolder(root: string, version: string): string {
@@ -1074,7 +1124,14 @@ async function coresRoute(request: Request, url: URL): Promise<Response> {
     const core = typeof body?.core === "string" ? body.core.trim() : "";
     if (!root || !core) return Response.json({ error: "Missing root or core" }, { status: 400 });
     try {
-      return Response.json(await startCoreInstall(root, core, downloadsFolder));
+      return Response.json(
+        await startCoreInstall(
+          root,
+          core,
+          downloadsFolder,
+          (installed) => warmLaunchHashes(root, { cores: [installed] }),
+        ),
+      );
     } catch (error) {
       if (error instanceof CoreInstallError) return Response.json({ error: error.message }, { status: 400 });
       throw error;
@@ -1178,7 +1235,7 @@ async function plugYFolderFor(
   return { folder, files: scan.layer };
 }
 
-async function boxSpecFor(root: string, target: BoxTarget) {
+async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: number, total: number) => void) {
   const state = await readState();
   const coreVersion = target.kind === "core"
     ? target.version
@@ -1190,6 +1247,7 @@ async function boxSpecFor(root: string, target: BoxTarget) {
     hashWritable: false,
     linkData: true,
     cache,
+    ...(onHash ? { onHash } : {}),
     mods: target.kind === "mod" ? [target.folder] : [],
     cores: coreVersion ? [coreVersion] : [],
   });
@@ -1301,7 +1359,13 @@ async function verifyD2SEBox(root: string, target: BoxTarget) {
  * own loader config, log and registry hive, since a running game keeps its hive open. While another
  * copy runs the box cannot be rebuilt (its files are in use) and Game.exe is not re-stamped.
  */
-async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersRunning = false) {
+async function realiseD2SEBox(
+  root: string,
+  target: BoxTarget,
+  copy = 1,
+  othersRunning = false,
+  progress?: (phase: LaunchPhase, current?: number, total?: number) => void,
+) {
   // TEMP timing: which phase makes Play slow.
   const timings: Record<string, number> = {};
   let mark = performance.now();
@@ -1310,14 +1374,36 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
     timings[name] = Math.round(now - mark);
     mark = now;
   };
-  const { imported, state, appSettings, core, setup, plan, loader, id, boxes, spec } = await boxSpecFor(root, target);
+  progress?.("checking");
+  let lastHashProgress = 0;
+  const { imported, state, appSettings, core, setup, plan, loader, id, boxes, spec } = await boxSpecFor(
+    root,
+    target,
+    (read, total) => {
+      const now = performance.now();
+      if (read === total || now - lastHashProgress >= 100) {
+        lastHashProgress = now;
+        progress?.("checking", read, total);
+      }
+    },
+  );
   lap("readD2SE");
   lap("saveHashes");
   lap("setup");
   lap("plan");
+  let lastLinkProgress = 0;
   const realised = await boxes.realise(
     spec,
-    { modes: BOX_MODES },
+    {
+      modes: BOX_MODES,
+      onProgress: (completed, total) => {
+        const now = performance.now();
+        if (completed === 0 || completed === total || now - lastLinkProgress >= 100) {
+          lastLinkProgress = now;
+          progress?.("building", completed, total);
+        }
+      },
+    },
   ).catch((error) => {
     if (othersRunning && error instanceof BoxError) {
       throw new HttpError(409, "The mod changed since the running copy started. Close it to start another.");
@@ -1327,6 +1413,7 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
   lap("realise");
   // The registry the game sees: the machine's Diablo II keys (read, never written), what D2SE would
   // set for this mod, the box's own InstallPath and Save Path, then what earlier runs changed.
+  progress?.("registry");
   const snapshot = await machineSnapshot();
   lap("machineSnapshot");
   const base = { id: "machine", role: "base" as const, entries: snapshot.entries };
@@ -1345,11 +1432,18 @@ async function realiseD2SEBox(root: string, target: BoxTarget, copy = 1, othersR
   const presence = gamePresenceAllowed(state, appSettings)
     ? activityJson(runActivity({ kind: target.kind, name: title, core: core?.version ?? loader.gameVersion ?? null }))
     : null;
+  progress?.("loader");
   const files = await installNativeLoader(
     realised.folder,
     loader,
     hive,
-    { title, icon },
+    {
+      title,
+      icon,
+      windowTitle: target.kind === "mod"
+        ? gameWindowTitle(core?.version ?? loader.core, title, setup.mod.version)
+        : gameWindowTitle(target.version, null, null),
+    },
     {
       key: entryKey(target),
       boxId: id,
@@ -1416,6 +1510,33 @@ async function saveHashCache(cache: Map<string, KnownFile>): Promise<void> {
   const temp = `${hashesFile}.${crypto.randomUUID()}.tmp`;
   await Deno.writeTextFile(temp, JSON.stringify(Object.fromEntries(cache)));
   await Deno.rename(temp, hashesFile);
+}
+
+/**
+ * Reads new immutable inputs once, when they enter the library. Later boxes reuse these persisted
+ * hashes after a cheap size/timestamp check, so adding a mod never re-reads shared game/core bytes.
+ */
+async function warmLaunchHashes(
+  root: string,
+  only: { mods?: string[]; cores?: string[] } = {},
+): Promise<void> {
+  try {
+    const cache = await hashCache();
+    const imported = await readD2SE(root, {
+      hash: true,
+      hashWritable: false,
+      linkData: true,
+      cache,
+      mods: only.mods ?? [],
+      cores: only.cores ?? [],
+    });
+    if (!imported) throw new Error(`Could not warm launch files in ${root}.`);
+    await saveHashCache(cache);
+  } catch (error) {
+    // Warming is an optimization after the files are safely installed. The first launch can retry
+    // anything uncached, so a cache write failure must not turn a completed install into a failure.
+    appLog("warn", `warming launch hashes: ${(error as Error).message}`);
+  }
 }
 
 // ---- Playing ------------------------------------------------------------------------------------
@@ -2393,6 +2514,7 @@ async function status() {
     // A run whose game has exited is still settling (registry, box, backup) for ~10 s; it is not shown
     // as running any more. copiesRunning still counts it, so nothing rebuilds the box meanwhile.
     running: [...sessionRunning, ...legacyRunning].filter((run) => !endedRuns.has(`${run.key}#${run.copy}`)),
+    preparing: [...preparing.values()],
     // Seconds played, runs and the last end per title, from the launchers' ledger.
     playtime: Object.fromEntries(await sessions.playtime()),
     // A desktop shortcut starts Exordium.exe itself, which only exists in the packaged app.
@@ -2803,9 +2925,19 @@ async function play(request: Request): Promise<Response> {
   const taken = new Set(others.map((run) => run.copy));
   let copy = 1;
   while (taken.has(copy)) copy++;
+  let launchTitle = read.target.kind === "mod" ? read.target.folder : `Diablo II ${read.target.version}`;
+  reportLaunch(key, launchTitle, "checking");
 
   try {
-    const box = await realiseD2SEBox(read.root, read.target, copy, others.length > 0);
+    const box = await realiseD2SEBox(
+      read.root,
+      read.target,
+      copy,
+      others.length > 0,
+      (phase, current, total) => reportLaunch(key, launchTitle, phase, current ?? null, total ?? null),
+    );
+    launchTitle = box.title;
+    reportLaunch(key, launchTitle, "starting");
     await Deno.remove(`${box.folder}/${box.log}`).catch(() => {});
     const startedAt = new Date().toISOString();
     let pid: number;
@@ -2869,6 +3001,9 @@ async function play(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
     throw error;
+  } finally {
+    preparing.delete(key);
+    notify("status");
   }
 }
 
@@ -3522,7 +3657,11 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           return Response.json({ error: `No MODS folder in ${winPath(root) || "the install"}.` }, { status: 400 });
         }
         // Unpacked beside MODS, on the same drive, so moving the mod in is a rename.
-        const target: InstallTarget = { modsDir, stagingDir: `${root.replace(/\\/g, "/")}/.exordium-staging` };
+        const target: InstallTarget = {
+          modsDir,
+          stagingDir: `${root.replace(/\\/g, "/")}/.exordium-staging`,
+          afterInstall: (folders) => warmLaunchHashes(root, { mods: folders }),
+        };
         const downloadSettings = {
           keepArchives: appSettings.downloads.keepArchives,
           verifyAfterDownload: appSettings.downloads.verifyAfterDownload,
@@ -3531,6 +3670,14 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
           ? await startJob(downloadsFolder, browseCache, id, file, title, target, downloadSettings)
           : await installDownloaded(downloadsFolder, browseCache, id, file, title, target, downloadSettings);
         return Response.json(job);
+      }
+      case "/api/browse/pause": {
+        if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
+        const body = await request.json().catch(() => null) as
+          | { id?: unknown; file?: unknown; paused?: unknown }
+          | null;
+        const held = pauseJob(String(body?.id ?? ""), String(body?.file ?? ""), body?.paused === true);
+        return Response.json({ ok: held }, { status: held ? 200 : 409 });
       }
       case "/api/browse/cancel": {
         if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -3558,7 +3705,11 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
         if (!root || !(await Deno.stat(modsDir).catch(() => null))?.isDirectory) {
           return Response.json({ error: `No MODS folder in ${winPath(root) || "the install"}.` }, { status: 400 });
         }
-        const target: InstallTarget = { modsDir, stagingDir: `${root.replace(/\\/g, "/")}/.exordium-staging` };
+        const target: InstallTarget = {
+          modsDir,
+          stagingDir: `${root.replace(/\\/g, "/")}/.exordium-staging`,
+          afterInstall: (folders) => warmLaunchHashes(root, { mods: folders }),
+        };
         const job = await startUrlJob(downloadsFolder, downloadUrl, title || "ModDB download", target, {
           keepArchives: appSettings.downloads.keepArchives,
           verifyAfterDownload: appSettings.downloads.verifyAfterDownload,
@@ -3703,6 +3854,7 @@ async function installLocalArchive(request: Request): Promise<Response> {
     keepDir: `${downloadsFolder}/local/${crypto.randomUUID()}/unpacked`,
   });
   const folders = result.installed.map((mod) => mod.name);
+  if (folders.length > 0) await warmLaunchHashes(root, { mods: folders });
   const metadata = body?.importMetadata === true && folders.length > 0
     ? await importD2SEMetadataForFolders(root, folders)
     : null;
@@ -4475,7 +4627,7 @@ async function installNativeLoader(
   folder: string,
   loader: ReturnType<typeof buildLoaderPlan>,
   registry: { hive: string; file: string },
-  identity: { title: string; icon: string | null },
+  identity: { title: string; icon: string | null; windowTitle: string },
   run: { key: string; boxId: string; presence: string | null; diagnostics: AppSettings["diagnostics"] },
   copy = 1,
   othersRunning = false,
@@ -4506,6 +4658,7 @@ async function installNativeLoader(
         game: GAME_EXE,
         // The title's icon, which the loader puts on the game window (the taskbar's icon).
         icon: identity.icon ?? "",
+        windowTitle: identity.windowTitle,
         // Run identity for future shortcut/session work. exordium-game currently ignores these.
         key: run.key,
         title: identity.title,

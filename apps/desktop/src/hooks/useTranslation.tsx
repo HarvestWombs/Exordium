@@ -1,5 +1,6 @@
 import * as React from "react";
 import { descriptionLanguage, tr } from "../lib/i18n.ts";
+import { sameLanguage, writtenIn } from "../lib/language.ts";
 
 interface Translated {
   text: string;
@@ -19,11 +20,10 @@ function languageName(tag: string): string {
   }
 }
 
-const sameLanguage = (a: string, b: string) => a.split("-")[0]!.toLowerCase() === b.split("-")[0]!.toLowerCase();
-
 /**
  * A description and its Translate button, into the player's own language. `text` is what to show;
- * `button` goes wherever the card keeps its links, and is null while there is nothing to translate.
+ * `button` goes wherever the card keeps its links, and is null when there is nothing to translate:
+ * no description, or one already in that language (writtenIn, which sends nothing to Google).
  */
 export function useTranslation(original: string): { text: string; button: React.ReactNode } {
   const [state, setState] = React.useState<{ for: string; on: boolean; busy: boolean; error: string | null }>(
@@ -31,6 +31,7 @@ export function useTranslation(original: string): { text: string; button: React.
   );
   const current = state.for === original ? state : { for: original, on: false, busy: false, error: null };
   const answer = answers.get(`${language()}\n${original}`) ?? null;
+  const inTheirLanguage = React.useMemo(() => writtenIn(original, language()), [original]);
 
   const run = async () => {
     if (answer) return setState({ ...current, on: !current.on });
@@ -51,14 +52,14 @@ export function useTranslation(original: string): { text: string; button: React.
     setState({ ...current, on: true, busy: false, error: null });
   };
 
-  if (!original) return { text: original, button: null };
+  if (!original || inTheirLanguage) return { text: original, button: null };
   const already = answer !== null && sameLanguage(answer.from, language());
   const showing = current.on && answer !== null && !already;
   return {
     text: showing ? answer.text : original,
     button: (
       <>
-        <button type="button" className="link-button" disabled={current.busy || already} onClick={() => void run()}>
+        <button type="button" className="small-button" disabled={current.busy || already} onClick={() => void run()}>
           {current.busy
             ? tr("Translating…")
             : already

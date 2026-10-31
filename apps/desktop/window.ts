@@ -5,7 +5,7 @@
  * `new Deno.BrowserWindow()` never returns on Windows (it blocks the event loop while adopting
  * the runtime's window), so the app never has a window object. laufey still creates a real
  * HWND of class `LaufeyWebView2` before this module runs, and user32 can drive it once found.
- * Left alone that window is 800x600, framed, and titled "E" (laufey v0.6.1, stock canary).
+ * Left alone that window is 800x600, framed, and titled "E" (seen on laufey v0.6.1).
  *
  * Best-effort, every call returns whether it worked: without --allow-ffi, under a plain
  * `deno run` (no window), or off Windows, nothing happens and the page keeps the browser's chrome.

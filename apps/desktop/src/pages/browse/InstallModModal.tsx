@@ -77,7 +77,7 @@ export function InstallModModal(
         {error && <p className="bad-text small" role="alert">{error}</p>}
         <div className="row-actions">
           <button type="button" className="ghost" disabled={busy} onClick={onClose}>{tr("Cancel")}</button>
-          <button type="submit" className="ghost primary" disabled={busy || !ready}>
+          <button type="submit" className="ghost primary action-install" disabled={busy || !ready}>
             {busy ? tr("Starting…") : tr("Install")}
           </button>
         </div>

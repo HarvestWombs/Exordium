@@ -95,6 +95,7 @@ export interface Job {
   total: number;
   extracted: number;
   unpackedSize: number;
+  paused?: boolean;
   installing: string | null;
   result: InstallResult | null;
   error?: string;

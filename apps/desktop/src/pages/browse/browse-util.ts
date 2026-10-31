@@ -124,6 +124,14 @@ export function formatRate(bytesPerSecond: number): string {
   return tr("{value} MB/s", { value: (bytesPerSecond / 1024 / 1024).toFixed(1) });
 }
 
+/** `01:40`, or `1:02:03` past an hour, as Steam shows the time left. */
+export function formatClock(seconds: number): string {
+  const whole = Math.ceil(seconds);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const clock = `${pad(Math.floor(whole / 60) % 60)}:${pad(whole % 60)}`;
+  return whole < 3600 ? clock : `${Math.floor(whole / 3600)}:${clock}`;
+}
+
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.ceil(seconds)}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;

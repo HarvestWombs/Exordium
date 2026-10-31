@@ -275,17 +275,14 @@ export function TitlePage(
                     <ul className="links">
                       {t.links.map((link) => (
                         <li key={link.url}>
-                          <a
-                            href={link.url}
-                            className="link-text"
+                          <button
+                            type="button"
+                            className="small-button"
                             title={link.url}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              void openLink(link.url);
-                            }}
+                            onClick={() => void openLink(link.url)}
                           >
-                            {link.label}
-                          </a>
+                            {link.label} ↗
+                          </button>
                         </li>
                       ))}
                     </ul>

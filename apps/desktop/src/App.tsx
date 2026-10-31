@@ -23,7 +23,7 @@ import { loadUploads } from "./lib/latest-uploads.ts";
 import { libraryView } from "./lib/library-view.ts";
 import { runningSummary } from "./lib/util.ts";
 import { D2SEConverter } from "./pages/D2SEConverter.tsx";
-import { HelpPage } from "./pages/help/Help.tsx";
+import { HelpPage, type HelpPageId } from "./pages/help/Help.tsx";
 import { ImportDialog } from "./pages/ImportDialog.tsx";
 import { LatestUploads, pendingUpdates } from "./pages/library/LatestUploads.tsx";
 import { LibraryGrid } from "./pages/library/LibraryGrid.tsx";
@@ -43,11 +43,36 @@ import type {
   Filter,
   NameRequest,
   Scan,
+  SettingsSection,
   SidebarSection,
   Status,
   Tab,
   Title,
 } from "./types.ts";
+
+function preparationSummary(progress: Status["preparing"][number] | undefined): string | null {
+  if (!progress) return null;
+  if (progress.phase === "checking") {
+    return progress.current !== null && progress.total
+      ? tr("Checking {title}'s files — {percent}%", {
+        title: progress.title,
+        percent: Math.min(100, Math.round((progress.current / progress.total) * 100)),
+      })
+      : tr("Checking {title}'s files…", { title: progress.title });
+  }
+  if (progress.phase === "building") {
+    return progress.current !== null && progress.total !== null
+      ? tr("Building {title}'s box — {current} of {total}", {
+        title: progress.title,
+        current: progress.current,
+        total: progress.total,
+      })
+      : tr("Building {title}'s box…", { title: progress.title });
+  }
+  if (progress.phase === "registry") return tr("Preparing {title}'s settings…", { title: progress.title });
+  if (progress.phase === "loader") return tr("Preparing {title}'s loader…", { title: progress.title });
+  return tr("Starting {title}…", { title: progress.title });
+}
 
 /**
  * Exordium's page: the top bar and its four views (Library, Browse, Settings, Help), first-launch
@@ -79,6 +104,8 @@ export function App() {
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
   const [browsePage, setBrowsePage] = React.useState<BrowseView>("archive");
   const [libraryPage, setLibraryPage] = React.useState<LibraryPage>("home");
+  const [settingsSection, setSettingsSection] = React.useState<SettingsSection>("library");
+  const [helpPage, setHelpPage] = React.useState<HelpPageId>("start");
   // What Browse opens filtered to: a Latest uploads card opens its upload.
   const [browseSearch, setBrowseSearch] = React.useState("");
   const [converterOpen, setConverterOpen] = React.useState(false);
@@ -172,7 +199,7 @@ export function App() {
   async function play(title: Title) {
     if (!root) return;
     setStarting(title.key);
-    setActivity(tr("Starting {title} — preparing its box…", { title: title.title }));
+    setActivity(tr("Checking {title}'s files…", { title: title.title }));
     try {
       const response = await fetch("/api/play", {
         method: "POST",
@@ -349,6 +376,14 @@ export function App() {
     setBrowseSearch("");
     showView("browse");
   }
+  function openSettings(section: SettingsSection) {
+    setSettingsSection(section);
+    showView("settings");
+  }
+  function openHelp(page: HelpPageId) {
+    setHelpPage(page);
+    showView("help");
+  }
 
   const readyUpdate = status?.update.phase === "ready" && status.update.version &&
       updateLater !== status.update.version
@@ -371,12 +406,15 @@ export function App() {
         view={view}
         libraryPage={libraryPage}
         browsePage={browsePage}
+        settingsSection={settingsSection}
+        helpPage={helpPage}
         libraryReady={root !== null}
         desktop={desktop}
         maximized={maximized}
-        onView={showView}
         onLibrary={openLibrary}
         onBrowse={openBrowse}
+        onSettings={openSettings}
+        onHelp={openHelp}
         onMaximized={setMaximized}
         onToggleMaximize={() => void toggleMaximize()}
       />
@@ -454,7 +492,8 @@ export function App() {
         <Browse
           view={browsePage}
           onView={setBrowsePage}
-          cores={cores}
+          downloads={downloading}
+          onCancelDownload={askCancel}
           initialSearch={browseSearch}
           installed={new Set(titles.flatMap((t) => [titleKey(t.title), titleKey(t.folder)]))}
           root={root}
@@ -468,8 +507,15 @@ export function App() {
           onCoreStarted={() => void refreshCores()}
         />
       )}
-      {view === "settings" && status && <AppSettings status={status} onChanged={refreshStatus} />}
-      {view === "help" && <HelpPage version={status?.version ?? null} />}
+      {view === "settings" && status && (
+        <AppSettings
+          status={status}
+          section={settingsSection}
+          onSection={setSettingsSection}
+          onChanged={refreshStatus}
+        />
+      )}
+      {view === "help" && <HelpPage version={status?.version ?? null} page={helpPage} onPage={setHelpPage} />}
       {view === "library" && !root && status && (
         <SetupPage
           app={status.appSettings}
@@ -582,6 +628,8 @@ export function App() {
                 art={artVersion}
                 running={runningKeys}
                 favorites={favorites}
+                playedAt={status?.playedAt ?? {}}
+                playtime={status?.playtime ?? {}}
                 starting={starting}
                 onOpen={openTitle}
                 onPlay={(t) => void play(t)}
@@ -652,13 +700,13 @@ export function App() {
         update={readyUpdate}
         download={downloadStatus}
         onDownloads={() => openBrowse("downloads")}
-        activity={activity ??
+        activity={preparationSummary(status?.preparing[0]) ?? activity ??
           (scanning
             ? tr("Reading the install…")
             : status?.running.length
             ? runningSummary(status.running)
             : tr("Nothing running"))}
-        live={Boolean(activity || scanning || status?.running.length)}
+        live={Boolean(status?.preparing.length || activity || scanning || status?.running.length)}
         library={scan
           ? tr("Library: {mods}, {cores}", {
             mods: plural(scan.mods.length, "{count} mod", "{count} mods"),

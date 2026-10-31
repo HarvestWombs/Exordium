@@ -191,6 +191,21 @@ export function gameCommandLine(settings: LoaderSettings): string {
   ].filter(Boolean).join(" ");
 }
 
+/**
+ * The game window's title: `Diablo II 1.10f Eastern Sun 3.2`. A core played on its own passes no
+ * title. A version the title already ends with is not repeated, as D2SE setups often carry both.
+ */
+export function gameWindowTitle(
+  core: string | null | undefined,
+  title: string | null | undefined,
+  version: string | null | undefined,
+): string {
+  const name = title?.replace(/\s+/g, " ").trim() ?? "";
+  const release = version?.replace(/\s+/g, " ").trim() ?? "";
+  const repeated = release !== "" && name.toLowerCase().endsWith(release.toLowerCase());
+  return ["Diablo II", core?.trim(), name, repeated ? "" : release].filter(Boolean).join(" ");
+}
+
 /** `1.10f` as Game.exe spells its own version for Fog: `v1.10`. */
 export function gameVersion(core: string | null | undefined): string | null {
   const match = core?.trim().match(/^(\d+)\.(\d+)/);

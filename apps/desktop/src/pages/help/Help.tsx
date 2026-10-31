@@ -5,7 +5,7 @@ import { SettingsHead } from "../../components/settings-rows.tsx";
 import { About } from "./About.tsx";
 import { FAQ, type FaqEntry, type HelpField, type HelpSection, TOPICS } from "./content.ts";
 
-type Page = string; // a topic id, "faq" or "about"
+export type HelpPageId = string; // a topic id, "faq" or "about"
 
 /** Words of the query, lowercased; a hit must contain every one. */
 function words(query: string): string[] {
@@ -48,7 +48,7 @@ function sectionText(section: HelpSection): string[] {
 
 interface Hit {
   key: string;
-  page: Page;
+  page: HelpPageId;
   where: string;
   title: string;
   snippet: string;
@@ -170,8 +170,9 @@ function Faq({ open, onOpen }: { open: number | null; onOpen: (i: number | null)
 }
 
 /** Help: how Exordium's library and mods work, the FAQ, and About, with a search over all of it. */
-export function HelpPage({ version }: { version: string | null }) {
-  const [page, setPage] = React.useState<Page>("start");
+export function HelpPage(
+  { version, page, onPage }: { version: string | null; page: HelpPageId; onPage: (page: HelpPageId) => void },
+) {
   const [query, setQuery] = React.useState("");
   const [openFaq, setOpenFaq] = React.useState<number | null>(null);
   // Where to scroll once a search hit's page has rendered.
@@ -186,9 +187,9 @@ export function HelpPage({ version }: { version: string | null }) {
     setScrollTo(null);
   }, [scrollTo, page, openFaq]);
 
-  function go(next: Page) {
+  function go(next: HelpPageId) {
     setQuery("");
-    setPage(next);
+    onPage(next);
   }
 
   function openHit(hit: Hit) {
@@ -199,7 +200,7 @@ export function HelpPage({ version }: { version: string | null }) {
     } else if (hit.section !== undefined) setScrollTo(`${hit.page}-${hit.section}`);
   }
 
-  const nav = (id: Page, label: string) => (
+  const nav = (id: HelpPageId, label: string) => (
     <button
       key={id}
       type="button"

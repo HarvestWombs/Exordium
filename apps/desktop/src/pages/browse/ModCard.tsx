@@ -101,7 +101,7 @@ export function ModCard(
             </span>
           )}
           {description.length > 280 && (
-            <button type="button" className="link-button" onClick={onExpand}>
+            <button type="button" className="small-button" onClick={onExpand}>
               {expanded ? tr("Less") : tr("More")}
             </button>
           )}
@@ -110,7 +110,7 @@ export function ModCard(
             <button
               type="button"
               key={link.url}
-              className="link-button"
+              className="small-button"
               title={link.url}
               onClick={() => openLink(link.url)}
             >
@@ -147,7 +147,7 @@ export function ModCard(
 
       <div className="mod-bar">
         <span className="source-badge">Internet Archive</span>
-        <button type="button" className="link-button" onClick={() => onOpen("page")}>{tr("Page ↗")}</button>
+        <button type="button" className="small-button" onClick={() => onOpen("page")}>{tr("Page ↗")}</button>
         <div className="grow" />
         {detailsError && <span className="bad-text small">{detailsError}</span>}
         <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job?.file)} />

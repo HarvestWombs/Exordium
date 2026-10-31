@@ -38,6 +38,7 @@ const DEFAULT_MODES: readonly LinkMode[] = ["symlink", "hardlink"];
 
 /** Plugins keep their settings in `.ini` files and some rewrite them; a protected one is copied. */
 const SETTINGS = /\.ini$/i;
+const FILE_BATCH = 32;
 
 export class Boxes {
   readonly root: string;
@@ -112,28 +113,54 @@ export class Boxes {
     const files: BoxFile[] = [];
     try {
       await Deno.mkdir(building);
-      for (const { file, source, protected: guarded } of sources) {
-        const dest = `${building}/${file.path}`;
-        await Deno.mkdir(dest.slice(0, dest.lastIndexOf("/")), { recursive: true });
-        const modes = guarded && copy(file.path) ? (["copy"] as const) : (options.modes ?? DEFAULT_MODES);
-        const drive = driveOf(source);
-        const mode = await place(source, dest, modes, failed.get(drive) ?? new Set(), (m, why) => {
-          if (!failed.has(drive)) failed.set(drive, new Set());
-          failed.get(drive)!.add(m);
-          notes.add(`${m} is not available for files on ${drive} (${why}); used the next option`);
-        });
-        counts[mode]++;
-        const info = await Deno.stat(source);
-        files.push({
-          path: file.path,
-          mode,
-          source,
-          protected: guarded,
-          hash: file.hash,
-          size: info.size,
-          mtime: info.mtime?.getTime() ?? null,
-        });
+      // Creating the same parent directory for every file made large first builds syscall-bound.
+      // Make each directory once, then place independent files in bounded batches: enough parallelism
+      // for Windows and Defender to pipeline their work without opening thousands of handles at once.
+      const parents = [
+        ...new Set(
+          sources.map(({ file }) => {
+            const at = file.path.lastIndexOf("/");
+            return at < 0 ? "" : file.path.slice(0, at);
+          }).filter(Boolean),
+        ),
+      ].sort((a, b) => a.split("/").length - b.split("/").length);
+      for (let i = 0; i < parents.length; i += FILE_BATCH) {
+        await Promise.all(
+          parents.slice(i, i + FILE_BATCH).map((parent) => Deno.mkdir(`${building}/${parent}`, { recursive: true })),
+        );
       }
+      const placed = new Array<BoxFile>(sources.length);
+      options.onProgress?.(0, sources.length);
+      for (let i = 0; i < sources.length; i += FILE_BATCH) {
+        const batch = sources.slice(i, i + FILE_BATCH);
+        await Promise.all(batch.map(async ({ file, source, protected: guarded }, offset) => {
+          const dest = `${building}/${file.path}`;
+          const modes = guarded && copy(file.path) ? (["copy"] as const) : (options.modes ?? DEFAULT_MODES);
+          const drive = driveOf(source);
+          let unavailable = failed.get(drive);
+          if (!unavailable) {
+            unavailable = new Set();
+            failed.set(drive, unavailable);
+          }
+          const mode = await place(source, dest, modes, unavailable, (m, why) => {
+            unavailable!.add(m);
+            notes.add(`${m} is not available for files on ${drive} (${why}); used the next option`);
+          });
+          counts[mode]++;
+          const info = await Deno.stat(source);
+          placed[i + offset] = {
+            path: file.path,
+            mode,
+            source,
+            protected: guarded,
+            hash: file.hash,
+            size: info.size,
+            mtime: info.mtime?.getTime() ?? null,
+          };
+        }));
+        options.onProgress?.(Math.min(i + batch.length, sources.length), sources.length);
+      }
+      files.push(...placed);
       if (spec.saves) {
         await Deno.mkdir(spec.saves, { recursive: true });
         await Deno.symlink(spec.saves, `${building}/${SAVE}`, { type: "junction" });

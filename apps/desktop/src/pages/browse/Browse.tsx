@@ -1,5 +1,6 @@
 import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
+import { RefreshIcon } from "../../components/icons.tsx";
 import { Cores } from "./Cores.tsx";
 import { Downloads } from "./Downloads.tsx";
 import { InstallModModal } from "./InstallModModal.tsx";
@@ -25,27 +26,39 @@ import type { ArchiveSort, BrowseView, Group, Item, Job, ModDbItem, ModDbKind, S
  * Installing is one step: download, unpack with progress, move into MODS, delete the archive.
  */
 export function Browse(
-  { view, onView, initialSearch, installed, root, cores, onInstalled, onCoreStarted, onDownloadStarted, onExpectDraft }:
-    {
-      /** The page showing, which the top bar's menus choose too. */
-      view: BrowseView;
-      onView: (view: BrowseView) => void;
-      /** What the search box starts with: a Latest uploads card opens on its upload. */
-      initialSearch?: string;
-      installed: Set<string>;
-      /** The D2SE install mods are installed into (its MODS folder). */
-      root: string | null;
-      /** Cores on their way in, for Downloads to list. */
-      cores: Incoming[];
-      /** A mod was installed as MODS\<name>: rescan and show it. */
-      onInstalled: (name: string) => void;
-      /** A core's install has started, for the library to follow. */
-      onCoreStarted: () => void;
-      /** A download has started, for the library to follow. */
-      onDownloadStarted: () => void;
-      /** Once this download is in, draft its exordium.mod.json. */
-      onExpectDraft: (key: string) => void;
-    },
+  {
+    view,
+    onView,
+    initialSearch,
+    installed,
+    root,
+    downloads,
+    onCancelDownload,
+    onInstalled,
+    onCoreStarted,
+    onDownloadStarted,
+    onExpectDraft,
+  }: {
+    /** The page showing, which the top bar's menus choose too. */
+    view: BrowseView;
+    onView: (view: BrowseView) => void;
+    /** What the search box starts with: a Latest uploads card opens on its upload. */
+    initialSearch?: string;
+    installed: Set<string>;
+    /** The D2SE install mods are installed into (its MODS folder). */
+    root: string | null;
+    /** Everything on its way in, for Downloads to list. */
+    downloads: Incoming[];
+    onCancelDownload: (item: Incoming) => void;
+    /** A mod was installed as MODS\<name>: rescan and show it. */
+    onInstalled: (name: string) => void;
+    /** A core's install has started, for the library to follow. */
+    onCoreStarted: () => void;
+    /** A download has started, for the library to follow. */
+    onDownloadStarted: () => void;
+    /** Once this download is in, draft its exordium.mod.json. */
+    onExpectDraft: (key: string) => void;
+  },
 ) {
   const [data, setData] = React.useState<{ sources: Source[]; groups: Group[]; items: Item[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -259,6 +272,12 @@ export function Browse(
     });
   }
 
+  /** A download's picture, from the listing it was started from. */
+  const coverOf = (job: Job) =>
+    data?.items.find((item) => item.id === job.id)?.cover ??
+      modDb?.items.find((item) => urlJobs[`moddb:${item.kind}:${item.id}`] === job.id)?.cover ??
+      null;
+
   const linkUrl = modDbAddress(linkAddress);
   const linkOk = linkUrl ? installableModDbUrl(linkUrl) : false;
 
@@ -387,24 +406,8 @@ export function Browse(
                 className={hideInstalled ? "filter-row on" : "filter-row"}
                 onClick={() => setHideInstalled((v) => !v)}
               >
-                <span>{tr("Hide mods in my library")}</span>
+                <span>{tr("Hide installed mods")}</span>
               </button>
-              {view === "moddb"
-                ? (
-                  <button
-                    type="button"
-                    className="filter-row"
-                    disabled={modDbLoading}
-                    onClick={() => void loadModDb(true)}
-                  >
-                    <span>{modDbLoading ? tr("Refreshing…") : tr("Refresh source")}</span>
-                  </button>
-                )
-                : (
-                  <button type="button" className="filter-row" disabled={loading} onClick={() => void load(true)}>
-                    <span>{loading ? tr("Refreshing…") : tr("Refresh source")}</span>
-                  </button>
-                )}
               {view === "moddb" && (
                 <button
                   type="button"
@@ -434,7 +437,11 @@ export function Browse(
                     placeholder={tr("ModDB page or archive link")}
                     aria-label={tr("Download address")}
                   />
-                  <button type="submit" className="ghost primary compact" disabled={!linkOk || !root}>
+                  <button
+                    type="submit"
+                    className="ghost primary action-install compact"
+                    disabled={!linkOk || !root}
+                  >
                     {tr("Install")}
                   </button>
                 </form>
@@ -476,15 +483,27 @@ export function Browse(
           {view === "downloads" && <span className="browse-context">{tr("DOWNLOADS")}</span>}
           <div className="grow" />
           {(view === "archive" || view === "moddb") && (
-            <label className="search browse-search">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.currentTarget.value)}
-                placeholder={tr("Search by name…")}
-                aria-label={tr("Search mods")}
-              />
-            </label>
+            <>
+              <label className="search browse-search">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.currentTarget.value)}
+                  placeholder={tr("Search by name…")}
+                  aria-label={tr("Search mods")}
+                />
+              </label>
+              <button
+                type="button"
+                className={`browse-refresh ${(view === "moddb" ? modDbLoading : loading) ? "loading" : ""}`}
+                disabled={view === "moddb" ? modDbLoading : loading}
+                title={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
+                aria-label={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
+                onClick={() => void (view === "moddb" ? loadModDb(true) : load(true))}
+              >
+                <RefreshIcon />
+              </button>
+            </>
           )}
         </nav>
 
@@ -536,7 +555,9 @@ export function Browse(
         {view === "cores" || view === "moddb" ? null : view === "downloads"
           ? (
             <Downloads
-              cores={cores}
+              downloads={downloads}
+              coverOf={coverOf}
+              onCancel={onCancelDownload}
               jobs={jobs}
               rates={rates}
               root={root}

@@ -38,6 +38,8 @@ export interface BoxSpec {
 export interface RealiseOptions {
   /** Link modes to try, in order. Default: symlink, then hardlink. Copies are opt-in. */
   modes?: readonly LinkMode[];
+  /** Called after each bounded batch while a new box is being linked. */
+  onProgress?: (completed: number, total: number) => void;
 }
 
 /** A folder in the box that is a junction to `target`. */

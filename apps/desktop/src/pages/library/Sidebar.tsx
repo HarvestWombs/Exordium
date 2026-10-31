@@ -125,7 +125,7 @@ export function Sidebar(
         {soloSection && (
           <div className="solo-bar">
             <span>{tr("Only {name}", { name: soloSection.name })}</span>
-            <button type="button" className="link-button" onClick={onClearSolo}>{tr("View all")}</button>
+            <button type="button" className="small-button" onClick={onClearSolo}>{tr("View all")}</button>
           </div>
         )}
         {incoming.length > 0 && (

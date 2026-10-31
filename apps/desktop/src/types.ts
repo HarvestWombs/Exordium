@@ -183,7 +183,7 @@ export interface Playtime {
 }
 
 export interface Status {
-  /** Exordium's own library (library-setup.ts); null until setup has copied the game files. */
+  /** Exordium's own library (library-setup.ts); null until setup has placed the game files. */
   root: string | null;
   /** The player's Diablo II install, read by setup and the mod import only. */
   install: string | null;
@@ -195,6 +195,13 @@ export interface Status {
   /** The player's own sidebar groups, in order (server.ts collectionsRoute). */
   collections: Collection[];
   running: Running[];
+  preparing: {
+    key: string;
+    title: string;
+    phase: "checking" | "building" | "registry" | "loader" | "starting";
+    current: number | null;
+    total: number | null;
+  }[];
   playtime: Record<string, Playtime>;
   /** Running as the packaged Exordium.exe, which a desktop shortcut can start. */
   packaged: boolean;

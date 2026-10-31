@@ -16,6 +16,7 @@ import {
   modDbItemsFromRss,
   modDbNextPage,
   parseArchiveListing,
+  pauseJob,
   startUrlJob,
 } from "./browse.ts";
 
@@ -285,6 +286,43 @@ Deno.test("latest uploads come from the caches, newest first, one card per same-
     assertEquals(uploads[0]!.sourceLabel, "ModDB · Files");
   } finally {
     await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("a paused download reads nothing more, carries on, and can still be cancelled", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, () =>
+    new Response(
+      new ReadableStream({
+        async pull(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          controller.enqueue(new Uint8Array(1024));
+        },
+      }),
+      { headers: { "content-type": "application/zip" } },
+    ));
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    const url = `http://127.0.0.1:${server.addr.port}/Held%20Mod.zip`;
+    const job = startUrlJob(dir, url, "Held Mod", { modsDir: `${dir}/mods`, stagingDir: `${dir}/staging` });
+    for (let i = 0; i < 400 && job.received === 0; i++) await pause(5);
+    assertEquals(pauseJob(job.id, job.file, true), true);
+    await pause(100);
+    const held = job.received;
+    await pause(300);
+    assertEquals(job.received, held);
+
+    assertEquals(pauseJob(job.id, job.file, false), true);
+    for (let i = 0; i < 400 && job.received === held; i++) await pause(5);
+    assert(job.received > held);
+
+    pauseJob(job.id, job.file, true);
+    assertEquals(cancelJob(job.id, job.file), true);
+    for (let i = 0; i < 400 && (await jobList(dir)).length > 0; i++) await pause(5);
+    assertEquals(await jobList(dir), []);
+  } finally {
+    await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
   }
 });
 

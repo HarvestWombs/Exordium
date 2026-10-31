@@ -6,9 +6,10 @@ import { ACTIVE, jobProgress, post } from "../pages/browse/browse-util.ts";
 import type { Job } from "../pages/browse/types.ts";
 
 /** A download's identity while it runs: a link's file name is only known once it has started. */
-const jobKey = (job: Job) => `download:${job.source === "url" ? job.id : `${job.id}/${job.file}`}`;
+export const jobKey = (job: Job) => `download:${job.source === "url" ? job.id : `${job.id}/${job.file}`}`;
 
 function status(job: Job): string {
+  if (job.paused) return tr("Paused");
   const progress = jobProgress(job);
   const percent = progress === null ? null : Math.floor(progress * 100);
   if (job.state === "installing") return tr("Installing…");
@@ -125,6 +126,11 @@ export function useDownloads(
       cancellable: job.state === "downloading",
       cancel: async () => {
         await post("/api/browse/cancel", { id: job.id, file: job.file });
+        await refresh();
+      },
+      paused: job.paused === true,
+      setPaused: async (paused) => {
+        await post("/api/browse/pause", { id: job.id, file: job.file, paused });
         await refresh();
       },
     };

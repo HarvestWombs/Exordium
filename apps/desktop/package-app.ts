@@ -1,14 +1,13 @@
 /**
- * Packages the desktop app with the canary `deno`, the same way Excelsior does.
+ * Packages the desktop app with the `deno` running this script.
  *
- * Stable deno 2.9.4 packages laufey v0.5.0, which crashes at window creation on Windows
- * (0xC0000409 in ucrtbase) right after the server binds its port — even for an empty app.
- * Canary packages v0.6.1, which works. The binary is resolved here rather than through PATH
- * because `deno task` under Git Bash can't spawn a PATH-resolved `deno-canary`.
- *
- * Install the canary binary once:
- *   deno upgrade canary --output ~/.deno/bin/deno-canary.exe
+ * The version picks the laufey build that goes in the package: stable 2.9.4 brings v0.5.0, which
+ * crashes at window creation on Windows (0xC0000409 in ucrtbase) right after the server binds its
+ * port, even for an empty app, while stable 2.9.8 brings v0.7.0, which works. An older deno would
+ * build without complaint and give an exe that dies on launch, so it is refused here.
  */
+
+const MINIMUM_DENO = [2, 9, 8];
 
 const PACKAGE_ARGS = [
   "desktop",
@@ -28,49 +27,29 @@ const here = import.meta.dirname ?? Deno.cwd();
 const nativeSidecars = ["exordium-window.dll"] as const;
 const SEVEN_ZIP_FILES = ["7z.exe", "7z.dll", "License.txt"] as const;
 
-function candidatePaths(): string[] {
-  const paths: string[] = [];
-  const override = Deno.env.get("DENO_CANARY");
-  if (override) paths.push(override);
-  const home = Deno.env.get(isWindows ? "USERPROFILE" : "HOME");
-  if (home) paths.push(`${home}/.deno/bin/deno-canary${exe}`);
-  return paths;
-}
-
-function findCanary(): string {
-  for (const path of candidatePaths()) {
-    try {
-      if (Deno.statSync(path).isFile) return path;
-    } catch {
-      continue;
-    }
+function olderThanMinimum(version: string): boolean {
+  const parts = version.split(/[.+-]/).slice(0, 3).map(Number);
+  for (const [index, minimum] of MINIMUM_DENO.entries()) {
+    const part = parts[index] ?? 0;
+    if (part !== minimum) return part < minimum;
   }
-  return "deno-canary";
+  return false;
 }
 
-let code: number;
-try {
-  ({ code } = await new Deno.Command(findCanary(), {
-    args: PACKAGE_ARGS,
-    cwd: here,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output());
-} catch (error) {
+if (olderThanMinimum(Deno.version.deno)) {
   console.error(
-    [
-      "",
-      `Could not run the canary deno (tried: ${candidatePaths().join(", ") || "PATH only"}).`,
-      `  ${error instanceof Error ? error.message : String(error)}`,
-      "",
-      "Install it once:  deno upgrade canary --output ~/.deno/bin/deno-canary.exe",
-      "Or point DENO_CANARY at an existing build.",
-      "",
-    ].join("\n"),
+    `Packaging needs deno ${MINIMUM_DENO.join(".")} or newer; this is ${Deno.version.deno}. Run: deno upgrade`,
   );
   Deno.exit(1);
 }
+
+const { code } = await new Deno.Command(Deno.execPath(), {
+  args: PACKAGE_ARGS,
+  cwd: here,
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+}).output();
 if (code !== 0) {
   console.error("\nPackaging failed. If it mentions access denied, Exordium is still running — close it first.");
   Deno.exit(code);

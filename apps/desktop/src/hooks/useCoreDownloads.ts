@@ -9,6 +9,7 @@ export interface CoreJob {
   received: number;
   total: number;
   error?: string;
+  paused?: boolean;
 }
 
 const active = (job: CoreJob) => job.state !== "installed" && job.state !== "failed";
@@ -16,6 +17,7 @@ const jobKey = (job: CoreJob) => `core:${job.core.toLowerCase()}`;
 const name = (job: CoreJob) => tr("Core {core}", { core: job.core });
 
 function status(job: CoreJob): string {
+  if (job.paused) return tr("Paused");
   if (job.state === "verifying") return tr("Verifying…");
   if (job.state === "installing") return tr("Installing…");
   const percent = job.total > 0 ? Math.floor((job.received / job.total) * 100) : null;
@@ -108,6 +110,15 @@ export function useCoreDownloads(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ core: job.core }),
+      });
+      await refresh();
+    },
+    paused: job.paused === true,
+    setPaused: async (paused) => {
+      await fetch("/api/cores/pause", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ core: job.core, paused }),
       });
       await refresh();
     },

@@ -1,6 +1,6 @@
 /**
- * Exordium's own library: the game files, cores and mods it runs, copied out of the player's Diablo II
- * install so that nothing launches from (or scans) the install itself (decided 2026-10-10).
+ * Exordium's own library: the game files, cores and mods it runs. The game layer normally links to
+ * the player's Diablo II install; cores and mods are installed into the library itself.
  *
  *   <Exordium>/library/
  *     exordium-library.json      the marker; the D2SE reader reads a folder with it (findD2SE)
@@ -11,8 +11,8 @@
  *                                installed from Browse
  *
  * The folders are LIBRARY_FOLDERS; the install keeps D2SE's own (D2SE_FOLDERS), and the reader takes
- * either. The install is read only by setup and by the mod import (the converter); every file is
- * copied, never linked, so the two are fully independent.
+ * either. Automatic game setup prefers symbolic links, falls back to hardlinks on the same volume,
+ * then copies. The player can still explicitly copy or move the files instead.
  */
 
 import { GAME_ARCHIVES, INSTALL_FILES, LIBRARY_FOLDERS, LIBRARY_MARKER, RENDERER_WRAPPERS } from "@exordium/d2se";
@@ -127,6 +127,23 @@ export async function createLibrary(library: string, install: string): Promise<v
   }
 }
 
+export type TransferMode = "auto" | "symlink" | "hardlink" | "copy" | "move";
+type UsedTransferMode = Exclude<TransferMode, "auto" | "move"> | "move";
+
+/** Records how the game layer was populated so diagnostics and repairs can explain its ownership. */
+export async function recordLibraryTransfer(
+  library: string,
+  requested: TransferMode,
+  methods: Readonly<Record<UsedTransferMode, number>>,
+): Promise<void> {
+  const marker = `${slash(library)}/${LIBRARY_MARKER}`;
+  const current = JSON.parse(await Deno.readTextFile(marker)) as Record<string, unknown>;
+  await Deno.writeTextFile(
+    marker,
+    JSON.stringify({ ...current, version: 2, gameTransfer: { requested, methods } }, null, 2) + "\n",
+  );
+}
+
 // ---- Copy jobs --------------------------------------------------------------------------------------
 
 export type CopyKind = "game" | "core" | "mod";
@@ -144,6 +161,8 @@ export interface CopyJob {
   total: number;
   error: string | null;
   startedAt: string;
+  /** Files placed by each method. Automatic jobs can use more than one fallback. */
+  methods: Record<UsedTransferMode, number>;
 }
 
 class CopyCancelled extends Error {}
@@ -173,19 +192,39 @@ export function cancelCopy(id: string): CopyJob | null {
   return { ...job };
 }
 
-async function copyTree(from: string, to: string, job: CopyJob): Promise<void> {
+async function transferFile(from: string, to: string, job: CopyJob, mode: TransferMode): Promise<void> {
+  const choices: UsedTransferMode[] = mode === "auto"
+    ? ["symlink", "hardlink", "copy"]
+    : [mode === "move" ? "copy" : mode];
+  let lastError: Error | null = null;
+  for (const choice of choices) {
+    try {
+      if (choice === "symlink") await Deno.symlink(from, to, { type: "file" });
+      else if (choice === "hardlink") await Deno.link(from, to);
+      else await Deno.copyFile(from, to);
+      job.methods[choice]++;
+      return;
+    } catch (error) {
+      lastError = error as Error;
+      await Deno.remove(to).catch(() => {});
+    }
+  }
+  throw lastError ?? new Error(`Could not place ${from}.`);
+}
+
+async function transferTree(from: string, to: string, job: CopyJob, mode: TransferMode): Promise<void> {
   const info = await Deno.lstat(from);
   if (info.isSymlink) return;
   if (info.isFile) {
     if (job.cancelling) throw new CopyCancelled();
-    // The OS copy (CopyFileW on Windows): far faster than a userspace read/write loop, and it keeps
-    // the file's timestamps. Progress is per file rather than per chunk, which is fine for mod files.
-    await Deno.copyFile(from, to);
+    await transferFile(from, to, job, mode);
     job.copied += info.size;
     return;
   }
   await Deno.mkdir(to, { recursive: true });
-  for await (const entry of Deno.readDir(from)) await copyTree(`${from}/${entry.name}`, `${to}/${entry.name}`, job);
+  for await (const entry of Deno.readDir(from)) {
+    await transferTree(`${from}/${entry.name}`, `${to}/${entry.name}`, job, mode);
+  }
 }
 
 /**
@@ -205,7 +244,13 @@ export function startCopy(
   kind: CopyKind,
   label: string,
   pairs: { from: string; to: string }[],
-  options: { skipExisting?: boolean; move?: boolean; queue?: boolean; then?: () => Promise<void> } = {},
+  options: {
+    skipExisting?: boolean;
+    move?: boolean;
+    mode?: TransferMode;
+    queue?: boolean;
+    then?: (job: Readonly<CopyJob>) => Promise<void>;
+  } = {},
 ): CopyJob {
   const running = [...jobs.values()].find((j) =>
     j.kind === kind && j.label === label && (j.state === "copying" || j.state === "queued")
@@ -221,6 +266,7 @@ export function startCopy(
     total: 0,
     error: null,
     startedAt: new Date().toISOString(),
+    methods: { symlink: 0, hardlink: 0, copy: 0, move: 0 },
   };
   jobs.set(job.id, job);
   const run = async () => {
@@ -242,19 +288,25 @@ export function startCopy(
       for (const { from, to, bytes } of todo) {
         if (job.cancelling) throw new CopyCancelled();
         await Deno.mkdir(to.replace(/\/[^/]+$/, ""), { recursive: true });
-        if (options.move && await Deno.rename(from, to).then(() => true, () => false)) {
+        const move = options.move || options.mode === "move";
+        if (move && await Deno.rename(from, to).then(() => true, () => false)) {
           // Same drive: an instant rename moved it in one step, no bytes streamed.
+          job.methods.move++;
           job.copied += bytes;
           continue;
         }
         const partial = `${to}.partial`;
         await Deno.remove(partial, { recursive: true }).catch(() => {});
-        await copyTree(from, partial, job);
+        await transferTree(from, partial, job, options.mode ?? "copy");
         await Deno.rename(partial, to);
         // Move across drives: the copy is in place, so the source can go.
-        if (options.move) await Deno.remove(from, { recursive: true }).catch(() => {});
+        if (move) {
+          await Deno.remove(from, { recursive: true }).catch(() => {});
+          job.methods.move += job.methods.copy;
+          job.methods.copy = 0;
+        }
       }
-      await options.then?.();
+      await options.then?.({ ...job, methods: { ...job.methods } });
       job.state = "done";
     } catch (error) {
       for (const { to } of todo) await Deno.remove(`${to}.partial`, { recursive: true }).catch(() => {});

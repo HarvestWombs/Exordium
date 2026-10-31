@@ -54,8 +54,13 @@ async function spec(f: Fixture, id = "soul"): Promise<BoxSpec> {
 Deno.test("a box presents every layer as links, and save is the mod's own folder", async () => {
   const f = await fixture();
   try {
-    const box = await f.boxes.realise(await spec(f));
+    const progress: [number, number][] = [];
+    const box = await f.boxes.realise(await spec(f), {
+      onProgress: (completed, total) => progress.push([completed, total]),
+    });
     assertEquals(box.reused, false);
+    assertEquals(progress[0], [0, 5]);
+    assertEquals(progress.at(-1), [5, 5]);
     assertEquals(box.counts.copy, 0);
     assertEquals(box.counts.hardlink + box.counts.symlink, 5);
     assertEquals(await Deno.readTextFile(`${box.folder}/D2Game.dll`), "modded game");

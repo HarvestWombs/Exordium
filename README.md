@@ -21,7 +21,7 @@ Your Diablo II install stays exactly as it is. Mods can't break it, and they can
 
 ## How it works
 
-**Its own library.** On first launch, Exordium reads your Diablo II install and copies the game archives into a library of its own. It downloads the patches you pick, called **cores**, and checks each one against a published checksum. From then on your install is only read.
+**Its own library.** On first launch, Exordium links the game archives from your Diablo II install into a library of its own, falling back to an independent copy when links are unavailable. It downloads the patches you pick, called **cores**, and checks each one against a published checksum.
 
 **A box for every mod.** Each mod runs from its own folder, built from links to the game, its core and the mod. Fifty mods don't mean fifty copies of the game, and nothing one mod does can reach another.
 
@@ -122,7 +122,7 @@ Everything here is also in the app, under **Help**, with a search box.
 
 ### Getting started
 
-On first launch Exordium links your Diablo II install and copies what it needs into its own library: the game's MPQ archives, `D2.LNG`, the video DLLs and any graphics wrappers. From then on your install is only read, never changed.
+On first launch Exordium places the game's MPQ archives, `D2.LNG`, video DLLs and graphics wrappers in its library. Automatic mode tries symbolic links first, hardlinks on the same drive second, and a copy last. You can explicitly choose any method, or Move if you intend to remove those files from the original install.
 
 Next it downloads the cores you choose: each one is a patch of the game, from 1.00 to 1.13d. Then you add mods, from your D2SE install, a folder, an archive, or Browse.
 
@@ -282,13 +282,13 @@ Yes: over TCP/IP, with everyone on the same mod and version, or on the mod's own
 Yes. Press Play again while a title runs; each copy gets its own registry and log.
 
 **How much disk space does it need?**
-About 2 GB for the game files, a few MB per core, and each mod's own size. Boxes are made of links, so they take almost nothing. When importing from D2SE, *Move instead of copy* avoids keeping a mod twice.
+With the default linked game layer, only a few MB per core and each mod's own size. Copying the game layer independently adds about 2 GB. Boxes are made of links, so they take almost nothing. When importing from D2SE, *Move instead of copy* avoids keeping a mod twice.
 
 **Does it work with PlugY, D2Mod and other plugins?**
 Yes. D2Mod and other plugin DLLs load when the mod brings and lists them. PlugY is the mod's own, else one you put in the core's folder or set in Settings, Launching; Exordium ships none. D2SE's own plugin systems are not loaded.
 
 **Does it work with D2GL, dgVoodoo and other wrappers?**
-Yes. Setup copies the wrappers in your Diablo II folder, and a mod can bring its own. With Glide, the wrapper's own settings decide the window.
+Yes. Setup links or copies the wrappers in your Diablo II folder, and a mod can bring its own. With Glide, the wrapper's own settings decide the window.
 
 **What does Rebuild Box do?**
 It remakes the title's box from the library, bringing links and copied files up to date. Saves are not touched, and are backed up first.
@@ -585,13 +585,7 @@ deno run -A server.ts    # then open http://127.0.0.1:8235
 
 To build the desktop app, run `deno task desktop` in `apps/desktop`. It packages everything into `apps/desktop/Exordium/Exordium.exe`, with the UI and the loader embedded, and 7-Zip beside it in `native/7zip`.
 
-Packaging needs the canary Deno. Install it once:
-
-```
-deno upgrade canary --output ~/.deno/bin/deno-canary.exe
-```
-
-Stable Deno packs a laufey build that crashes at window creation on Windows. Close the app before rebuilding, because Windows locks its files while it runs.
+Packaging needs Deno 2.9.8 or newer, because older versions pack a laufey build that crashes at window creation on Windows. Close the app before rebuilding, because Windows locks its files while it runs.
 
 ### Releasing
 

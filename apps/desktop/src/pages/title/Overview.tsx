@@ -73,7 +73,7 @@ export function WhatsNew({ t, onOpen }: { t: Title; onOpen: () => void }) {
       {entry.kind === "html"
         ? <p className="muted">{tr("This changelog is a web page.")}</p>
         : <pre className="news-excerpt">{text === null ? tr("Reading…") : excerptOf(text, 700)}</pre>}
-      <button type="button" className="link-button" onClick={onOpen}>{tr("Read the full changelog ›")}</button>
+      <button type="button" className="small-button" onClick={onOpen}>{tr("Read the full changelog ›")}</button>
     </section>
   );
 }

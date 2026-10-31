@@ -60,6 +60,8 @@ export interface CoreJob {
   received: number;
   total: number;
   error?: string;
+  /** The download is held: no more of it is read until this clears. */
+  paused?: boolean;
 }
 
 const CORE_NAME = /^\d+\.\d+[a-z]?$/i;
@@ -140,6 +142,14 @@ export function coreJobs(): CoreJob[] {
   return [...jobs.values()].map((job) => ({ ...job }));
 }
 
+/** Holds a core's download or lets it go on. False once it is past downloading. */
+export function pauseCoreInstall(core: string, paused: boolean): boolean {
+  const job = jobs.get(core.toLowerCase());
+  if (job?.state !== "downloading") return false;
+  job.paused = paused;
+  return true;
+}
+
 /** Stops a core's download and forgets it. False once it is past downloading. */
 export function cancelCoreInstall(core: string): boolean {
   const job = jobs.get(core.toLowerCase());
@@ -180,7 +190,12 @@ export class CoreInstallError extends Error {
  * Starts installing `core` into the library's `cores` folder. Refuses a 1.14 core, a core already
  * there, a root that is not the library, and a second install of the same core at once.
  */
-export async function startCoreInstall(root: string, core: string, downloads: string): Promise<CoreJob> {
+export async function startCoreInstall(
+  root: string,
+  core: string,
+  downloads: string,
+  afterInstall?: (core: string) => Promise<void>,
+): Promise<CoreJob> {
   const list = await catalog();
   const entry = list?.cores.find((c) => c.core.toLowerCase() === core.toLowerCase());
   if (!entry) throw new CoreInstallError(`No core ${core} in the catalog.`);
@@ -198,7 +213,7 @@ export async function startCoreInstall(root: string, core: string, downloads: st
   const job: CoreJob = { core: entry.core, state: "downloading", received: 0, total: entry.size };
   jobs.set(key, job);
   const url = entry.url ? directUrl(entry.url) : new URL(entry.file, catalogUrl()).href;
-  void runInstall(job, entry, url, root, target, `${downloads}/cores`);
+  void runInstall(job, entry, url, root, target, `${downloads}/cores`, afterInstall);
   return job;
 }
 
@@ -207,7 +222,15 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function runInstall(job: CoreJob, entry: CatalogCore, url: string, root: string, target: string, folder: string) {
+async function runInstall(
+  job: CoreJob,
+  entry: CatalogCore,
+  url: string,
+  root: string,
+  target: string,
+  folder: string,
+  afterInstall?: (core: string) => Promise<void>,
+) {
   const archive = `${folder}/${entry.file}`;
   const staging = `${root}/.exordium-staging/core-${entry.core}`;
   const abort = new AbortController();
@@ -221,6 +244,7 @@ async function runInstall(job: CoreJob, entry: CatalogCore, url: string, root: s
       chunks.push(chunk);
       job.received += chunk.length;
       if (job.received > entry.size) throw new Error("The download is larger than the catalog says.");
+      while (job.paused && !abort.signal.aborted) await new Promise((resolve) => setTimeout(resolve, 200));
     }
     job.state = "verifying";
     const bytes = new Uint8Array(job.received);
@@ -241,6 +265,7 @@ async function runInstall(job: CoreJob, entry: CatalogCore, url: string, root: s
     if (!(await isDir(unpacked))) throw new Error(`The zip has no ${entry.version} folder.`);
     if (await isDir(target)) throw new Error(`Core ${entry.core} appeared while installing; left as it was.`);
     await Deno.rename(unpacked, target);
+    await afterInstall?.(entry.core);
     job.state = "installed";
     await Deno.remove(archive).catch(() => {});
   } catch (error) {

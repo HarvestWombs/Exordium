@@ -1015,7 +1015,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "How much disk space does it need?",
     a: [
-      "About 2 GB for the game files, a few MB per core, and each mod's own size. Boxes are made of links, so they take almost nothing. When importing from D2SE, Move instead of copy avoids keeping a mod twice.",
+      "With the default linked game layer, only a few MB per core and each mod's own size. Copying the game layer independently adds about 2 GB. Boxes are made of links, so they take almost nothing.",
     ],
   },
   {
@@ -1027,7 +1027,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Does it work with D2GL, dgVoodoo and other wrappers?",
     a: [
-      "Yes. Setup copies the wrappers in your Diablo II folder, and a mod can bring its own. With Glide, the wrapper's own settings decide the window.",
+      "Yes. Setup links or copies the wrappers in your Diablo II folder, and a mod can bring its own. With Glide, the wrapper's own settings decide the window.",
     ],
   },
   {

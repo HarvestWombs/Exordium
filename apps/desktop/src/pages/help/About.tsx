@@ -8,7 +8,7 @@ const APP_ICON = new URL("../../../assets/exordium-icon.png", import.meta.url).h
 /** A link on the About page, opened in the browser. */
 function AboutLink({ href, children }: { href: string; children: string }) {
   return (
-    <button type="button" className="link-button" onClick={() => void openLink(href)}>
+    <button type="button" className="small-button" onClick={() => void openLink(href)}>
       {children} ↗
     </button>
   );
@@ -60,7 +60,7 @@ export function About({ version }: { version: string | null }) {
         </div>
       </SettingsGroup>
       <SettingsGroup title={tr("LICENCE")}>
-        <p className="muted small">
+        <p className="about-note muted small">
           {tr(
             "Exordium by Harvest (HarvestLabs). Copyright © 2026. Exordium is free software: you can redistribute it and modify it under the GNU General Public License, version 3 or (at your option) any later version, with the attribution terms in its NOTICE file. It comes with no warranty. LICENSE.txt and NOTICE.txt are beside Exordium.exe.",
           )}

@@ -28,6 +28,21 @@ Deno.test("classification: saves are the player's, D2SE's own files and logs sta
   assertEquals(classify("core", "PlugY/EmptyPage.dc6"), { kind: "layer" });
 });
 
+/** Hash progress lets the desktop show movement while a cold, large MPQ is read. */
+Deno.test("hashing reports bytes through to the complete file", async () => {
+  const file = await Deno.makeTempFile({ prefix: "exordium-hash-" });
+  try {
+    const bytes = new Uint8Array(200_000).fill(7);
+    await Deno.writeFile(file, bytes);
+    const progress: number[] = [];
+    await hashFile(file, (read) => progress.push(read));
+    assert(progress.length > 0);
+    assertEquals(progress.at(-1), bytes.length);
+  } finally {
+    await Deno.remove(file);
+  }
+});
+
 /** A small D2SE install on disk: one core, one mod, the root's archives. */
 async function install(): Promise<string> {
   const root = await Deno.makeTempDir({ prefix: "exordium-d2se-" });

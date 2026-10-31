@@ -27,8 +27,14 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "discord", label: "Discord" },
 ];
 
-export function AppSettings({ status, onChanged }: { status: Status; onChanged: () => Promise<unknown> }) {
-  const [section, setSection] = React.useState<SettingsSection>("library");
+export function AppSettings(
+  { status, section, onSection, onChanged }: {
+    status: Status;
+    section: SettingsSection;
+    onSection: (section: SettingsSection) => void;
+    onChanged: () => Promise<unknown>;
+  },
+) {
   const [app, setApp] = React.useState<AppSettingsState | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -73,7 +79,7 @@ export function AppSettings({ status, onChanged }: { status: Status; onChanged: 
             key={item.id}
             type="button"
             className={section === item.id ? "on" : ""}
-            onClick={() => setSection(item.id)}
+            onClick={() => onSection(item.id)}
           >
             {item.label}
           </button>
@@ -121,7 +127,7 @@ export function SettingsSectionView(
         <SettingsHead
           title={tr("Library")}
           text={tr(
-            "Exordium runs everything from its own library: the game files, cores and mods copied or installed into it.",
+            "Exordium runs everything from its own library: linked or copied game files, installed cores and mods.",
           )}
         />
         <SettingsGroup title={tr("Install")}>

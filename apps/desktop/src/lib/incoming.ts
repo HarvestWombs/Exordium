@@ -16,4 +16,7 @@ export interface Incoming {
   /** False once it is being cancelled, and for the stages that can't be stopped. */
   cancellable: boolean;
   cancel: () => Promise<void>;
+  paused?: boolean;
+  /** Holds it or lets it go on, where it can be: an import can't be paused. */
+  setPaused?: (paused: boolean) => Promise<void>;
 }
