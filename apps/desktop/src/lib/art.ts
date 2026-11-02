@@ -38,7 +38,7 @@ export const ART_MAX_SIDE = 4096;
 
 /**
  * Any image the WebView decodes (PNG, JPEG, WebP, GIF's first frame, BMP, AVIF, ICO, SVG) as a PNG,
- * which is all the art store keeps: the icon goes into Game.exe and shortcuts as PNG-in-ICO. An icon
+ * which is what the Art page saves: the icon goes into Game.exe and shortcuts as PNG-in-ICO. An icon
  * is fitted inside 256×256 and centred on a transparent square; a banner or portrait keeps its size
  * up to ART_MAX_SIDE. A PNG that already fits is sent unchanged.
  */

@@ -2,9 +2,11 @@ import { plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { FolderIcon } from "../../components/icons.tsx";
 import { installLocation } from "../../lib/util.ts";
-import type { AppPreferences, Title } from "../../types.ts";
+import type { AppPreferences, ConfirmRequest, Title } from "../../types.ts";
 
-export function FilesPage({ t, root }: { t: Title; root: string }) {
+export function FilesPage(
+  { t, root, onConfirm }: { t: Title; root: string; onConfirm: (request: ConfirmRequest) => void },
+) {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<string | null>(null);
 
@@ -17,19 +19,7 @@ export function FilesPage({ t, root }: { t: Title; root: string }) {
     if (!response.ok) setResult((await response.json()).error ?? tr("Could not open the folder."));
   }
 
-  async function build(action: "rebuild" | "verify") {
-    const settings = action === "rebuild"
-      ? await fetch("/api/app-settings").then((r) => r.json()).then((body) => body.settings as AppPreferences)
-        .catch(() => null)
-      : null;
-    if (
-      action === "rebuild" && settings?.boxes.confirmRebuild !== false &&
-      !confirm(
-        tr("Rebuild {title}'s box? Its links and copied files are brought up to date; saves are not touched.", {
-          title: t.title,
-        }),
-      )
-    ) return;
+  async function runBuild(action: "rebuild" | "verify") {
     setBusy(action);
     setResult(null);
     try {
@@ -68,6 +58,27 @@ export function FilesPage({ t, root }: { t: Title; root: string }) {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function build(action: "rebuild" | "verify") {
+    if (action === "rebuild") {
+      const settings = await fetch("/api/app-settings").then((r) => r.json()).then((body) =>
+        body.settings as AppPreferences
+      ).catch(() => null);
+      if (settings?.boxes.confirmRebuild !== false) {
+        onConfirm({
+          title: tr("Rebuild Box"),
+          body: tr(
+            "Rebuild {title}'s box? Its links and copied files are brought up to date; saves are not touched.",
+            { title: t.title },
+          ),
+          action: tr("Rebuild Box"),
+          run: async () => await runBuild(action),
+        });
+        return;
+      }
+    }
+    await runBuild(action);
   }
 
   return (

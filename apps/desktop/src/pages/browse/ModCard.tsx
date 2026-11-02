@@ -43,12 +43,14 @@ export function ModCard(
   const [details, setDetails] = React.useState<Details | null>(null);
   const [detailsError, setDetailsError] = React.useState<string | null>(null);
   const [file, setFile] = React.useState<string>("");
+  const [loadedCover, setLoadedCover] = React.useState<string | null>(null);
 
   // Details (screenshots, files, the archive's own readme) are asked for once the card is near the
   // screen; the full screenshots are then preloaded, so switching between them is instant.
   React.useEffect(() => {
     const node = ref.current;
     if (!node || details) return;
+    const scrollRoot = node.closest(".browse-list");
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       observer.disconnect();
@@ -61,7 +63,7 @@ export function ModCard(
         onDetails(body);
         for (const s of body.screenshots as Details["screenshots"]) new Image().src = s.full;
       })();
-    }, { rootMargin: "300px" });
+    }, { root: scrollRoot, rootMargin: "900px 0px" });
     observer.observe(node);
     return () => observer.disconnect();
   }, [item.id, details, onDetails]);
@@ -71,11 +73,13 @@ export function ModCard(
   const translation = useTranslation(description);
   const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
+  const cover = shots[0]?.thumb ?? item.cover;
+  const loadingDetails = !details && !detailsError;
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
 
   return (
-    <article ref={ref} className="mod-card">
+    <article ref={ref} className="mod-card" aria-busy={loadingDetails}>
       <button
         ref={heights.cover}
         type="button"
@@ -87,16 +91,34 @@ export function ModCard(
           /* The uploader's first screenshot when there is one: archive.org's own tile is a generic logo for
             most items. */
         }
-        <img src={shots[0]?.thumb ?? item.cover} alt="" loading="lazy" />
+        {loadedCover !== cover && <span className="skeleton mod-cover-skeleton" aria-hidden="true" />}
+        <img
+          className={loadedCover === cover ? "mod-cover-image loaded" : "mod-cover-image"}
+          src={cover}
+          alt=""
+          loading="lazy"
+          onLoad={() => setLoadedCover(cover)}
+          onError={() => setLoadedCover(cover)}
+        />
         {installed && <span className="ribbon">{tr("IN LIBRARY")}</span>}
       </button>
 
       <div className="mod-info">
         <h2 className="mod-title">{item.title}</h2>
-        <p ref={heights.description} className={expanded ? "mod-description open" : "mod-description"}>
-          {details === null
-            ? "…"
-            : translation.text || tr("The uploader gave no description, and none was found in the archive.")}
+        <p
+          ref={heights.description}
+          className={`${expanded ? "mod-description open" : "mod-description"}${loadingDetails ? " loading" : ""}`}
+        >
+          {loadingDetails
+            ? (
+              <>
+                <span className="skeleton skeleton-line" aria-hidden="true" />
+                <span className="skeleton skeleton-line" aria-hidden="true" />
+                <span className="skeleton skeleton-line w-70" aria-hidden="true" />
+              </>
+            )
+            : detailsError ??
+              (translation.text || tr("The uploader gave no description, and none was found in the archive."))}
         </p>
         <div className="mod-under">
           {details?.descriptionSource && description && (
@@ -147,7 +169,11 @@ export function ModCard(
         </dl>
       </div>
 
-      <ShotGallery shots={shots} empty={details ? tr("No screenshots") : detailsError ?? "…"} />
+      <ShotGallery
+        shots={shots}
+        loading={loadingDetails}
+        empty={details ? tr("No screenshots") : detailsError ?? tr("No screenshots")}
+      />
 
       <div className="mod-bar">
         <span className="source-badge">Internet Archive</span>
@@ -169,6 +195,7 @@ export function ModCard(
             {details.archives.map((a) => <option key={a.name} value={a.name}>{a.name} ({formatBytes(a.size)})</option>)}
           </select>
         )}
+        {loadingDetails && <span className="skeleton mod-file-skeleton" aria-hidden="true" />}
         <FileType name={file} />
         <span className="mod-size">
           {formatBytes(details?.archives.find((a) => a.name === file)?.size ?? item.size)}

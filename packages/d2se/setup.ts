@@ -38,6 +38,13 @@ export interface ModSetup {
     skipToBNet?: boolean;
     seed?: string | null;
     startAct?: 1 | 2 | 3 | 4 | 5 | null;
+    perspective?: boolean;
+    lowQuality?: boolean;
+    gamma?: number | null;
+    vsync?: boolean;
+    noCompress?: boolean;
+    noFixAspect?: boolean;
+    backgroundSound?: boolean;
   };
 
   /** `[Protected]` — the modder's settings. */
@@ -181,6 +188,20 @@ export interface LaunchSettings {
   skipToBNet: boolean;
   seed: string | null;
   startAct: 1 | 2 | 3 | 4 | 5 | null;
+  /** `-per`: perspective, on the Glide, OpenGL and Direct3D renderers. */
+  perspective: boolean;
+  /** `-lq`: low quality. */
+  lowQuality: boolean;
+  /** `-gamma N`: the game's own default is 155. */
+  gamma: number | null;
+  /** `-vsync`. */
+  vsync: boolean;
+  /** `-nocompress`: keep sprites uncompressed in memory. */
+  noCompress: boolean;
+  /** `-nofixaspect`: 1.13 and later. */
+  noFixAspect: boolean;
+  /** `-sndbkg`: keep the sound playing behind other windows. 1.13 and later. */
+  backgroundSound: boolean;
 }
 
 /**
@@ -208,6 +229,13 @@ export function launchSettings(setup: ModSetup): LaunchSettings {
     skipToBNet: player.skipToBNet ?? false,
     seed: player.seed ?? null,
     startAct: player.startAct ?? null,
+    perspective: player.perspective ?? false,
+    lowQuality: player.lowQuality ?? false,
+    gamma: player.gamma ?? null,
+    vsync: player.vsync ?? false,
+    noCompress: player.noCompress ?? false,
+    noFixAspect: player.noFixAspect ?? false,
+    backgroundSound: player.backgroundSound ?? false,
   };
 }
 

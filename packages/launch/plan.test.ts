@@ -193,12 +193,12 @@ Deno.test("the core names the version Game.exe gives Fog's error manager", () =>
   assertEquals(gameVersion("Debug Logs"), null);
 });
 
-Deno.test("the window title names the core, the mod and its version", () => {
-  assertEquals(gameWindowTitle("1.10f", "Eastern Sun", "3.2"), "Diablo II 1.10f Eastern Sun 3.2");
-  assertEquals(gameWindowTitle("1.10f", "Eastern Sun 3.2", "3.2"), "Diablo II 1.10f Eastern Sun 3.2");
-  assertEquals(gameWindowTitle("1.13c", " Eastern\n Sun ", ""), "Diablo II 1.13c Eastern Sun");
+Deno.test("a mod window names the mod and its version; a core window names Diablo II", () => {
+  assertEquals(gameWindowTitle("1.10f", "Eastern Sun", "3.2"), "Eastern Sun - 3.2");
+  assertEquals(gameWindowTitle("1.10f", "Eastern Sun 3.2", "3.2"), "Eastern Sun - 3.2");
+  assertEquals(gameWindowTitle("1.13c", " Eastern\n Sun ", ""), "Eastern Sun");
   assertEquals(gameWindowTitle("1.10f", null, null), "Diablo II 1.10f");
-  assertEquals(gameWindowTitle(null, "Eastern Sun", null), "Diablo II Eastern Sun");
+  assertEquals(gameWindowTitle(null, "Eastern Sun", null), "Eastern Sun");
 });
 
 Deno.test("a core whose Game.exe version is unknown is warned about, not guessed", () => {
@@ -237,8 +237,39 @@ Deno.test("optional game command switches are appended after the core launch fla
     skipToBNet: true,
     seed: "123456",
     startAct: 5,
+    perspective: false,
+    lowQuality: false,
+    gamma: null,
+    vsync: false,
+    noCompress: false,
+    noFixAspect: false,
+    backgroundSound: false,
   });
   assertEquals(command, "-w -ns -direct -skiptobnet -act5 -seed 123456");
+});
+
+Deno.test("the player's video and sound switches reach the command line", () => {
+  const command = gameCommandLine({
+    renderer: "glide",
+    windowed: false,
+    noSound: false,
+    direct: false,
+    txt: true,
+    hardcore: true,
+    plugY: false,
+    language: null,
+    skipToBNet: false,
+    seed: null,
+    startAct: null,
+    perspective: true,
+    lowQuality: true,
+    gamma: 180,
+    vsync: true,
+    noCompress: true,
+    noFixAspect: true,
+    backgroundSound: true,
+  });
+  assertEquals(command, "-3dfx -per -lq -gamma 180 -vsync -nofixaspect -sndbkg -txt -nocompress");
 });
 
 Deno.test("PlugY is whichever layer has it, at the root or in a PlugY folder; none starts without it", () => {
@@ -251,9 +282,11 @@ Deno.test("PlugY is whichever layer has it, at the root or in a PlugY folder; no
   const plugy = (layers: [string, string[]][]) => load(layers).plugins.find((p) => p.kind === "plugy")?.path;
   assertEquals(plugy([["mod", ["PlugY/PlugY.dll", "PlugY/EmptyPage.dc6"]]]), "PlugY/PlugY.dll");
   assertEquals(plugy([["mod", ["PlugY.dll", "PlugY/PlugY.dll"]]]), "PlugY.dll");
-  // One the player put in the core's folder, or the PlugY folder from Settings.
-  assertEquals(plugy([["core", ["PlugY.dll"]], ["mod", []]]), "PlugY.dll");
+  // The library's plugy folder, or one a core copied from D2SE carries.
   assertEquals(plugy([["plugy", ["PlugY.dll", "PlugY/EmptyPage.dc6"]], ["mod", []]]), "PlugY.dll");
+  assertEquals(plugy([["core", ["PlugY.dll"]], ["mod", []]]), "PlugY.dll");
+  // The mod's own comes first, in whichever layout it ships.
+  assertEquals(plugy([["core", ["PlugY.dll"]], ["mod", ["PlugY/PlugY.dll"]]]), "PlugY/PlugY.dll");
   assertEquals(plugy([["mod", []]]), undefined);
   const missing = load([["mod", []]]).problems.find((p) =>
     p.message.startsWith("PlugY is turned on, but no PlugY.dll")
@@ -282,7 +315,31 @@ Deno.test("a 1.14 core runs Blizzard's Game.exe: no DLL handoff, and no plugins 
   assertEquals(load.problems.map((problem) => problem.message), [
     "D2Mod is built for the pre-1.14 game DLLs; core 1.14d has none for it to load into.",
     "Custom mod and language MPQs are not supported yet on core 1.14d; it runs through Blizzard's single Game.exe.",
+    "Core 1.14d runs on Blizzard's own Game.exe: it uses your machine's Diablo II registry settings, and Battle.net is not locked.",
   ]);
+});
+
+Deno.test("a 1.14 mod is its loose files: PlugY and plugin DLLs have no loader to load them", () => {
+  const load = buildLoaderPlan(
+    resolve({
+      files: [
+        layer("game", "game", ["d2data.mpq", "d2sfx.mpq", "d2speech.mpq", "d2char.mpq", "d2music.mpq", "d2video.mpq"]),
+        layer("core", "core", ["Game.exe", "patch_d2.mpq"]),
+        layer("mod", "mod", ["PlugY.dll", "extra.dll"]),
+      ],
+      registry: [],
+    }),
+    setup("[USERSETTINGS]\nEnablePlugY=1\n[Protected]\nD2Core=1.14d\nModAllowPlugY=1\nModDll1=extra.dll\n"),
+    { expansion: false },
+  );
+  assertEquals(load.plugins.some((plugin) => plugin.kind === "plugy"), false);
+  assertEquals(load.problems.filter((problem) => problem.level === "error").map((problem) => problem.message), [
+    "extra.dll cannot load on core 1.14d; it runs through Blizzard's single Game.exe, without Exordium's loader.",
+  ]);
+  assertEquals(
+    load.problems.some((problem) => problem.message === "PlugY cannot load on core 1.14d. It starts without PlugY."),
+    true,
+  );
 });
 
 Deno.test("a 1.00 core runs through the Exordium loader", () => {

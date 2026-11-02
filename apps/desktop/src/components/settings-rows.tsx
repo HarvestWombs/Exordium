@@ -136,10 +136,15 @@ export function FolderRow(
   );
 }
 
-export function PathRow({ label, value, openKey }: { label: string; value: string; openKey?: string }) {
+export function PathRow(
+  { label, hint, value, openKey }: { label: string; hint?: string; value: string; openKey?: string },
+) {
   return (
     <div className="settings-row">
-      <span>{label}</span>
+      <span className="settings-label">
+        {label}
+        {hint && <small className="settings-hint">{hint}</small>}
+      </span>
       <div className="path-actions">
         <code>{value}</code>
         {openKey && (

@@ -1,6 +1,7 @@
 import { plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
+import { CloseIcon } from "../../components/icons.tsx";
 import { SettingsHead } from "../../components/settings-rows.tsx";
 import { About } from "./About.tsx";
 import { FAQ, type FaqEntry, type HelpField, type HelpSection, TOPICS } from "./content.ts";
@@ -214,18 +215,31 @@ export function HelpPage(
   return (
     <div className="body settings-body">
       <aside className="settings-sidebar">
-        <input
-          className="help-search"
-          type="search"
-          value={query}
-          placeholder={tr("Search help")}
-          aria-label={tr("Search help")}
-          onChange={(e) => setQuery(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && hits[0]) openHit(hits[0]);
-            if (e.key === "Escape") setQuery("");
-          }}
-        />
+        <div className="search help-search">
+          <input
+            type="text"
+            value={query}
+            placeholder={tr("Search help")}
+            aria-label={tr("Search help")}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && hits[0]) openHit(hits[0]);
+              if (e.key === "Escape") setQuery("");
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="search-clear-button"
+              aria-label={tr("Clear")}
+              data-tooltip={tr("Clear")}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setQuery("")}
+            >
+              <CloseIcon />
+            </button>
+          )}
+        </div>
         <span className="eyebrow">{tr("HELP")}</span>
         {TOPICS.filter((t) => !t.group).map((t) => nav(t.id, t.label))}
         {[...new Set(TOPICS.flatMap((t) => (t.group ? [t.group] : [])))].map((group) => (

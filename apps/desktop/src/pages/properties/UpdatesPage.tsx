@@ -2,26 +2,25 @@ import { formatDateTime, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { openLink } from "../../lib/util.ts";
 import type { Title, TitleUpdateCheck, TitleUpdateSettings } from "../../types.ts";
+import { ManifestFooter } from "./ManifestFooter.tsx";
+import type { ManifestEditor } from "./useManifest.ts";
 
-export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; onChanged: () => Promise<void> }) {
-  const [draft, setDraft] = React.useState<TitleUpdateSettings>(t.updateSettings);
+export function UpdatesPage(
+  { t, root, editor, onChanged }: { t: Title; root: string; editor: ManifestEditor; onChanged: () => Promise<void> },
+) {
+  const update = editor.manifest!.update ?? {};
   const [check, setCheck] = React.useState<TitleUpdateCheck | null>(t.updateCheck);
-  const [busy, setBusy] = React.useState<"save" | "check" | null>(null);
+  const [checking, setChecking] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
-  const changed = JSON.stringify(draft) !== JSON.stringify(t.updateSettings);
+  const busy = checking || editor.saving;
 
   React.useEffect(() => {
-    setDraft(t.updateSettings);
     setCheck(t.updateCheck);
     setProblem(null);
-  }, [t.key, t.updateSettings, t.updateCheck]);
+  }, [t.key, t.updateCheck]);
 
-  function update(next: Partial<TitleUpdateSettings>) {
-    setDraft((current) => ({ ...current, ...next }));
-  }
-
-  async function post(action: "save" | "check") {
-    setBusy(action);
+  async function runCheck() {
+    setChecking(true);
     setProblem(null);
     try {
       const response = await fetch("/api/title-updates", {
@@ -30,20 +29,18 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
         body: JSON.stringify({
           root,
           ...(t.kind === "core" ? { core: t.folder } : { folder: t.folder }),
-          action,
-          version: t.version,
-          settings: draft,
+          version: editor.manifest!.version ?? t.version,
+          settings: update,
         }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? tr("Could not update settings."));
-      setDraft(body.settings ?? draft);
       setCheck(body.check ?? check);
       await onChanged();
     } catch (error) {
       setProblem((error as Error).message);
     } finally {
-      setBusy(null);
+      setChecking(false);
     }
   }
 
@@ -52,21 +49,22 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
   return (
     <div className="page-with-footer">
       <div className="stack">
-        <fieldset disabled={busy !== null} className="checks option-section">
+        {problem && <div className="banner-error" role="alert">{problem}</div>}
+        <fieldset disabled={busy} className="checks option-section">
           <legend className="eyebrow">{tr("AUTOMATIC UPDATES")}</legend>
           <label>
             <input
               type="checkbox"
-              checked={draft.automatic}
-              onChange={(e) => update({ automatic: e.currentTarget.checked })}
+              checked={update.automatic ?? true}
+              onChange={(e) => editor.section("update", { automatic: e.currentTarget.checked })}
             />{" "}
             {tr("Automatic updates")}
           </label>
           <label>
             <input
               type="checkbox"
-              checked={draft.background}
-              onChange={(e) => update({ background: e.currentTarget.checked })}
+              checked={update.background ?? true}
+              onChange={(e) => editor.section("update", { background: e.currentTarget.checked })}
             />{" "}
             {tr("Allow background downloads")}
           </label>
@@ -80,18 +78,19 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
             {tr("Manifest URL or file")}
             <input
               type="text"
-              value={draft.endpoint ?? ""}
-              disabled={busy !== null}
+              value={update.endpoint ?? ""}
+              disabled={busy}
               placeholder="updates.json, https://example.com/mod.json"
-              onChange={(e) => update({ endpoint: e.currentTarget.value || null })}
+              onChange={(e) => editor.section("update", { endpoint: e.currentTarget.value || null })}
             />
           </label>
           <label className="field compact-field">
             {tr("Channel")}
             <select
-              value={draft.channel}
-              disabled={busy !== null}
-              onChange={(e) => update({ channel: e.currentTarget.value as TitleUpdateSettings["channel"] })}
+              value={update.channel ?? "stable"}
+              disabled={busy}
+              onChange={(e) =>
+                editor.section("update", { channel: e.currentTarget.value as TitleUpdateSettings["channel"] })}
             >
               <option value="stable">{tr("Stable")}</option>
               <option value="testing">{tr("Testing")}</option>
@@ -132,37 +131,11 @@ export function UpdatesPage({ t, root, onChanged }: { t: Title; root: string; on
           )}
         </section>
       </div>
-      <footer className="dialog-footer">
-        <span className={problem ? "error" : "muted small"}>
-          {problem ?? (changed ? tr("Unsaved changes") : tr("Saved"))}
-        </span>
-        <div className="row-actions">
-          <button
-            type="button"
-            className="ghost"
-            disabled={busy !== null || (!changed && !draft.endpoint)}
-            onClick={() => void post("check")}
-          >
-            {busy === "check" ? tr("Checking…") : tr("Check now")}
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            disabled={!changed || busy !== null}
-            onClick={() => setDraft(t.updateSettings)}
-          >
-            {tr("Reset")}
-          </button>
-          <button
-            type="button"
-            className="ghost primary"
-            disabled={!changed || busy !== null}
-            onClick={() => void post("save")}
-          >
-            {busy === "save" ? tr("Applying…") : tr("Apply")}
-          </button>
-        </div>
-      </footer>
+      <ManifestFooter editor={editor}>
+        <button type="button" className="ghost" disabled={busy || !update.endpoint} onClick={() => void runCheck()}>
+          {checking ? tr("Checking…") : tr("Check now")}
+        </button>
+      </ManifestFooter>
     </div>
   );
 }

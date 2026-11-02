@@ -41,8 +41,11 @@ const GAME_EXE_VERSIONS: Readonly<Record<string, FileVersion>> = {
   "1.14d": [1, 14, 3, 71],
 };
 
+/** Every Diablo II core for which Exordium has a known launch path. */
+export const SUPPORTED_CORES: readonly string[] = Object.keys(GAME_EXE_VERSIONS);
+
 /** The cores whose box runs the loader as `Game.exe`: each gets a stamped copy at build time. */
-export const STAMPED_CORES: readonly string[] = Object.keys(GAME_EXE_VERSIONS).filter((core) => core !== "1.14d");
+export const STAMPED_CORES: readonly string[] = SUPPORTED_CORES.filter((core) => core !== "1.14d");
 
 /** The file version the core's `Game.exe` had, or null when it is not known. */
 export function gameExeVersion(core: string | null | undefined): FileVersion | null {

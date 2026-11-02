@@ -9,11 +9,12 @@
  *
  * Installing downloads the zip, checks it against the catalog, unpacks it in the library and
  * moves the folder into `cores/<name>`. Zips are named as mods name cores (`1.10f`, not `1.10`).
- * Like mods, a core is never installed over one that exists. 1.14 cores are the install itself
- * (Blizzard's installer provides them), so they are listed but not installed here.
+ * Like mods, a core is never installed over one that exists. A 1.14 core comes from Blizzard's
+ * installer, not this host: a 1.14 install's own files are copied into `cores/<name>` instead
+ * (copyInstallCore), so it runs from the library like every other core.
  */
 
-import { isSingleExeCore, LIBRARY_FOLDERS } from "@exordium/d2se";
+import { isSingleExeCore, LIBRARY_FOLDERS, rootCoreName, SINGLE_EXE_CORE_FILES } from "@exordium/d2se";
 import { extract } from "./install.ts";
 
 /**
@@ -47,7 +48,7 @@ export interface Catalog {
 }
 
 export interface CoreEntry extends CatalogCore {
-  /** `installed`: in the library's `cores/` (or the install's own 1.14). `install`: the install itself. */
+  /** `installed`: in the library's `cores/`. `install`: the install's own 1.14, not copied in yet. */
   status: "available" | "installed" | "install";
   job: CoreJob | null;
 }
@@ -162,12 +163,24 @@ async function isDir(path: string): Promise<boolean> {
   return (await Deno.stat(path).catch(() => null))?.isDirectory ?? false;
 }
 
+/** The files of a 1.14 install's core (`SINGLE_EXE_CORE_FILES`), as named on disk. */
+async function installCoreFiles(install: string): Promise<{ name: string; size: number }[]> {
+  const wanted = new Set<string>(SINGLE_EXE_CORE_FILES);
+  const files: { name: string; size: number }[] = [];
+  for await (const entry of Deno.readDir(install)) {
+    if (!wanted.has(entry.name.toLowerCase())) continue;
+    const info = await Deno.stat(`${install}/${entry.name}`);
+    if (info.isFile) files.push({ name: entry.name, size: info.size });
+  }
+  return files;
+}
+
 /**
- * Each catalog core with whether this install has it, and its install job if one ran. A 1.14
- * single-exe core is left out: it is the install itself, adds nothing a 1.13c core does not, and is
- * not offered here (2026-10-06). The code that can still launch one is untouched.
+ * Each catalog core with whether this install has it, and its install job if one ran. A catalog 1.14
+ * core is left out: Blizzard's files are not this host's to hand out for it. The install's own 1.14
+ * is listed instead, when it is one, to be copied in (copyInstallCore).
  */
-export async function coreEntries(root: string | null, list: Catalog, _rootCore: string | null): Promise<CoreEntry[]> {
+export async function coreEntries(root: string | null, list: Catalog, install: string | null): Promise<CoreEntry[]> {
   const entries: CoreEntry[] = [];
   for (const c of list.cores) {
     if (isSingleExeCore(c.core)) continue;
@@ -179,11 +192,83 @@ export async function coreEntries(root: string | null, list: Catalog, _rootCore:
       job: jobs.get(c.core.toLowerCase()) ?? null,
     });
   }
+  const own = install ? await rootCoreName(install).catch(() => null) : null;
+  if (install && own) {
+    const size = (await installCoreFiles(install)).reduce((sum, file) => sum + file.size, 0);
+    const copied = root !== null && await isDir(`${root}/${LIBRARY_FOLDERS.cores}/${own}`);
+    entries.push({
+      version: own,
+      core: own,
+      file: "",
+      size,
+      sha256: "",
+      status: copied ? "installed" : "install",
+      job: jobs.get(own) ?? null,
+    });
+  }
   return entries;
 }
 
 export class CoreInstallError extends Error {
   override name = "CoreInstallError";
+}
+
+/**
+ * Puts a 1.14 install's core in the library's `cores` folder, unless it is there. A copy, never a link
+ * or a move: the install must keep working, and Blizzard's installer rewrites these files in place.
+ */
+export async function placeInstallCore(root: string, install: string, core: string): Promise<void> {
+  const target = `${root}/${LIBRARY_FOLDERS.cores}/${core}`;
+  if (await isDir(target)) return;
+  const staging = `${root}/.exordium-staging/core-${core}`;
+  await Deno.remove(staging, { recursive: true }).catch(() => {});
+  await Deno.mkdir(staging, { recursive: true });
+  try {
+    for (const { name } of await installCoreFiles(install)) {
+      await Deno.copyFile(`${install}/${name}`, `${staging}/${name}`);
+    }
+    await Deno.rename(staging, target);
+  } finally {
+    await Deno.remove(staging, { recursive: true }).catch(() => {});
+  }
+}
+
+/**
+ * Starts copying a 1.14 install's core into the library, as a job like a download's. Refuses when the
+ * install is not that version, and a core already there.
+ */
+export async function copyInstallCore(
+  root: string,
+  install: string | null,
+  core: string,
+  afterInstall?: (core: string) => Promise<void>,
+): Promise<CoreJob> {
+  const own = install ? await rootCoreName(install).catch(() => null) : null;
+  if (!install || own !== core.toLowerCase()) {
+    throw new CoreInstallError(
+      `Core ${core} comes from a Diablo II install on that patch, and yours is not. Update Diablo II to ${core} with Blizzard's installer, then try again.`,
+    );
+  }
+  if (await isDir(`${root}/${LIBRARY_FOLDERS.cores}/${own}`)) {
+    throw new CoreInstallError(`Core ${own} is already installed.`);
+  }
+  const running = jobs.get(own);
+  if (running?.state === "installing") return running;
+  const size = (await installCoreFiles(install)).reduce((sum, file) => sum + file.size, 0);
+  const job: CoreJob = { core: own, state: "installing", received: 0, total: size };
+  jobs.set(own, job);
+  void (async () => {
+    try {
+      await placeInstallCore(root, install, own);
+      await afterInstall?.(own);
+      job.received = size;
+      job.state = "installed";
+    } catch (error) {
+      job.state = "failed";
+      job.error = (error as Error).message;
+    }
+  })();
+  return job;
 }
 
 /**

@@ -94,8 +94,8 @@ export function libraryView(
     sectionsOn,
     soloSection,
     shownSections: soloSection ? [soloSection] : sections,
-    /** A mod whose core is not in the library (1.14 runs from the install itself, so never missing). */
+    /** A mod whose core is not in the library. */
     missingCore: (t: Title): string | null =>
-      t.kind === "mod" && t.core && !t.core.startsWith("1.14") && !coreNames.has(t.core.toLowerCase()) ? t.core : null,
+      t.kind === "mod" && t.core && !coreNames.has(t.core.toLowerCase()) ? t.core : null,
   };
 }

@@ -114,13 +114,23 @@ export function Cores(
                   </span>
                 )}
                 {c.status === "installed" && <span className="core-state">{tr("Installed")}</span>}
-                {c.status === "install" && (
-                  <span
-                    className="muted small"
-                    data-tooltip={tr("1.14 is the whole game in one Game.exe, from Blizzard's installer")}
-                  >
-                    {tr("Comes with Diablo II itself")}
-                  </span>
+                {c.status === "install" && !running && (
+                  <>
+                    <span
+                      className="muted small"
+                      data-tooltip={tr("1.14 is the whole game in one Game.exe, from Blizzard's installer")}
+                    >
+                      {tr("Comes with Diablo II itself")}
+                    </span>
+                    <button
+                      type="button"
+                      className="ghost primary action-install"
+                      disabled={!root}
+                      onClick={() => void install(c.core)}
+                    >
+                      {job?.state === "failed" ? tr("Try again") : tr("Copy from install")}
+                    </button>
+                  </>
                 )}
                 {c.status === "available" && !running && (
                   <button

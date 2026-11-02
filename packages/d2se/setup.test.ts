@@ -49,6 +49,13 @@ Deno.test("launch settings apply the modder's permissions to the player's choice
     skipToBNet: false,
     seed: null,
     startAct: null,
+    perspective: false,
+    lowQuality: false,
+    gamma: null,
+    vsync: false,
+    noCompress: false,
+    noFixAspect: false,
+    backgroundSound: false,
   });
 
   // Not Modable: the player's -direct/-txt choice is ignored, the forced values win.

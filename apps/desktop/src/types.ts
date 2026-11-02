@@ -22,21 +22,61 @@ export interface PluginLoad {
   release: string | number | null;
 }
 
-export interface TitleOptions {
-  language?: string | null;
-  renderer?: string;
-  windowed?: boolean;
-  noSound?: boolean;
-  hardcore?: boolean;
-  plugY?: boolean;
-  direct?: boolean;
-  txt?: boolean;
-  skipToBNet?: boolean;
-  seed?: string | null;
-  startAct?: 1 | 2 | 3 | 4 | 5 | null;
+/** A title's `exordium.mod.json`, as Properties edits it. Keys it has no form for are kept. */
+export interface ModManifest {
   title?: string | null;
+  version?: string | null;
+  core?: string | null;
   author?: string | null;
-  links?: { label: string; url: string }[];
+  description?: string | null;
+  readme?: string | null;
+  art?: { banner?: string | null; icon?: string | null; portrait?: string | null } | null;
+  links?: { label?: string; url: string }[];
+  update?: {
+    endpoint?: string | null;
+    channel?: TitleUpdateSettings["channel"] | null;
+    automatic?: boolean | null;
+    background?: boolean | null;
+  } | null;
+  launch?: {
+    renderer?: string | null;
+    windowed?: boolean | null;
+    noSound?: boolean | null;
+    backgroundSound?: boolean | null;
+    hardcore?: boolean | null;
+    plugY?: boolean | null;
+    direct?: boolean | null;
+    txt?: boolean | null;
+    language?: string | null;
+    skipToBNet?: boolean | null;
+    seed?: string | number | null;
+    /** Off: the value is kept but left out of the launch. The same for the other two. */
+    seedEnabled?: boolean;
+    startAct?: 1 | 2 | 3 | 4 | 5 | null;
+    startActEnabled?: boolean;
+    perspective?: boolean | null;
+    lowQuality?: boolean | null;
+    gamma?: number | null;
+    gammaEnabled?: boolean;
+    vsync?: boolean | null;
+    noCompress?: boolean | null;
+    noFixAspect?: boolean | null;
+  } | null;
+  loads?: {
+    mpqs?: string[] | null;
+    dlls?: string[] | null;
+    d2mod?: boolean | null;
+    nefex?: boolean | null;
+    d2extra?: boolean | null;
+  } | null;
+  realm?: {
+    gateway?: string | null;
+    gatewayName?: string | null;
+    selected?: string | null;
+    timezone?: string | null;
+    port?: string | null;
+  } | null;
+  [key: string]: unknown;
 }
 
 export interface TitleUpdateSettings {
@@ -95,9 +135,7 @@ export interface Title {
     selected: string | null;
     port: string | null;
   } | null;
-  updateSettings: TitleUpdateSettings;
   updateCheck: TitleUpdateCheck | null;
-  options: TitleOptions;
   files: number;
   saves: number;
   screenshots: number;
@@ -105,6 +143,8 @@ export interface Title {
   problems: Problem[];
   archives: ArchiveLoad[];
   plugins: PluginLoad[];
+  /** Which plugin systems' DLLs the title's mod or core ships. */
+  pluginFiles: { d2mod: boolean; nefex: boolean; d2extra: boolean };
   art: { banner: "png" | "d2se" | null; icon: boolean; portrait: boolean };
   settings: {
     renderer: string;
@@ -118,6 +158,13 @@ export interface Title {
     skipToBNet?: boolean;
     seed?: string | null;
     startAct?: 1 | 2 | 3 | 4 | 5 | null;
+    perspective?: boolean;
+    lowQuality?: boolean;
+    gamma?: number | null;
+    vsync?: boolean;
+    noCompress?: boolean;
+    noFixAspect?: boolean;
+    backgroundSound?: boolean;
   } | null;
 }
 
@@ -260,8 +307,6 @@ export interface AppPreferences {
     showLogsOnFailure: boolean;
     /** Close official Battle.net to every mod without its own realm. */
     battlenetLockdown: boolean;
-    /** A folder holding PlugY.dll, used by titles with PlugY on that bring none. Empty: none. */
-    plugYFolder: string;
     /** Off Windows: a detected runner's id, or a path to a Wine or Proton build. Empty: the first found. */
     wineRunner: string;
   };
@@ -298,7 +343,7 @@ export interface AppPreferences {
 
 export interface AppSettingsState {
   settings: AppPreferences;
-  paths: Record<"data" | "boxes" | "downloads" | "backups" | "logs" | "art", string>;
+  paths: Record<"data" | "boxes" | "downloads" | "backups" | "logs" | "plugy", string>;
   /** `Deno.build.os` of the server. */
   platform: string;
   /** Off Windows, the Wine runners found and the one a launch would use; null on Windows. */
@@ -336,7 +381,7 @@ export type Filter = "mods" | "cores" | "favorites" | "recent" | "updates" | "is
 
 export type Tab = "overview" | "documentation" | "changelogs" | "screenshots" | "backups" | "logs";
 
-export type DialogPage = "general" | "about" | "updates" | "files" | "artwork";
+export type DialogPage = "about" | "launch" | "realm" | "updates" | "files" | "art";
 
 export interface InstallCheck {
   install: string;

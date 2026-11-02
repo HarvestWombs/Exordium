@@ -89,7 +89,6 @@ export function App() {
   // The main area is the library's home, a grid of every title, until one is opened.
   const [gridHome, setGridHome] = React.useState(true);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
-  const [filters, setFilters] = React.useState<Set<Filter>>(() => new Set());
   const [sidebarSearch, setSidebarSearch] = React.useState("");
   const [homeSearch, setHomeSearch] = React.useState("");
   // The one sidebar section shown alone (View only), if any.
@@ -231,7 +230,7 @@ export function App() {
     titles,
     status,
     scan,
-    filters,
+    filters: new Set<Filter>(),
     search: sidebarSearch,
     solo,
   });
@@ -360,7 +359,7 @@ export function App() {
     onProperties: (t) => {
       setSelectedKey(t.key);
       setView("library");
-      setDialog("general");
+      setDialog("launch");
     },
     onPlay: (t) => void play(t),
   });
@@ -382,21 +381,6 @@ export function App() {
       dnd={rowDnd(t, collection)}
     />
   );
-
-  const visibleForFilters = titles.filter((t) =>
-    !hidden.has(t.key) &&
-    !(status?.appSettings.settings.library.hideUnsupported && t.problems.some((problem) => problem.level === "error"))
-  );
-  const filterCounts: Record<Filter, number> & { all: number } = {
-    all: visibleForFilters.length,
-    mods: visibleForFilters.filter((t) => t.kind === "mod").length,
-    cores: visibleForFilters.filter((t) => t.kind === "core").length,
-    favorites: visibleForFilters.filter((t) => favorites.has(t.key)).length,
-    recent: visibleForFilters.filter((t) => status?.playedAt[t.key]).length,
-    updates: visibleForFilters.filter((t) => t.updateCheck?.available).length,
-    issues: titles.filter((t) => t.problems.length > 0 && !hidden.has(t.key)).length,
-    hidden: hidden.size,
-  };
 
   function showView(next: AppView) {
     // From a title's page, Library goes back to the library home; Browse opens unfiltered.
@@ -531,9 +515,6 @@ export function App() {
           onDelete={deleteCollection}
         />
       )}
-      {nameDialog && <NameDialog request={nameDialog} onClose={() => setNameDialog(null)} />}
-      {confirmBox && <ConfirmDialog request={confirmBox} onClose={() => setConfirmBox(null)} />}
-
       {view === "browse" && (
         <Browse
           view={browsePage}
@@ -589,9 +570,6 @@ export function App() {
           onSearch={setSidebarSearch}
           scan={scan}
           scanning={scanning}
-          filters={filters}
-          onFilters={setFilters}
-          filterCounts={filterCounts}
           onRead={root ? () => void load(root) : null}
           soloSection={soloSection}
           onClearSolo={() => setSolo(null)}
@@ -614,6 +592,7 @@ export function App() {
               hidden={!reviewShown}
               queued={conversions}
               onQueued={addConversion}
+              onConfirm={setConfirmBox}
               onClose={() => {
                 setConverterOpen(false);
                 setFolderImport(null);
@@ -704,7 +683,7 @@ export function App() {
                 onFavorite={() => void titleAction("favorite", selected)}
                 starting={starting === selected.key}
                 onPlay={() => void play(selected)}
-                onProperties={() => setDialog("general")}
+                onProperties={() => setDialog("launch")}
                 onBack={() => setGridHome(true)}
                 missingCore={missingCore(selected)}
                 coreJob={coreJobs.find((job) => job.core.toLowerCase() === missingCore(selected)?.toLowerCase()) ??
@@ -776,7 +755,9 @@ export function App() {
           root={root}
           page={dialog}
           art={artVersion}
+          blocked={confirmBox !== null}
           onPage={setDialog}
+          onConfirm={setConfirmBox}
           onClose={() => setDialog(null)}
           onArtChanged={async () => {
             setArtVersion((v) => v + 1);
@@ -784,6 +765,8 @@ export function App() {
           }}
         />
       )}
+      {nameDialog && <NameDialog request={nameDialog} onClose={() => setNameDialog(null)} />}
+      {confirmBox && <ConfirmDialog request={confirmBox} onClose={() => setConfirmBox(null)} />}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <share.h>
@@ -231,6 +232,7 @@ using D2GfxSetPerspectivePointer = void (__stdcall*)(int);
 using D2GfxToggleLowQualityPointer = int (__stdcall*)();
 using D2GfxSetGammaPointer = int (__stdcall*)(uint32_t);
 using D2GfxEnableVSyncPointer = void (__stdcall*)();
+using D2GfxNoFixedAspectPointer = void (__stdcall*)();
 
 struct FogBootstrap {
     HMODULE module = nullptr;
@@ -396,6 +398,8 @@ BOOL __stdcall allow_expansion() {
     return TRUE;
 }
 
+// The loader's own view of the options, laid out as 1.10f's. What the game's modules read is
+// game_config below.
 D2ConfigStrc build_config(const Plan& plan) {
     D2ConfigStrc config{};
     config.bIsExpansion = TRUE;
@@ -406,64 +410,87 @@ D2ConfigStrc build_config(const Plan& plan) {
     config.bRave = has_flag(plan.commandLine, "rave") ? 1 : 0;
     config.bPerspective = has_flag(plan.commandLine, "per") ? 1 : 0;
     config.bQuality = has_flag(plan.commandLine, "lq") ? 1 : 0;
+    config.dwGamma = flag_number(plan.commandLine, "gamma");
+    config.bVSync = has_flag(plan.commandLine, "vsync") ? 1 : 0;
     config.bDirect = has_flag(plan.commandLine, "direct") ? 1 : 0;
+    config.bNoCompress = has_flag(plan.commandLine, "nocompress") ? 1 : 0;
     config.bTxt = has_flag(plan.commandLine, "txt") ? 1 : 0;
     config.bNoSound = has_flag(plan.commandLine, "ns") || has_flag(plan.commandLine, "nosound") ? 1 : 0;
     config.bAmazon = 1;
     config.nLaunchType = LAUNCHTYPE_NONE;
     config.pAllowExpansionCallback = allow_expansion;
-    // The config is laid out as 1.10f's, but each core reads some fields at its own offset (the
-    // struct grew between patches). Found per core by what reads them (2026-10-14):
-    // - The Battle.net interface pointer (1.10f's pComInterface), by where each D2Launch copies it
-    //   into its global. It must start null; 1.00 and 1.01 read a stray 1 there, and their
-    //   "Disconnect from BNET" step on entering the menu jumped through it.
-    // - bSkipToBNet (-skiptobnet), by the main menu's test of it: read, then cleared, and in 1.01 and
-    //   later the last gateway read from the registry (Storm #423) in between.
-    // - dwAct (-actN) and dwSeed (-seed N), by D2Client's two accessors: `mov eax,[ecx+X]; test eax,
-    //   eax; je`, the act then checked below 5 (classic, four acts) or 6, the seed handed to D2Game
-    //   #10010. 0 is "not set" for both, which is Game.exe's default.
-    // Until these were found, -skiptobnet, -act and -seed reached the command line but never the
-    // config, so none of them did anything. 0 in the table means the field is where 1.10f has it.
-    struct CoreLayout {
-        const char* core;
-        size_t comInterface;
-        size_t skipToBNet;
-        size_t act;
-        size_t seed;
-        uint32_t acts;
-    };
-    static const CoreLayout kLayouts[] = {
-        {"1.00", 0x1FA, 0x332, 0x1DC, 0x1F2, 4},  {"1.01", 0x1FA, 0x332, 0x1DC, 0x1F2, 4},
-        {"1.02", 0x212, 0x34A, 0x1F4, 0x20A, 4},  {"1.03", 0x212, 0x34A, 0x1F4, 0x20A, 4},
-        {"1.04b", 0x212, 0x34A, 0x1F4, 0x20A, 4}, {"1.04c", 0x212, 0x34A, 0x1F4, 0x20A, 4},
-        {"1.05", 0x212, 0x34A, 0x1F4, 0x20A, 4},  {"1.05b", 0x212, 0x34A, 0x1F4, 0x20A, 4},
-        {"1.06", 0x216, 0x34E, 0x1F8, 0x20E, 4},  {"1.06b", 0x216, 0x34E, 0x1F8, 0x20E, 4},
-        {"1.07", 0x21D, 0x355, 0, 0, 5},          {"1.08", 0x21D, 0x355, 0, 0, 5},
-        {"1.09", 0x21D, 0x355, 0, 0, 5},          {"1.09b", 0x21D, 0x355, 0, 0, 5},
-        {"1.09d", 0x21D, 0x355, 0, 0, 5},         {"1.13c", 0, 0x359, 0x1FB, 0x216, 5},
-        {"1.13d", 0, 0x359, 0x1FB, 0x216, 5},
-    };
-    auto* bytes = reinterpret_cast<uint8_t*>(&config);
-    size_t skipAt = offsetof(D2ConfigStrc, bSkipToBNet);
-    size_t actAt = offsetof(D2ConfigStrc, dwAct);
-    size_t seedAt = offsetof(D2ConfigStrc, dwSeed);
-    uint32_t acts = 5;
-    for (const auto& layout : kLayouts) {
-        if (plan.core != layout.core) continue;
-        if (layout.comInterface) std::memset(bytes + layout.comInterface, 0, sizeof(void*));
-        if (layout.skipToBNet) skipAt = layout.skipToBNet;
-        if (layout.act) actAt = layout.act;
-        if (layout.seed) seedAt = layout.seed;
-        acts = layout.acts;
+    return config;
+}
+
+// Where each core keeps the options its modules read. D2Client alone reads most of them, at its own
+// core's offsets, so one layout for every core sent options to the wrong fields: on 1.13 -txt and -ns
+// never arrived and -ns turned on -teen, and before 1.06 the expansion flag read as -w. These are the
+// offsets in each core's own Game.exe option table (D2CmdArgStrc, read 2026-11-01; vault:
+// Shared/Diablo-II/Command Line). 1.13d's table matches 1.13c's. 0 in txt, noFixedAspect and
+// soundBackground means the core has no such option; window really is at 0 before 1.06.
+struct ConfigLayout {
+    size_t window, glide, opengl, rave, d3d, perspective, quality, gamma, vsync, amazon;
+    size_t act, direct, noCompress, txt, seed, noSound, skipToBNet;
+    size_t noFixedAspect, soundBackground;
+    bool expansion;
+    uint32_t acts;
+};
+
+const ConfigLayout kConfig100 = {0, 1, 2, 3, 4, 5, 6, 7, 0x0B, 0x7C, 0x1DC, 0x1E1, 0x1E3, 0, 0x1F2, 0x1F7, 0x332, 0, 0, false, 4};
+const ConfigLayout kConfig102 = {0, 1, 2, 3, 4, 5, 6, 7, 0x0B, 0x7C, 0x1F4, 0x1F9, 0x1FB, 0, 0x20A, 0x20F, 0x34A, 0, 0, false, 4};
+const ConfigLayout kConfig106 = {4, 5, 6, 7, 8, 9, 0x0A, 0x0B, 0x0F, 0x80, 0x1F8, 0x1FD, 0x1FF, 0, 0x20E, 0x213, 0x34E, 0, 0, true, 4};
+const ConfigLayout kConfig107 = {4, 5, 6, 7, 8, 9, 0x0A, 0x0B, 0x0F, 0x80, 0x1FA, 0x1FF, 0x201, 0x210, 0x215, 0x21A, 0x355, 0, 0, true, 5};
+const ConfigLayout kConfig110 = {4, 5, 6, 7, 8, 9, 0x0A, 0x0B, 0x0F, 0x80, 0x1FA, 0x1FF, 0x201, 0x210, 0x215, 0x21B, 0x357, 0, 0, true, 5};
+const ConfigLayout kConfig113 = {4, 6, 7, 8, 9, 0x0A, 0x0B, 0x0C, 0x10, 0x81, 0x1FB, 0x200, 0x202, 0x211, 0x216, 0x21C, 0x359, 5, 0x220, true, 5};
+
+const ConfigLayout& config_layout(const std::string& core) {
+    if (core == "1.00" || core == "1.01") return kConfig100;
+    if (core == "1.02" || core == "1.03" || core == "1.04b" || core == "1.04c" || core == "1.05" || core == "1.05b") {
+        return kConfig102;
     }
-    if (has_flag(plan.commandLine, "skiptobnet")) bytes[skipAt] = 1;
+    if (core == "1.06" || core == "1.06b") return kConfig106;
+    if (core == "1.07" || core == "1.08" || core == "1.09" || core == "1.09b" || core == "1.09d") return kConfig107;
+    if (core == "1.13c" || core == "1.13d") return kConfig113;
+    return kConfig110;
+}
+
+// Larger than any core's config, which the modules also write into; 1.13's is 2 bytes over 1.10f's.
+using GameConfig = std::array<uint8_t, 0x400>;
+
+// The config the game's modules get, at this core's own offsets. Fields not set here stay 0, which is
+// Game.exe's default for all of them but -ama.
+GameConfig game_config(const Plan& plan, const D2ConfigStrc& config) {
+    const ConfigLayout& layout = config_layout(plan.core);
+    GameConfig bytes{};
+    if (layout.expansion) std::memcpy(bytes.data(), &config.bIsExpansion, sizeof(config.bIsExpansion));
+    bytes[layout.window] = config.bWindow;
+    bytes[layout.glide] = config.b3DFX;
+    bytes[layout.opengl] = config.bOpenGL;
+    bytes[layout.rave] = config.bRave;
+    bytes[layout.d3d] = config.bD3D;
+    bytes[layout.perspective] = config.bPerspective;
+    bytes[layout.quality] = config.bQuality;
+    std::memcpy(bytes.data() + layout.gamma, &config.dwGamma, sizeof(config.dwGamma));
+    bytes[layout.vsync] = config.bVSync;
+    bytes[layout.amazon] = config.bAmazon;
+    bytes[layout.direct] = config.bDirect;
+    bytes[layout.noCompress] = config.bNoCompress;
+    bytes[layout.noSound] = config.bNoSound;
+    if (layout.txt) {
+        bytes[layout.txt] = config.bTxt;
+        // Game.exe's expansion callback sits just before -txt, on the cores that have either.
+        std::memcpy(bytes.data() + layout.txt - sizeof(void*), &config.pAllowExpansionCallback, sizeof(void*));
+    }
+    if (layout.noFixedAspect) bytes[layout.noFixedAspect] = has_flag(plan.commandLine, "nofixaspect") ? 1 : 0;
+    if (layout.soundBackground) bytes[layout.soundBackground] = has_flag(plan.commandLine, "sndbkg") ? 1 : 0;
+    if (has_flag(plan.commandLine, "skiptobnet")) bytes[layout.skipToBNet] = 1;
     // An act the core does not have (Act V before Lord of Destruction) is left unset, as Game.exe would
     // refuse it; D2Client asserts on it.
     const uint32_t act = flag_number(plan.commandLine, "act");
-    if (act >= 1 && act <= acts) std::memcpy(bytes + actAt, &act, sizeof(act));
+    if (act >= 1 && act <= layout.acts) std::memcpy(bytes.data() + layout.act, &act, sizeof(act));
     const uint32_t seed = flag_number(plan.commandLine, "seed");
-    if (seed) std::memcpy(bytes + seedAt, &seed, sizeof(seed));
-    return config;
+    if (seed) std::memcpy(bytes.data() + layout.seed, &seed, sizeof(seed));
+    return bytes;
 }
 
 void log_config(Log& log, const D2ConfigStrc& config, const Plan& plan) {
@@ -479,6 +506,19 @@ void log_config(Log& log, const D2ConfigStrc& config, const Plan& plan) {
         static_cast<unsigned>(config.bTxt),
         static_cast<unsigned>(config.bNoSound),
         plan.handoff ? "enabled" : "disabled"
+    );
+    log.line(buffer);
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "Video options: per=%u lq=%u gamma=%u vsync=%u nocompress=%u nofixaspect=%u sndbkg=%u",
+        static_cast<unsigned>(config.bPerspective),
+        static_cast<unsigned>(config.bQuality),
+        static_cast<unsigned>(config.dwGamma),
+        static_cast<unsigned>(config.bVSync),
+        static_cast<unsigned>(config.bNoCompress),
+        static_cast<unsigned>(has_flag(plan.commandLine, "nofixaspect")),
+        static_cast<unsigned>(has_flag(plan.commandLine, "sndbkg"))
     );
     log.line(buffer);
     if (!plan.commandLine.empty()) log.line("Command line flags: " + plan.commandLine);
@@ -666,6 +706,9 @@ struct CoreOrdinals {
     WORD d2gfxEnableVSync;
     WORD d2soundOpen;
     WORD d2soundClose;
+    // What Game.exe calls for -nofixaspect, 1.13 on; D2MOO has no name for it. 0: the core has no such
+    // call. Read from each 1.13 Game.exe's imports, after it reads "Fixed Aspect Ratio".
+    WORD d2gfxNoFixedAspect;
 };
 
 // Export ordinals are part of the core ABI, not global Diablo II truth. D2SE's own resolver table
@@ -729,6 +772,7 @@ const CoreOrdinals kCore113 = {
     10142, 10052, 10032,
     10000, 10084, 10081, 10053, 10034, 10007,
     10002, 10031,
+    10066,
 };
 
 // Not in D2SE's table, which stops at 1.13c. Derived 2026-10-05 from Blizzard's 1.11 and 1.13d DLLs
@@ -749,6 +793,7 @@ const CoreOrdinals kCore113d = {
     10071, 10129, 10132,
     10000, 10050, 10068, 10008, 10071, 10065,
     10023, 10024,
+    10049,
 };
 
 // By the exact core when the config names it (1.11 and 1.11b share "v1.11" but not ordinals), else
@@ -1263,6 +1308,7 @@ bool setup_gfx(
     Log& log,
     const D2ConfigStrc& config,
     const CoreOrdinals& ordinals,
+    bool noFixedAspect,
     bool startGraphics,
     bool manual,
     bool probeInit,
@@ -1289,6 +1335,9 @@ bool setup_gfx(
     const auto toggleLowQuality = reinterpret_cast<D2GfxToggleLowQualityPointer>(proc_by_ordinal(gfx.d2gfx, ordinals.d2gfxToggleLowQuality));
     const auto setGamma = reinterpret_cast<D2GfxSetGammaPointer>(proc_by_ordinal(gfx.d2gfx, ordinals.d2gfxSetGamma));
     const auto enableVSync = reinterpret_cast<D2GfxEnableVSyncPointer>(proc_by_ordinal(gfx.d2gfx, ordinals.d2gfxEnableVSync));
+    const auto noFixedAspectCall = ordinals.d2gfxNoFixedAspect
+        ? reinterpret_cast<D2GfxNoFixedAspectPointer>(proc_by_ordinal(gfx.d2gfx, ordinals.d2gfxNoFixedAspect))
+        : nullptr;
 
     if (!createWindow || !initializeSpriteCache || !gfx.closeSpriteCache || !gfx.release) {
         log.line(std::string("Cannot bootstrap gfx: D2Win/D2Gfx startup ordinals are not mapped for ") + ordinals.label + ".");
@@ -1326,6 +1375,8 @@ bool setup_gfx(
     }
     gfx.gfxStarted = true;
 
+    if (config.bPerspective && mode >= 4 && setPerspective) setPerspective(TRUE);
+
     const bool spritesReady = manual ? initialize_d2win_sprite_cache(log, gfx.d2win, gfx.d2gfx, windowed)
                                      : initializeSpriteCache(windowed, 0) != FALSE;
     if (!spritesReady) {
@@ -1334,10 +1385,10 @@ bool setup_gfx(
     }
     gfx.spriteCacheStarted = true;
 
-    if (config.bPerspective && mode >= 4 && setPerspective) setPerspective(TRUE);
     if (config.bQuality && toggleLowQuality) toggleLowQuality();
     if (config.dwGamma && setGamma) setGamma(config.dwGamma);
     if (config.bVSync && enableVSync) enableVSync();
+    if (noFixedAspect && noFixedAspectCall) noFixedAspectCall();
 
     char buffer[160]{};
     std::snprintf(
@@ -1605,8 +1656,9 @@ void call_plugin_release(Log& log, LoadedPlugin& loaded) {
     log.line("Released " + loaded.plugin.path + " (" + loaded.plugin.release + " returned " + std::to_string(result) + ")");
 }
 
-// D2Sound #10000 / #10001 (1.10f), D2MOO D2Sound.h. 1.13 added a background-sound argument.
-using D2SoundOpenPointer = void (__fastcall*)(BOOL);
+// D2Sound #10000 / #10001 (1.10f), D2MOO D2Sound.h. 1.13 added a background-sound argument, in EDX;
+// earlier cores ignore it.
+using D2SoundOpenPointer = void (__fastcall*)(BOOL, BOOL);
 using D2SoundClosePointer = void (__fastcall*)();
 
 struct SoundBootstrap {
@@ -1614,7 +1666,7 @@ struct SoundBootstrap {
     bool started = false;
 };
 
-void setup_sound(Log& log, const D2ConfigStrc& config, const CoreOrdinals& ordinals, SoundBootstrap& sound) {
+void setup_sound(Log& log, const D2ConfigStrc& config, const CoreOrdinals& ordinals, bool background, SoundBootstrap& sound) {
     if (config.bNoSound) {
         log.line("Sound off (-ns).");
         return;
@@ -1627,7 +1679,7 @@ void setup_sound(Log& log, const D2ConfigStrc& config, const CoreOrdinals& ordin
         log.line("D2Sound exports not found; continuing without sound.");
         return;
     }
-    open(config.bIsExpansion);
+    open(config.bIsExpansion, background ? TRUE : FALSE);
     sound.started = true;
     log.line("Sound system open.");
 }
@@ -2047,8 +2099,10 @@ int run_loader() {
     FogBootstrap fog;
     GfxBootstrap gfx;
 
-    D2ConfigStrc config = build_config(plan);
+    const D2ConfigStrc config = build_config(plan);
     log_config(log, config, plan);
+    GameConfig gameConfigBytes = game_config(plan, config);
+    auto* gameConfig = reinterpret_cast<D2ConfigStrc*>(gameConfigBytes.data());
     if (has_flag(plan.commandLine, "skiptobnet")) log.line("Skip to Battle.net: on, at this core's config offset.");
     if (const uint32_t act = flag_number(plan.commandLine, "act")) log.line("Start act: " + std::to_string(act) + ".");
     if (const uint32_t seed = flag_number(plan.commandLine, "seed")) log.line("Map seed: " + std::to_string(seed) + ".");
@@ -2061,7 +2115,7 @@ int run_loader() {
 
     D2WinArchives d2winArchives;
     const bool viaD2Win = plan.archivesViaD2Win && plan.gameVersion == "v1.10";
-    if (viaD2Win ? !open_archives_d2win(log, plan, config, archives, d2winArchives)
+    if (viaD2Win ? !open_archives_d2win(log, plan, *gameConfig, archives, d2winArchives)
                  : !open_archives(log, plan, archives, closeArchive)) {
         log.line("Cannot continue: required MPQ archive stack did not open.");
         teardown_fog(log, fog);
@@ -2070,7 +2124,7 @@ int run_loader() {
 
     probe_files(log, plan, fog.module, archives);
 
-    if (!setup_gfx(log, config, ordinals, plan.graphics, plan.graphicsManual, plan.graphicsInit, plan.graphicsSurface, plan.graphicsWrapper, plan.graphicsWindow, gfx)) {
+    if (!setup_gfx(log, config, ordinals, has_flag(plan.commandLine, "nofixaspect"), plan.graphics, plan.graphicsManual, plan.graphicsInit, plan.graphicsSurface, plan.graphicsWrapper, plan.graphicsWindow, gfx)) {
         log.line("Cannot continue: gfx bootstrap failed.");
         teardown_gfx(log, gfx);
         close_archives(log, closeArchive, archives);
@@ -2083,7 +2137,7 @@ int run_loader() {
     probe_mpqs(log, plan);
 
     SoundBootstrap sound;
-    if (plan.graphics) setup_sound(log, config, ordinals, sound);
+    if (plan.graphics) setup_sound(log, config, ordinals, has_flag(plan.commandLine, "sndbkg"), sound);
 
     std::vector<HMODULE> loaded;
     for (const std::string& dll : plan.gameDlls) {
@@ -2130,7 +2184,7 @@ int run_loader() {
         return shutdown(0);
     }
 
-    run_modules(log, config, sound, gfx);
+    run_modules(log, *gameConfig, sound, gfx);
     return shutdown(0);
 }
 

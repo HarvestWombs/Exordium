@@ -1,9 +1,10 @@
 import { tr } from "../lib/i18n.ts";
 import * as React from "react";
+import { ManifestImportForm } from "../components/ManifestImportForm.tsx";
 import { CopyProgress } from "../components/progress.tsx";
 import { type Conversion, copyPercent } from "../hooks/useConversions.ts";
 import { formatSize } from "../lib/util.ts";
-import type { CopyJob, Scan } from "../types.ts";
+import type { ConfirmRequest, CopyJob, ModManifest, Scan } from "../types.ts";
 
 type Mod = Scan["importableMods"][number];
 
@@ -35,7 +36,7 @@ function badge(job: CopyJob | undefined): string | null {
  * carry on when the player leaves, and stays mounted while hidden, so a draft does too.
  */
 export function D2SEConverter(
-  { root, mods, hidden, queued, onQueued, onClose }: {
+  { root, mods, hidden, queued, onQueued, onConfirm, onClose }: {
     root: string;
     mods: Scan["importableMods"];
     /** Another page of the library is showing. */
@@ -43,6 +44,7 @@ export function D2SEConverter(
     /** Every import in progress or finished this visit, by mod. */
     queued: Record<string, Conversion>;
     onQueued: (conversion: Conversion) => void;
+    onConfirm: (request: ConfirmRequest) => void;
     onClose: () => void;
   },
 ) {
@@ -70,14 +72,26 @@ export function D2SEConverter(
   const failed = entries.filter((entry) => entry.job.state === "failed");
   const mine = current ? queued[modKey(current)] : undefined;
 
-  const discardOk = React.useCallback(
-    () => !dirty || confirm(tr("Discard your unsaved changes to this exordium.mod.json?")),
-    [dirty],
-  );
+  const discardOrRun = React.useCallback((run: () => void) => {
+    if (!dirty) {
+      run();
+      return;
+    }
+    onConfirm({
+      title: tr("Unsaved changes"),
+      body: tr("Discard your unsaved changes to this exordium.mod.json?"),
+      action: tr("Discard changes"),
+      danger: true,
+      run: () => {
+        run();
+        return Promise.resolve();
+      },
+    });
+  }, [dirty, onConfirm]);
   const close = React.useCallback(() => {
-    if (busy || !discardOk()) return;
-    onClose();
-  }, [busy, discardOk, onClose]);
+    if (busy) return;
+    discardOrRun(onClose);
+  }, [busy, discardOrRun, onClose]);
   const manifest = React.useMemo(() => {
     try {
       const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -142,9 +156,8 @@ export function D2SEConverter(
     };
   }, [folder, from, path]);
 
-  function patchManifest(key: string, value: string) {
-    const base = manifest ?? shown ?? {};
-    setText(JSON.stringify({ ...base, [key]: value }, null, 2));
+  function replaceManifest(next: ModManifest) {
+    setText(JSON.stringify(next, null, 2));
     setDirty(true);
   }
 
@@ -184,16 +197,6 @@ export function D2SEConverter(
   }
 
   const locked = busy || mine !== undefined;
-  const field = (key: "title" | "name" | "author" | "version" | "core") => (
-    <label>
-      <span>{key}</span>
-      <input
-        value={String(shown?.[key] ?? "")}
-        disabled={locked || !manifest}
-        onChange={(event) => patchManifest(key, event.currentTarget.value)}
-      />
-    </label>
-  );
   const copying = running.find((entry) => entry.job.state === "copying") ?? null;
   const waitingCount = running.filter((entry) => entry.job.state === "queued").length;
 
@@ -232,7 +235,7 @@ export function D2SEConverter(
                 key={mod.folder}
                 className={mod.folder === folder ? "on" : ""}
                 disabled={busy}
-                onClick={() => mod.folder !== folder && discardOk() && setFolder(mod.folder)}
+                onClick={() => mod.folder !== folder && discardOrRun(() => setFolder(mod.folder))}
               >
                 <strong>
                   {mod.title}
@@ -278,33 +281,31 @@ export function D2SEConverter(
               })}
             </label>
           </div>
-          <div className="converter-grid">
-            {field("title")}
-            {field("name")}
-            {field("author")}
-            {field("version")}
-            {field("core")}
+          <div className="converter-workspace">
+            {shown && (
+              <ManifestImportForm
+                manifest={shown as ModManifest}
+                folder={current?.folder ?? ""}
+                disabled={locked || !manifest}
+                onChange={replaceManifest}
+              />
+            )}
+            <section className="option-section converter-json">
+              <div className="section-head">
+                <h2 className="eyebrow">{tr("JSON preview")}</h2>
+                <span className="muted small">{tr("Updates live as you edit the form")}</span>
+              </div>
+              <textarea
+                value={text}
+                disabled={locked}
+                spellCheck={false}
+                onChange={(event) => {
+                  setText(event.currentTarget.value);
+                  setDirty(true);
+                }}
+              />
+            </section>
           </div>
-          <label className="converter-description">
-            <span>description</span>
-            <textarea
-              value={String(shown?.description ?? "")}
-              disabled={locked || !manifest}
-              onChange={(event) => patchManifest("description", event.currentTarget.value)}
-            />
-          </label>
-          <label className="converter-json">
-            <span>{tr("JSON preview")}</span>
-            <textarea
-              value={text}
-              disabled={locked}
-              spellCheck={false}
-              onChange={(event) => {
-                setText(event.currentTarget.value);
-                setDirty(true);
-              }}
-            />
-          </label>
           {!manifest && text.trim() !== "" && (
             <p className="warn-text small">
               {tr("The JSON is not valid yet — fix it to edit the fields or import.")}

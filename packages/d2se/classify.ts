@@ -66,8 +66,7 @@ export function classify(kind: FolderKind, path: string): Classification {
     }
     // A core is its own files, at its root, and nothing else: its subfolders (documentation, backups,
     // a `data` folder left by testing) are not part of it. Its languages are handled above. The one
-    // exception is PlugY's own folder, beside a PlugY.dll the player put in the core for mods that
-    // turn PlugY on without shipping it (Exordium ships none).
+    // exception is PlugY's own folder, beside the PlugY.dll a core copied from D2SE can carry.
     if (kind === "core" && top !== "plugy") {
       return { kind: "excluded", reason: `"${segments[0]}" is not part of the core` };
     }

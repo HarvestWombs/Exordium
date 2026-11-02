@@ -313,7 +313,14 @@ export function TitlePage(
                       <dt>{tr("Options")}</dt>
                       <dd>
                         {[
+                          t.settings.perspective && "-per",
+                          t.settings.lowQuality && "-lq",
+                          t.settings.gamma && `-gamma ${t.settings.gamma}`,
+                          t.settings.vsync && "-vsync",
+                          t.settings.noFixAspect && "-nofixaspect",
+                          t.settings.noCompress && "-nocompress",
                           t.settings.noSound && "-ns",
+                          t.settings.backgroundSound && "-sndbkg",
                           t.settings.skipToBNet && "-skiptobnet",
                           t.settings.startAct && `-act${t.settings.startAct}`,
                           t.settings.seed && `-seed ${t.settings.seed}`,

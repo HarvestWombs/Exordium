@@ -83,17 +83,20 @@ export function buildLoaderPlan(
 
   const settings = launchSettings(setup);
   const plugins: PluginLoad[] = [];
-  if (settings.plugY) {
-    // Exordium ships no PlugY. The box's PlugY.dll is the mod's own, else one the player put in the
-    // core's folder, else the PlugY folder set in Settings (layered in that order). At the root, or in
-    // a PlugY folder (D2SE's layout). Without one the game starts without PlugY, with a warning.
-    const path = !has("PlugY.dll") && has("PlugY/PlugY.dll") ? "PlugY/PlugY.dll" : "PlugY.dll";
+  if (settings.plugY && !singleExe) {
+    // Exordium ships no PlugY. The box's PlugY.dll is the mod's own, else the one in the library's plugy
+    // folder (a core copied from D2SE can carry one too, below that). At the root, or in a PlugY folder
+    // (D2SE's layout). Without one the game starts without PlugY, with a warning.
+    const inMod = (path: string) =>
+      plan.files.some((file) => file.role === "mod" && file.path.toLowerCase() === path.toLowerCase());
+    const nested = !has("PlugY.dll") || (inMod("PlugY/PlugY.dll") && !inMod("PlugY.dll"));
+    const path = nested && has("PlugY/PlugY.dll") ? "PlugY/PlugY.dll" : "PlugY.dll";
     if (has(path)) plugins.push({ kind: "plugy", path, required: true, init: "_Init@4", release: "_Release@0" });
     else {
       problems.push({
         level: "warning",
-        message: "PlugY is turned on, but no PlugY.dll was found in the mod, its core's folder or the PlugY " +
-          "folder in Settings, Launching. It starts without PlugY.",
+        message: "PlugY is turned on, but no PlugY.dll was found in the mod or the library's plugy folder. " +
+          "It starts without PlugY.",
       });
     }
   }
@@ -117,6 +120,12 @@ export function buildLoaderPlan(
           level: "error",
           message: `${name} is built for the pre-1.14 game DLLs; core ${setup.mod.core} has none for it to load into.`,
         });
+      } else if (plugin.kind === "custom") {
+        problems.push({
+          level: "error",
+          message:
+            `${plugin.path} cannot load on core ${setup.mod.core}; it runs through Blizzard's single Game.exe, without Exordium's loader.`,
+        });
       }
     }
     if (archives.some((archive) => archive.kind === "mod" || archive.kind === "language")) {
@@ -126,6 +135,17 @@ export function buildLoaderPlan(
           `Custom mod and language MPQs are not supported yet on core ${setup.mod.core}; it runs through Blizzard's single Game.exe.`,
       });
     }
+    if (settings.plugY) {
+      problems.push({
+        level: "warning",
+        message: `PlugY cannot load on core ${setup.mod.core}. It starts without PlugY.`,
+      });
+    }
+    problems.push({
+      level: "warning",
+      message:
+        `Core ${setup.mod.core} runs on Blizzard's own Game.exe: it uses your machine's Diablo II registry settings, and Battle.net is not locked.`,
+    });
   } else if (nativeGameExe) {
     need("Game.exe", `core ${setup.mod.core}`);
     for (const plugin of plugins) {
@@ -184,9 +204,16 @@ export function gameCommandLine(settings: LoaderSettings): string {
   return [
     renderer,
     settings.renderer === "ddraw" && settings.windowed ? "-w" : "",
+    settings.perspective ? "-per" : "",
+    settings.lowQuality ? "-lq" : "",
+    settings.gamma ? `-gamma ${settings.gamma}` : "",
+    settings.vsync ? "-vsync" : "",
+    settings.noFixAspect ? "-nofixaspect" : "",
     settings.noSound ? "-ns" : "",
+    settings.backgroundSound ? "-sndbkg" : "",
     settings.direct ? "-direct" : "",
     settings.txt ? "-txt" : "",
+    settings.noCompress ? "-nocompress" : "",
     settings.skipToBNet ? "-skiptobnet" : "",
     settings.startAct ? `-act${settings.startAct}` : "",
     settings.seed ? `-seed ${settings.seed}` : "",
@@ -194,8 +221,8 @@ export function gameCommandLine(settings: LoaderSettings): string {
 }
 
 /**
- * The game window's title: `Diablo II 1.10f Eastern Sun 3.2`. A core played on its own passes no
- * title. A version the title already ends with is not repeated, as D2SE setups often carry both.
+ * A mod's game window title: `Eastern Sun - 3.2`. D2SE titles that already end in their version are
+ * cleaned before the separator is added. A core played on its own keeps `Diablo II 1.10f`.
  */
 export function gameWindowTitle(
   core: string | null | undefined,
@@ -205,7 +232,10 @@ export function gameWindowTitle(
   const name = title?.replace(/\s+/g, " ").trim() ?? "";
   const release = version?.replace(/\s+/g, " ").trim() ?? "";
   const repeated = release !== "" && name.toLowerCase().endsWith(release.toLowerCase());
-  return ["Diablo II", core?.trim(), name, repeated ? "" : release].filter(Boolean).join(" ");
+  const modName = repeated ? name.slice(0, -release.length).trimEnd() : name;
+  if (modName && release) return `${modName} - ${release}`;
+  if (name) return name;
+  return ["Diablo II", core?.trim()].filter(Boolean).join(" ");
 }
 
 /** `1.10f` as Game.exe spells its own version for Fog: `v1.10`. */

@@ -175,7 +175,6 @@ export function SettingsSectionView(
         </SettingsGroup>
         <SettingsGroup title={tr("Storage")}>
           <PathRow label={tr("Exordium folder")} value={app.paths.data} openKey="data" />
-          <PathRow label={tr("Artwork folder")} value={app.paths.art} openKey="art" />
         </SettingsGroup>
       </>
     );
@@ -217,14 +216,13 @@ export function SettingsSectionView(
           />
         </SettingsGroup>
         <SettingsGroup title="PlugY">
-          <FolderRow
+          <PathRow
             label={tr("PlugY folder")}
             hint={tr(
-              "Exordium ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll, else one in its core's folder, else the one in this folder. Without any, it starts without PlugY.",
+              "Exordium ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll, else the one in this folder. Without either, it starts without PlugY.",
             )}
-            value={s.launch.plugYFolder}
-            disabled={busy}
-            onChange={(value) => onPatch({ launch: { plugYFolder: value } })}
+            value={app.paths.plugy}
+            openKey="plugy"
           />
         </SettingsGroup>
         {app.wine && <WineGroup wine={app.wine} choice={s.launch.wineRunner} busy={busy} onPatch={onPatch} />}

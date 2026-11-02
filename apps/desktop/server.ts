@@ -1,10 +1,12 @@
 import {
   GAME_ARCHIVES,
+  holdsPlugY,
   isSingleExeCore,
   type KnownFile,
   launchSettings,
   layoutPath,
   LIBRARY_FOLDERS,
+  LIBRARY_PLUGY,
   type ModImport,
   modProblems,
   type ModSetup,
@@ -31,7 +33,7 @@ import {
   type ResolvedFile,
   type ResolvedValue,
 } from "@exordium/layers";
-import { ART_KINDS, ArtError, type ArtKind, ArtStore, installTag, isPng, slug } from "@exordium/library";
+import { ART_KINDS, ArtError, type ArtKind, checkArt, chosenArtPath, installTag, isPng, slug } from "@exordium/library";
 import {
   boxLayer,
   capturedChanges,
@@ -78,10 +80,12 @@ import { appLog, type Heartbeat, heartbeat, startAppLog } from "./applog.ts";
 import {
   cancelCoreInstall,
   catalog,
+  copyInstallCore,
   coreEntries,
   CoreInstallError,
   coreJobs,
   pauseCoreInstall,
+  placeInstallCore,
   startCoreInstall,
 } from "./cores.ts";
 import {
@@ -105,7 +109,8 @@ import {
 } from "./discord.ts";
 import { DOC_TYPES, findDocs, modLinks, webUrl } from "./docs.ts";
 import { copyTree, installArchive } from "./install.ts";
-import { exordiumManifestFromD2SE } from "./mod-manifest.ts";
+import { exordiumManifestFromD2SE, normalizeManifest } from "./mod-manifest.ts";
+import { checkRealm, realmAddress } from "./realm.ts";
 import { runHidden } from "./native.ts";
 import { pickFolderNative, pickOpenFilesNative } from "./native-dialog.ts";
 import { exordiumRoot, userDataFolder } from "./paths.ts";
@@ -161,7 +166,6 @@ function coreLabel(version: string): "LOD" | "Diablo II" {
 // First, so everything after it is on the record (applog.ts). The details are read every ten
 // minutes, long after the module has finished loading.
 startAppLog(() => ({ eventStreams: eventStreams.size, running: sessionRunning.length + legacyRunning.length }));
-const art = new ArtStore(exordiumRoot);
 const sessions = new Sessions(exordiumRoot);
 
 const server = Deno.serve(
@@ -192,7 +196,8 @@ async function handleRequest(request: Request): Promise<Response> {
   if (url.pathname === "/api/settings") return await settings(request);
   if (url.pathname === "/api/app-settings") return await appSettingsRoute(request);
   if (url.pathname === "/api/app-settings/open") return await openAppFolder(request);
-  if (url.pathname === "/api/options") return await options(request);
+  if (url.pathname === "/api/manifest") return await manifestRoute(request, url);
+  if (url.pathname === "/api/realm-check") return await realmCheck(url);
   if (url.pathname === "/api/title-updates") return await titleUpdates(request);
   if (url.pathname === "/api/art") return await artwork(request, url);
   if (url.pathname === "/api/characters") return await characters(url);
@@ -309,26 +314,7 @@ type TitleSetup = {
   /** From exordium.mod.json; a D2SE setup has neither. */
   author?: string | null;
   links?: { label?: unknown; url?: unknown }[];
-  update?: Partial<TitleUpdateSettings>;
 };
-
-type TitleOptions = Partial<{
-  language: string | null;
-  renderer: Renderer;
-  windowed: boolean;
-  noSound: boolean;
-  hardcore: boolean;
-  plugY: boolean;
-  direct: boolean;
-  txt: boolean;
-  skipToBNet: boolean;
-  seed: string | null;
-  startAct: 1 | 2 | 3 | 4 | 5 | null;
-  /** About the title, set by the player: shown, never used to launch. */
-  title: string | null;
-  author: string | null;
-  links: { label: string; url: string }[];
-}>;
 
 type TitleUpdateSettings = {
   automatic: boolean;
@@ -349,8 +335,6 @@ type TitleUpdateCheck = {
   downloadCount: number;
   error: string | null;
 };
-
-const RENDERER_CODES: Record<Renderer, number> = { ddraw: 0, d3d: 1, opengl: 2, glide: 3 };
 
 interface ExordiumModManifest {
   title?: unknown;
@@ -439,8 +423,15 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
     plugY: boolValue(launch.plugY ?? manifest.plugY, false),
     language: textValue(launch.language ?? manifest.language),
     skipToBNet: boolValue(launch.skipToBNet ?? manifest.skipToBNet, false),
-    seed: seedValue(launch.seed ?? manifest.seed),
-    startAct: actValue(launch.startAct ?? manifest.startAct),
+    seed: launch.seedEnabled === false ? null : seedValue(launch.seed ?? manifest.seed),
+    startAct: launch.startActEnabled === false ? null : actValue(launch.startAct ?? manifest.startAct),
+    perspective: boolValue(launch.perspective, false),
+    lowQuality: boolValue(launch.lowQuality, false),
+    gamma: launch.gammaEnabled === false ? null : gammaValue(launch.gamma),
+    vsync: boolValue(launch.vsync, false),
+    noCompress: boolValue(launch.noCompress, false),
+    noFixAspect: boolValue(launch.noFixAspect, false),
+    backgroundSound: boolValue(launch.backgroundSound, false),
     description: textValue(manifest.description),
     readme: textValue(manifest.readme),
     d2mod: boolValue(loads.d2mod, false),
@@ -456,8 +447,7 @@ async function readExordiumMod(folder: string): Promise<TitleSetup | null> {
     author: textValue(manifest.author),
     links: Array.isArray(manifest.links) ? manifest.links as { label?: unknown; url?: unknown }[] : [],
   };
-  const update = updateSettingsValue(manifest.update ?? manifest.updates, problems);
-  if (update) result.update = update;
+  updateSettingsValue(manifest.update ?? manifest.updates, problems);
   return result;
 }
 
@@ -476,6 +466,13 @@ function nativeSetup(input: {
   skipToBNet?: boolean;
   seed?: string | null;
   startAct?: 1 | 2 | 3 | 4 | 5 | null;
+  perspective?: boolean;
+  lowQuality?: boolean;
+  gamma?: number | null;
+  vsync?: boolean;
+  noCompress?: boolean;
+  noFixAspect?: boolean;
+  backgroundSound?: boolean;
   description?: string | null;
   readme?: string | null;
   d2mod?: boolean;
@@ -503,6 +500,13 @@ function nativeSetup(input: {
       skipToBNet: input.skipToBNet ?? false,
       seed: input.seed ?? null,
       startAct: input.startAct ?? null,
+      perspective: input.perspective ?? false,
+      lowQuality: input.lowQuality ?? false,
+      gamma: input.gamma ?? null,
+      vsync: input.vsync ?? false,
+      noCompress: input.noCompress ?? false,
+      noFixAspect: input.noFixAspect ?? false,
+      backgroundSound: input.backgroundSound ?? false,
     },
     mod: {
       core: input.core,
@@ -550,8 +554,20 @@ function actValue(value: unknown): 1 | 2 | 3 | 4 | 5 | null {
   return act === 1 || act === 2 || act === 3 || act === 4 || act === 5 ? act : null;
 }
 
+/** `-gamma`: a whole number from 1 to 255. The game's own default is 155. */
+function gammaValue(value: unknown): number | null {
+  const gamma = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+  return Number.isInteger(gamma) && gamma >= 1 && gamma <= 255 ? gamma : null;
+}
+
 function boolValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+/** Which plugin systems' DLLs these files hold, at their top level, where the plan loads them from. */
+function pluginFiles(files: readonly { path: string }[]) {
+  const names = new Set(files.map((file) => file.path.toLowerCase()));
+  return { d2mod: names.has("d2mod.dll"), nefex: names.has("nefex.dll"), d2extra: names.has("d2extra.dll") };
 }
 
 function rendererValue(value: unknown, problems: TitleSetup["problems"]): Renderer {
@@ -632,7 +648,6 @@ async function scanD2SE(url: URL): Promise<Response> {
   const root = url.searchParams.get("root")?.trim();
   if (!root) return Response.json({ error: "Missing root" }, { status: 400 });
   const state = await readState();
-  const settings = appSettingsFromState(state);
   const imported = await readD2SE(root, { hash: false, hashWritable: false, linkData: true });
   if (!imported) return Response.json({ error: "That folder is not a D2SE install." }, { status: 404 });
   const cores = new Map(imported.cores.map((core) => [core.version.toLowerCase(), core]));
@@ -646,9 +661,7 @@ async function scanD2SE(url: URL): Promise<Response> {
     const native = await readExordiumMod(folder);
     const target = { kind: "mod" as const, folder: mod.folder };
     const key = entryKey(target);
-    const options = state.options[entryKey(target)] ?? {};
-    const baseSetup = native?.setup ?? mod.setup ?? null;
-    const setup = baseSetup ? applyOptions(baseSetup, options) : null;
+    const setup = native?.setup ?? mod.setup ?? null;
     const core = setup?.mod.core ? cores.get(setup.mod.core.toLowerCase()) ?? null : null;
     const language = setup?.player.language?.toUpperCase() ?? null;
     const loader = setup
@@ -658,7 +671,7 @@ async function scanD2SE(url: URL): Promise<Response> {
           core,
           mod,
           language,
-          await plugYFolderFor(setup, settings, { hash: false }),
+          await plugYFolderFor(imported.layout.root, setup, mod, { hash: false }),
         ),
         setup,
         loaderPlanOptions(setup),
@@ -669,18 +682,16 @@ async function scanD2SE(url: URL): Promise<Response> {
       key,
       art: await artSummary(imported.layout.root, target),
       folder: mod.folder,
-      title: options.title ?? setup?.mod.title ?? mod.folder,
-      author: options.author ?? native?.author ?? null,
+      title: setup?.mod.title ?? mod.folder,
+      author: native?.author ?? null,
       realm: setup?.realm ?? null,
       description: plainDescription(setup?.mod.description),
-      links: modLinks(setup?.mod ?? null, native?.links, options.links),
+      links: modLinks(setup?.mod ?? null, native?.links),
       ...findDocs(mod.scan.layer.map((file) => file.source), setup?.mod.readme ?? null),
       core: setup?.mod.core ?? null,
       version: setup?.mod.version ?? null,
       language: setup?.player.language ?? null,
-      updateSettings: titleUpdateSettings(state, key, native?.update),
       updateCheck: state.updateChecks[key] ?? null,
-      options,
       files: mod.scan.layer.length,
       saves: mod.scan.writable.length,
       screenshots: await screenshotCount(imported.layout.root, target),
@@ -692,6 +703,7 @@ async function scanD2SE(url: URL): Promise<Response> {
       ],
       archives: loader?.archives ?? [],
       plugins: loader?.plugins ?? [],
+      pluginFiles: pluginFiles([...mod.scan.layer, ...(core?.scan.layer ?? [])]),
       settings: loader?.settings ?? null,
     };
   }));
@@ -699,10 +711,8 @@ async function scanD2SE(url: URL): Promise<Response> {
   const coreEntries = await Promise.all(imported.cores.map(async (core) => {
     const target = { kind: "core" as const, version: core.version };
     const key = entryKey(target);
-    const options = state.options[key] ?? {};
     const manifest = await readCoreManifest(imported.layout.root, core.version);
-    const baseSetup = manifest?.setup ?? await readCoreSetup(imported.layout.root, core.version);
-    const setup = baseSetup ? applyOptions(baseSetup, options) : null;
+    const setup = manifest?.setup ?? await readCoreSetup(imported.layout.root, core.version);
     const language = setup?.player.language?.toUpperCase() ?? null;
     const loader = setup
       ? buildLoaderPlan(
@@ -711,7 +721,7 @@ async function scanD2SE(url: URL): Promise<Response> {
           core,
           null,
           language,
-          await plugYFolderFor(setup, settings, { hash: false }),
+          await plugYFolderFor(imported.layout.root, setup, null, { hash: false }),
         ),
         setup,
         loaderPlanOptions(setup),
@@ -722,18 +732,16 @@ async function scanD2SE(url: URL): Promise<Response> {
       key,
       art: await artSummary(imported.layout.root, target),
       folder: core.version,
-      title: options.title ?? manifest?.setup.mod.title ?? coreTitle(core.version),
-      author: options.author ?? manifest?.author ?? null,
+      title: manifest?.setup.mod.title ?? coreTitle(core.version),
+      author: manifest?.author ?? null,
       realm: setup?.realm ?? null,
       description: plainDescription(setup?.mod.description),
-      links: modLinks(setup?.mod ?? null, manifest?.links, options.links),
+      links: modLinks(setup?.mod ?? null, manifest?.links),
       ...findDocs(core.scan.layer.map((file) => file.source), setup?.mod.readme ?? null),
       core: core.version,
       version: setup?.mod.version ?? null,
       language: setup?.player.language ?? null,
-      updateSettings: titleUpdateSettings(state, key, undefined),
       updateCheck: state.updateChecks[key] ?? null,
-      options,
       files: core.scan.layer.length,
       saves: core.scan.writable.length,
       screenshots: await screenshotCount(imported.layout.root, target),
@@ -744,6 +752,7 @@ async function scanD2SE(url: URL): Promise<Response> {
       ],
       archives: loader?.archives ?? [],
       plugins: loader?.plugins ?? [],
+      pluginFiles: pluginFiles(core.scan.layer),
       settings: loader?.settings ?? null,
     };
   }));
@@ -985,7 +994,7 @@ const libraryRoot = libraryFolder(exordiumRoot);
  * GET: the library, the linked install and what it holds, and the transfer jobs. POST `{ action }`:
  * "check" an install (read only), "start" (make the library and place the game files). Automatic
  * placement prefers symlinks, then hardlinks, then copies. Cores come from the catalog
- * (`/api/cores`), not the install.
+ * (`/api/cores`), not the install, except a 1.14 install's own, which is copied in with the game.
  */
 async function setupRoute(request: Request): Promise<Response> {
   const state = await readState();
@@ -1037,6 +1046,12 @@ async function setupRoute(request: Request): Promise<Response> {
         mode,
         then: async (finished) => {
           await recordLibraryTransfer(libraryRoot, mode, finished.methods);
+          const installCore = await rootCoreName(install).catch(() => null);
+          if (installCore) {
+            await placeInstallCore(libraryRoot, install, installCore).catch((error) =>
+              appLog("warn", `core ${installCore} was not copied: ${(error as Error).message}`)
+            );
+          }
           await warmLaunchHashes(libraryRoot);
           await writeState((s) => void (s.root = libraryRoot));
         },
@@ -1072,9 +1087,9 @@ function reportLaunch(
   notify("status");
 }
 
-/** A library core's folder: `cores/<version>`; for a 1.14 install, the install root itself. */
+/** A library core's folder: `cores/<version>`. */
 function coreFolder(root: string, version: string): string {
-  return isSingleExeCore(version) ? root : `${root}/${LIBRARY_FOLDERS.cores}/${version}`;
+  return `${root}/${LIBRARY_FOLDERS.cores}/${version}`;
 }
 
 /**
@@ -1115,7 +1130,8 @@ async function readCoreSetup(root: string, version: string): Promise<ModSetup | 
 
 /**
  * GET `?root[&refresh=1]`: the cores catalog with what this install has. POST `{ root, core }`:
- * installs one into `D2SE\CORES` (cores.ts); the page polls GET for its progress.
+ * installs one into the library's `cores` (cores.ts), or copies a 1.14 core from the install; the page
+ * polls GET for its progress.
  */
 async function coresRoute(request: Request, url: URL): Promise<Response> {
   if (request.method === "POST") {
@@ -1124,13 +1140,11 @@ async function coresRoute(request: Request, url: URL): Promise<Response> {
     const core = typeof body?.core === "string" ? body.core.trim() : "";
     if (!root || !core) return Response.json({ error: "Missing root or core" }, { status: 400 });
     try {
+      const warm = (installed: string) => warmLaunchHashes(root, { cores: [installed] });
       return Response.json(
-        await startCoreInstall(
-          root,
-          core,
-          downloadsFolder,
-          (installed) => warmLaunchHashes(root, { cores: [installed] }),
-        ),
+        isSingleExeCore(core)
+          ? await copyInstallCore(root, (await readState()).install ?? null, core, warm)
+          : await startCoreInstall(root, core, downloadsFolder, warm),
       );
     } catch (error) {
       if (error instanceof CoreInstallError) return Response.json({ error: error.message }, { status: 400 });
@@ -1141,8 +1155,8 @@ async function coresRoute(request: Request, url: URL): Promise<Response> {
   try {
     const list = await catalog(url.searchParams.get("refresh") === "1");
     if (!list) return Response.json({ configured: false, cores: [] });
-    const rootCore = root ? await rootCoreName(root).catch(() => null) : null;
-    return Response.json({ configured: true, cores: await coreEntries(root, list, rootCore) });
+    const install = (await readState()).install ?? null;
+    return Response.json({ configured: true, cores: await coreEntries(root, list, install) });
   } catch (error) {
     return Response.json({ configured: true, cores: [], error: (error as Error).message });
   }
@@ -1208,31 +1222,32 @@ async function stampedGameExe(
   };
 }
 
-/** The PlugY folder from Settings, Launching, as a box layer: its files, scanned. */
+/** The library's plugy folder as a box layer: its files, scanned. */
 interface PlugYFolder {
   folder: string;
   files: ScannedFile[];
 }
 
 /**
- * The PlugY folder for a title, when it has PlugY on and the setting names a folder that holds
- * PlugY.dll; null otherwise (a missing PlugY is the loader plan's warning, not an error here).
+ * The library's plugy folder for a title, when it has PlugY on, its mod brings none, and the folder
+ * holds PlugY.dll; null otherwise (a missing PlugY is the loader plan's warning, not an error here).
  */
 async function plugYFolderFor(
+  root: string,
   setup: ModSetup | null,
-  settings: AppSettings,
+  mod: ModImport | null,
   options: { hash: boolean; cache?: Map<string, KnownFile> },
 ): Promise<PlugYFolder | null> {
-  const folder = settings.launch.plugYFolder.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!folder || !setup || !launchSettings(setup).plugY) return null;
+  if (!setup || !launchSettings(setup).plugY || isSingleExeCore(setup.mod.core)) return null;
+  if (mod && holdsPlugY(mod.scan.layer)) return null;
+  const folder = layoutPath(root, LIBRARY_PLUGY);
   // Scanned as a mod folder, which keeps subfolders: PlugY's own PlugY folder is part of it.
   const scan = await scanFolder(folder, "mod", {
     hash: options.hash,
     ...(options.cache ? { cache: options.cache } : {}),
   })
     .catch(() => null);
-  if (!scan?.layer.some((file) => /^(plugy\/)?plugy\.dll$/i.test(file.path))) return null;
-  return { folder, files: scan.layer };
+  return scan && holdsPlugY(scan.layer) ? { folder, files: scan.layer } : null;
 }
 
 async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: number, total: number) => void) {
@@ -1289,7 +1304,6 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     saves = `${coreFolder(imported.layout.root, core.version)}/save`;
   }
 
-  setup = applyOptions(setup, state.options[entryKey(target)] ?? {});
   const language = setup.player.language?.toUpperCase() ?? null;
   const { plan, sources } = buildRealPlan(
     imported.layout.root,
@@ -1297,7 +1311,7 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     core,
     mod,
     language,
-    await plugYFolderFor(setup, appSettingsFromState(state), { hash: true, cache }),
+    await plugYFolderFor(imported.layout.root, setup, mod, { hash: true, cache }),
   );
   const loader = buildLoaderPlan(plan, setup, {
     ...loaderPlanOptions(setup),
@@ -1430,7 +1444,7 @@ async function realiseD2SEBox(
   const title = target.kind === "mod"
     ? setup.mod.title ?? target.folder
     : await coreName(imported.layout.root, target.version);
-  const iconFile = await artFile(imported.layout.root, target, "icon");
+  const iconFile = await modArt(imported.layout.root, target, "icon");
   const icon = iconFile ? gamePath(iconFile) : null;
   const presence = gamePresenceAllowed(state, appSettings)
     ? activityJson(runActivity({ kind: target.kind, name: title, core: core?.version ?? loader.gameVersion ?? null }))
@@ -1552,8 +1566,6 @@ interface AppState {
   install?: string | null;
   lastPlayed: string | null;
   playedAt: Record<string, string>;
-  options: Record<string, TitleOptions>;
-  updateSettings: Record<string, TitleUpdateSettings>;
   updateChecks: Record<string, TitleUpdateCheck>;
   /** Title keys pinned to the top of the list. */
   favorites: string[];
@@ -1597,11 +1609,6 @@ interface AppSettings {
     showLogsOnFailure: boolean;
     /** Close official Battle.net to every mod without its own realm (battlenetAllowed in @exordium/launch). */
     battlenetLockdown: boolean;
-    /**
-     * A folder holding PlugY.dll (and its PlugY folder): layered into the box of a title with PlugY on,
-     * below its core and mod, so a PlugY of their own wins. Empty: none. Exordium ships no PlugY.
-     */
-    plugYFolder: string;
     /**
      * Off Windows, what runs the game: a runner id from detection (`system:/usr/bin/wine`), or a path
      * to a Wine binary, a Wine or Proton folder, or umu-run. Empty: the first runner found.
@@ -1682,7 +1689,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     minimizeOnLaunch: false,
     showLogsOnFailure: true,
     battlenetLockdown: true,
-    plugYFolder: "",
     wineRunner: "",
   },
   boxes: {
@@ -1721,8 +1727,6 @@ async function readState(): Promise<AppState> {
       root: null,
       lastPlayed: null,
       playedAt: {},
-      options: {},
-      updateSettings: {},
       updateChecks: {},
       favorites: [],
       hidden: [],
@@ -1736,8 +1740,6 @@ async function readState(): Promise<AppState> {
         root: null,
         lastPlayed: null,
         playedAt: {},
-        options: {},
-        updateSettings: {},
         updateChecks: {},
         favorites: [],
         hidden: [],
@@ -1754,8 +1756,6 @@ async function readLegacyState(): Promise<AppState | null> {
       root: null,
       lastPlayed: null,
       playedAt: {},
-      options: {},
-      updateSettings: {},
       updateChecks: {},
       favorites: [],
       hidden: [],
@@ -2564,7 +2564,7 @@ function appSettingsResponse(settings: AppSettings) {
       downloads: winPath(downloadsFolder),
       backups: winPath(`${exordiumRoot}/backups`),
       logs: winPath(`${exordiumRoot}/logs`),
-      art: winPath(`${exordiumRoot}/art`),
+      plugy: winPath(`${libraryRoot}/${LIBRARY_PLUGY}`),
     },
     platform: Deno.build.os,
     wine: wineStatus(settings),
@@ -2612,7 +2612,6 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
   mergeObject(next.launch, record.launch, {
     battlenetLockdown: "boolean",
     minimizeOnLaunch: "boolean",
-    plugYFolder: "string",
     showLogsOnFailure: "boolean",
     wineRunner: "string",
   });
@@ -2669,79 +2668,88 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-async function options(request: Request): Promise<Response> {
-  if (request.method !== "POST" && request.method !== "DELETE") {
+/**
+ * A title's `exordium.mod.json`, which Properties edits. GET gives the file in its one spelling, or,
+ * with no file yet, what the title runs on now, drafted from its D2SE_SETUP.ini. POST writes it; from
+ * the first save the file wins over D2SE_SETUP.ini. Keys are one folder name (parseEntryKey), and only
+ * the library is written to.
+ */
+async function manifestRoute(request: Request, url: URL): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json().catch(() => null) as
-    | { root?: unknown; folder?: unknown; core?: unknown; options?: unknown }
-    | null;
-  const root = typeof body?.root === "string" ? body.root.trim() : "";
-  const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
-  const core = typeof body?.core === "string" ? body.core.trim() : "";
-  if (!root || (!folder && !core)) return Response.json({ error: "Missing root, and folder or core" }, { status: 400 });
-  const target: BoxTarget = folder ? { kind: "mod", folder } : { kind: "core", version: core };
-  const key = entryKey(target);
+  const body = request.method === "POST"
+    ? await request.json().catch(() => null) as { root?: unknown; key?: unknown; manifest?: unknown } | null
+    : null;
+  const root = (typeof body?.root === "string" ? body.root : url.searchParams.get("root") ?? "").trim();
+  const target = parseEntryKey(typeof body?.key === "string" ? body.key : url.searchParams.get("key") ?? "");
+  if (!target || !(await isLibrary(root))) {
+    return Response.json({ error: "Missing the library or the title." }, { status: 400 });
+  }
+  const folder = titleFolder(root, target);
+  const file = `${folder}/${EXORDIUM_MOD_FILE}`;
+  if (!(await Deno.stat(folder).then((info) => info.isDirectory, () => false))) {
+    return Response.json({ error: `${winPath(folder)} does not exist.` }, { status: 404 });
+  }
 
-  const state = await writeState((state) => {
-    state.root = root;
-    state.options ??= {};
-    if (request.method === "DELETE") delete state.options[key];
-    else state.options[key] = cleanOptions(body?.options);
-  });
-  return Response.json({ key, options: state.options[key] ?? {} });
+  if (request.method === "POST") {
+    const manifest = isRecord(body?.manifest) ? { ...body.manifest } : null;
+    if (!manifest) return Response.json({ error: "The manifest must be a JSON object." }, { status: 400 });
+    if (target.kind === "core") manifest.core = target.version;
+    if (!textValue(manifest.core)) return Response.json({ error: "Set the core this mod runs on." }, { status: 400 });
+    await writeManifest(folder, manifest);
+    return Response.json({ manifest: normalizeManifest(manifest), exists: true, path: winPath(file) });
+  }
+
+  try {
+    return Response.json({ ...await titleManifest(root, target), path: winPath(file) });
+  } catch (error) {
+    if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
 }
 
-function cleanOptions(input: unknown): TitleOptions {
-  if (!input || typeof input !== "object") return {};
-  const record = input as Record<string, unknown>;
-  const next: TitleOptions = {};
-  if (
-    record.renderer === "ddraw" || record.renderer === "d3d" || record.renderer === "opengl" ||
-    record.renderer === "glide"
-  ) {
-    next.renderer = record.renderer;
+/** A title's manifest in its one spelling; with no file yet, a draft of what the title runs on now. */
+async function titleManifest(
+  root: string,
+  target: BoxTarget,
+): Promise<{ manifest: Record<string, unknown>; exists: boolean }> {
+  const folder = titleFolder(root, target);
+  const text = await Deno.readTextFile(`${folder}/${EXORDIUM_MOD_FILE}`).catch(() => null);
+  if (text !== null) {
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (error) {
+      throw new HttpError(422, `${EXORDIUM_MOD_FILE} is not valid JSON: ${(error as Error).message}`);
+    }
+    if (!isRecord(json)) throw new HttpError(422, `${EXORDIUM_MOD_FILE} must be a JSON object.`);
+    return { manifest: normalizeManifest(json), exists: true };
   }
-  for (const key of ["windowed", "noSound", "hardcore", "plugY", "direct", "txt", "skipToBNet"] as const) {
-    if (typeof record[key] === "boolean") next[key] = record[key];
-  }
-  if (typeof record.language === "string") {
-    const language = record.language.trim();
-    next.language = language && language !== "MOD" ? language : null;
-  } else if (record.language === null) {
-    next.language = null;
-  }
-  if (typeof record.title === "string") {
-    const title = record.title.trim().slice(0, 120);
-    next.title = title || null;
-  } else if (record.title === null) {
-    next.title = null;
-  }
-  if (typeof record.author === "string") {
-    const author = record.author.trim().slice(0, 200);
-    next.author = author || null;
-  }
-  if (Array.isArray(record.links)) {
-    next.links = record.links
-      .map((link) => link as { label?: unknown; url?: unknown })
-      .map((link) => ({
-        label: typeof link.label === "string" ? link.label.trim().slice(0, 80) : "",
-        url: webUrl(link.url),
-      }))
-      .filter((link): link is { label: string; url: string } => link.url !== null)
-      .slice(0, 20);
-  }
-  if (typeof record.seed === "string") {
-    next.seed = seedValue(record.seed);
-  } else if (record.seed === null) {
-    next.seed = null;
-  }
-  if (typeof record.startAct === "number" || typeof record.startAct === "string") {
-    next.startAct = actValue(record.startAct);
-  } else if (record.startAct === null) {
-    next.startAct = null;
-  }
-  return next;
+  const setup = target.kind === "core" ? await readCoreSetup(root, target.version) : await readSetupFile(folder);
+  return {
+    manifest: setup
+      ? exordiumManifestFromD2SE(setup)
+      : { title: target.kind === "mod" ? target.folder : null, core: target.kind === "core" ? target.version : null },
+    exists: false,
+  };
+}
+
+/** Writes a title's manifest whole, so a failed write leaves the old one. */
+async function writeManifest(folder: string, manifest: Record<string, unknown>): Promise<void> {
+  const file = `${folder}/${EXORDIUM_MOD_FILE}`;
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  await Deno.writeTextFile(temporary, JSON.stringify(manifest, null, 2) + "\n");
+  await Deno.rename(temporary, file);
+}
+
+/** GET `?gateway&port`: whether a realm answers. Refused in Local-only mode, like everything online. */
+async function realmCheck(url: URL): Promise<Response> {
+  const refusal = await localOnlyRefusal();
+  if (refusal) return refusal;
+  const place = realmAddress(url.searchParams.get("gateway") ?? "", url.searchParams.get("port"));
+  if (!place) return Response.json({ error: "Set a gateway address and a port from 1 to 65535." }, { status: 400 });
+  return Response.json(await checkRealm(place));
 }
 
 function cleanUpdateSettings(input: unknown): TitleUpdateSettings {
@@ -2749,37 +2757,17 @@ function cleanUpdateSettings(input: unknown): TitleUpdateSettings {
   const channel = record.channel === "testing" || record.channel === "local" ? record.channel : "stable";
   const endpoint = typeof record.endpoint === "string" ? record.endpoint.trim().slice(0, 2048) : "";
   return {
-    automatic: typeof record.automatic === "boolean" ? record.automatic : false,
+    automatic: typeof record.automatic === "boolean" ? record.automatic : true,
     background: typeof record.background === "boolean" ? record.background : true,
     channel,
     endpoint: endpoint || null,
   };
 }
 
-function mergeTitleUpdateSettings(base?: Partial<TitleUpdateSettings>): TitleUpdateSettings {
-  return {
-    automatic: base?.automatic ?? false,
-    background: base?.background ?? true,
-    channel: base?.channel ?? "stable",
-    endpoint: base?.endpoint ?? null,
-  };
-}
-
-function titleUpdateSettings(
-  state: AppState,
-  key: string,
-  manifest?: Partial<TitleUpdateSettings>,
-): TitleUpdateSettings {
-  return {
-    ...mergeTitleUpdateSettings(manifest),
-    ...(state.updateSettings?.[key] ?? {}),
-  };
-}
-
 async function titleUpdates(request: Request): Promise<Response> {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await request.json().catch(() => null) as
-    | { root?: unknown; folder?: unknown; core?: unknown; settings?: unknown; action?: unknown; version?: unknown }
+    | { root?: unknown; folder?: unknown; core?: unknown; settings?: unknown; version?: unknown }
     | null;
   const root = typeof body?.root === "string" ? body.root.trim() : "";
   const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
@@ -2787,36 +2775,18 @@ async function titleUpdates(request: Request): Promise<Response> {
   if (!root || (!folder && !core)) return Response.json({ error: "Missing root, and folder or core" }, { status: 400 });
   const target: BoxTarget = folder ? { kind: "mod", folder } : { kind: "core", version: core };
   const key = entryKey(target);
-  const action = typeof body?.action === "string" ? body.action : "save";
-
-  if (action === "save") {
-    const settings = cleanUpdateSettings(body?.settings);
-    const state = await writeState((state) => {
-      state.root = root;
-      state.updateSettings ??= {};
-      state.updateSettings[key] = settings;
-    });
-    return Response.json({ key, settings: state.updateSettings[key], check: state.updateChecks?.[key] ?? null });
-  }
-
-  if (action === "check") {
-    const refusal = await localOnlyRefusal();
-    if (refusal) return refusal;
-    const settings = cleanUpdateSettings(body?.settings ?? (await readState()).updateSettings?.[key]);
-    if (!settings.endpoint) return Response.json({ error: "Set an update endpoint first." }, { status: 400 });
-    const currentVersion = typeof body?.version === "string" && body.version.trim() ? body.version.trim() : null;
-    const check = await checkTitleUpdate(root, target, settings, currentVersion);
-    await writeState((state) => {
-      state.root = root;
-      state.updateSettings ??= {};
-      state.updateChecks ??= {};
-      state.updateSettings[key] = settings;
-      state.updateChecks[key] = check;
-    });
-    return Response.json({ key, settings, check });
-  }
-
-  return Response.json({ error: "Unknown update action." }, { status: 400 });
+  const refusal = await localOnlyRefusal();
+  if (refusal) return refusal;
+  const settings = cleanUpdateSettings(body?.settings);
+  if (!settings.endpoint) return Response.json({ error: "Set an update endpoint first." }, { status: 400 });
+  const currentVersion = typeof body?.version === "string" && body.version.trim() ? body.version.trim() : null;
+  const check = await checkTitleUpdate(root, target, settings, currentVersion);
+  await writeState((state) => {
+    state.root = root;
+    state.updateChecks ??= {};
+    state.updateChecks[key] = check;
+  });
+  return Response.json({ key, check });
 }
 
 async function checkTitleUpdate(
@@ -2892,33 +2862,6 @@ function selectRelease(json: unknown, channel: TitleUpdateSettings["channel"]): 
 function downloadCount(release: Record<string, unknown>): number {
   if (Array.isArray(release.downloads)) return release.downloads.filter(isRecord).length;
   return textValue(release.download) || textValue(release.file) ? 1 : 0;
-}
-
-function applyOptions(setup: ModSetup, options: TitleOptions): ModSetup {
-  const renderer = options.renderer ?? setup.player.renderer;
-  const player = {
-    ...setup.player,
-    renderer,
-    rendererCode: RENDERER_CODES[renderer] ?? setup.player.rendererCode,
-    language: options.language === undefined ? setup.player.language : options.language,
-    windowed: options.windowed ?? setup.player.windowed,
-    noSound: options.noSound ?? setup.player.noSound,
-    hardcore: options.hardcore ?? setup.player.hardcore,
-    plugY: options.plugY ?? setup.player.plugY,
-    direct: options.direct ?? setup.player.direct,
-    txt: options.txt ?? setup.player.txt,
-    skipToBNet: options.skipToBNet ?? setup.player.skipToBNet ?? false,
-    seed: options.seed === undefined ? setup.player.seed ?? null : options.seed,
-    startAct: options.startAct === undefined ? setup.player.startAct ?? null : options.startAct,
-  };
-  return {
-    ...setup,
-    player,
-    mod: {
-      ...setup.mod,
-      modable: setup.mod.modable || options.direct !== undefined || options.txt !== undefined,
-    },
-  };
 }
 
 /** Starts a title. The box is built or reused, then its `Game.exe` starts as its own process. */
@@ -3359,7 +3302,6 @@ async function d2seBanner(root: string, target: BoxTarget): Promise<string | nul
   }
 }
 
-/**
 /** An image's type from its first bytes; null for anything else. */
 function imageType(head: Uint8Array): string | null {
   if (isPng(head)) return "image/png";
@@ -3406,58 +3348,59 @@ async function modArt(root: string, target: BoxTarget, kind: ArtKind): Promise<s
   }
 }
 
-/** The title's artwork file: the player's own, else what the mod ships. */
-async function artFile(root: string | null, target: BoxTarget, kind: ArtKind): Promise<string | null> {
-  if (await art.has(artKey(target), kind)) return art.path(artKey(target), kind);
-  return root ? await modArt(root, target, kind) : null;
-}
-
 /**
- * GET `?root&key&kind`: the title's PNG (the player's, else the mod's own), or for a banner its D2SE
- * `ModBanner` as it is.
- * POST (PNG body) sets it; DELETE removes it. Only PNG is kept.
+ * GET `?root&key&kind`: the image the title's manifest names, or for a banner its D2SE `ModBanner`
+ * as it is. POST (PNG body) saves one in the title's folder and names it in the manifest, which a D2SE
+ * mod gets here if it has none yet; DELETE stops naming it and leaves the file. Both answer with the path
+ * now in the manifest.
  */
 async function artwork(request: Request, url: URL): Promise<Response> {
   const target = parseEntryKey(url.searchParams.get("key") ?? "");
   const kind = url.searchParams.get("kind") as ArtKind | null;
+  const root = url.searchParams.get("root")?.trim() ?? "";
   if (!target || !kind || !ART_KINDS.includes(kind)) {
     return Response.json({ error: "Bad key or kind" }, { status: 400 });
   }
-  const key = artKey(target);
-  try {
-    if (request.method === "POST") {
-      const png = new Uint8Array(await request.arrayBuffer());
-      if (!isPng(png)) return Response.json({ error: "Artwork must be a PNG." }, { status: 415 });
-      await art.save(key, kind, png);
-      return Response.json({ ok: true });
-    }
-    if (request.method === "DELETE") {
-      await art.remove(key, kind);
-      return Response.json({ ok: true });
-    }
-    const png = await art.read(key, kind);
-    if (png) {
-      return new Response(png.slice(), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
-    }
-    const root = url.searchParams.get("root")?.trim();
-    const shipped = root ? await modArt(root, target, kind) : null;
-    if (shipped) {
-      const bytes = await Deno.readFile(shipped);
-      return new Response(bytes, {
-        headers: { "content-type": imageType(bytes.subarray(0, 32)) ?? "image/png", "cache-control": "no-cache" },
+  if (request.method === "POST" || request.method === "DELETE") {
+    if (!(await isLibrary(root))) return Response.json({ error: "That is not the library." }, { status: 400 });
+    const folder = titleFolder(root, target);
+    try {
+      const { manifest } = await titleManifest(root, target);
+      let named: string | null = null;
+      if (request.method === "POST") {
+        const png = new Uint8Array(await request.arrayBuffer());
+        checkArt(kind, png);
+        named = chosenArtPath(kind);
+        await Deno.mkdir(`${folder}/${named.slice(0, named.lastIndexOf("/"))}`, { recursive: true });
+        const temporary = `${folder}/${named}.${crypto.randomUUID()}.tmp`;
+        await Deno.writeFile(temporary, png);
+        await Deno.rename(temporary, `${folder}/${named}`);
+      }
+      await writeManifest(folder, {
+        ...manifest,
+        art: { ...(isRecord(manifest.art) ? manifest.art : {}), [kind]: named },
       });
+      return Response.json({ path: named });
+    } catch (error) {
+      if (error instanceof ArtError) return Response.json({ error: error.message }, { status: 400 });
+      if (error instanceof HttpError) return Response.json({ error: error.message }, { status: error.status });
+      throw error;
     }
-    const banner = kind === "banner" && root ? await d2seBanner(root, target) : null;
-    if (banner) {
-      return new Response(await Deno.readFile(banner), {
-        headers: { "content-type": contentType(banner), "cache-control": "no-cache" },
-      });
-    }
-    return new Response(null, { status: 404 });
-  } catch (error) {
-    if (error instanceof ArtError) return Response.json({ error: error.message }, { status: 400 });
-    throw error;
   }
+  const shipped = root ? await modArt(root, target, kind) : null;
+  if (shipped) {
+    const bytes = await Deno.readFile(shipped);
+    return new Response(bytes, {
+      headers: { "content-type": imageType(bytes.subarray(0, 32)) ?? "image/png", "cache-control": "no-cache" },
+    });
+  }
+  const banner = kind === "banner" && root ? await d2seBanner(root, target) : null;
+  if (banner) {
+    return new Response(await Deno.readFile(banner), {
+      headers: { "content-type": contentType(banner), "cache-control": "no-cache" },
+    });
+  }
+  return new Response(null, { status: 404 });
 }
 
 // ---- Characters ---------------------------------------------------------------------------------
@@ -4066,10 +4009,10 @@ async function makeShortcut(key: string, target: BoxTarget): Promise<Response> {
   const title = target.kind === "mod" ? setup?.mod.title ?? target.folder : await coreName(root, target.version);
   const exe = Deno.execPath();
   let icon = exe;
-  const iconPng = await artFile(root, target, "icon");
+  const iconPng = await modArt(root, target, "icon");
   if (iconPng) {
-    // Kept in Exordium's art folder, never the mod's: the .ico is the shortcut's, not the mod's.
-    const ico = art.path(artKey(target), "icon").replace(/\.png$/i, ".ico");
+    // Exordium's own, never the mod's: the .ico is the shortcut's.
+    const ico = `${exordiumRoot}/bin/icons/${artKey(target)}.ico`;
     await Deno.mkdir(ico.slice(0, ico.lastIndexOf("/")), { recursive: true });
     await Deno.writeFile(ico, pngToIco(await Deno.readFile(iconPng)));
     icon = winPath(ico);
@@ -4355,7 +4298,7 @@ async function openAppFolder(request: Request): Promise<Response> {
     downloads: downloadsFolder,
     backups: `${exordiumRoot}/backups`,
     logs: `${exordiumRoot}/logs`,
-    art: `${exordiumRoot}/art`,
+    plugy: `${libraryRoot}/${LIBRARY_PLUGY}`,
   };
   const folder = folders[key];
   if (!folder) return Response.json({ error: "Unknown app folder" }, { status: 400 });
@@ -4477,10 +4420,9 @@ async function logs(request: Request, url: URL): Promise<Response> {
   }
 }
 
-/** What a title has: its own PNGs, or for the banner D2SE's BMP. */
+/** What a title has: the images its manifest names, or for the banner D2SE's BMP. */
 async function artSummary(root: string, target: BoxTarget) {
-  const key = artKey(target);
-  const has = async (kind: ArtKind) => await art.has(key, kind) || await modArt(root, target, kind) !== null;
+  const has = async (kind: ArtKind) => await modArt(root, target, kind) !== null;
   return {
     banner: await has("banner") ? "png" : await d2seBanner(root, target) ? "d2se" : null,
     icon: await has("icon"),
@@ -4535,11 +4477,6 @@ function buildRealPlan(
   layers.push(toLayer("game", "game", game));
   addSources("game", root, game);
 
-  if (plugY) {
-    layers.push(toLayer("plugy", "core", plugY.files));
-    addSources("plugy", plugY.folder, plugY.files);
-  }
-
   if (core) {
     const coreBase = coreFolder(root, core.version);
     layers.push(toLayer("core", "core", core.scan.layer));
@@ -4549,6 +4486,11 @@ function buildRealPlan(
       layers.push(toLayer("core-language", "core", files));
       addSources("core-language", coreBase, files);
     }
+  }
+
+  if (plugY) {
+    layers.push(toLayer("plugy", "core", plugY.files));
+    addSources("plugy", plugY.folder, plugY.files);
   }
 
   if (mod) {
@@ -4729,8 +4671,8 @@ function previewPlan(
     files.set(path.toLowerCase(), { path, hash: "0".repeat(64), size, layer, role });
   };
   for (const file of game) add(file.path, file.size, "game", "game");
-  for (const file of plugY?.files ?? []) add(file.path, file.size, "plugy", "core");
   for (const file of core?.scan.layer ?? []) add(file.path, file.size, "core", "core");
+  for (const file of plugY?.files ?? []) add(file.path, file.size, "plugy", "core");
   for (const file of mod?.scan.layer ?? []) add(file.path, file.size, "mod", "mod");
   if (language && language !== "MOD") {
     for (const file of core?.scan.languages[language] ?? []) add(file.path, file.size, "core-language", "core");

@@ -137,14 +137,15 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "exordium.mod.json",
         paragraphs: [
-          "Each mod carries an exordium.mod.json: its title, its core, its art, how it launches, which MPQs and plugins it loads, and an optional realm. The converter drafts it for you; edit it any time in the title's Properties. A mod's own exordium.mod.json is used as it is.",
+          "Each mod carries an exordium.mod.json: its title, its core, its art, how it launches, which MPQs and plugins it loads, and an optional realm. The converter drafts it for you. A title's Properties is a form over this file: About, Launch, Realm, Updates and Art edit it, and Apply writes it. A D2SE mod without one gets it on its first Apply, and from then on the file is what runs.",
         ],
       },
       {
         heading: "Plugins and PlugY",
         paragraphs: [
-          "Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll; failing that, one you put in its core's folder (library, cores); failing that, the PlugY folder you set in Settings, Launching. With none of those it starts without PlugY, and its page says so. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
-          "Some D2SE mods turn PlugY on without shipping it, because D2SE supplied one. Give those a PlugY through the core's folder or Settings, or turn PlugY off in the title's Properties.",
+          "Exordium loads D2Mod, PlugY and the mod's own DLLs. It ships no PlugY. A title with PlugY on uses the mod's own PlugY.dll; failing that, the one in the library's plugy folder (open it from Settings, Launching). With neither it starts without PlugY, and its page says so. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
+          "Turn PlugY, D2Mod, Nefex and D2Extra on or off for a title in Properties, Launch, Modding. The last three need their DLL in the mod or its core. Nefex and D2Extra load, but Exordium does not start them yet.",
+          "Some D2SE mods turn PlugY on without shipping it, because D2SE supplied one. Put a PlugY in the library's plugy folder for those, or turn PlugY off in the title's Properties.",
         ],
       },
     ],
@@ -170,7 +171,9 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "1.14",
         paragraphs: [
-          "1.14 still launches, through Blizzard's own Game.exe, but gets none of Exordium's loader features: no plugins, no custom MPQs, and no Battle.net lockdown.",
+          "1.14 merged the game's DLLs into one Game.exe, so Exordium's loader cannot stand in for it. A 1.14 core runs on Blizzard's own Game.exe, and it is not in the catalog: when your Diablo II install is on 1.14, setup copies Game.exe, Patch_D2.mpq and BlizzardError.exe into the library's cores folder. In an existing library, use Copy from install in Browse, Cores, or Install core on a mod that needs it.",
+          'A 1.14 mod is a data folder of loose files. Put the folder in the library with Import, set "core" to "1.14d" in its exordium.mod.json, and turn on direct and txt under launch. Its MPQs, D2Mod, PlugY and other DLLs do not load, because only Exordium\'s loader can load them.',
+          "Two more differences apply on 1.14. The game uses your machine's Diablo II registry settings, not a private registry, so a run changes them. And there is no Battle.net lockdown, so keep a modded game off Battle.net yourself.",
         ],
       },
     ],
@@ -197,7 +200,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "The registry",
         paragraphs: [
-          "Each box has a private registry. A mod's video, gateway and Glide settings stay with that mod, and your machine's Diablo II settings are never touched.",
+          "Each box has a private registry. A mod's video, gateway and Glide settings stay with that mod, and your machine's Diablo II settings are not changed. 1.14 is the exception: see Cores.",
         ],
       },
       {
@@ -242,7 +245,8 @@ export const TOPICS: HelpTopicContent[] = [
     sections: [
       {
         paragraphs: [
-          "Choose a title's renderer in Properties, General. DirectDraw can run in a window; Direct3D and OpenGL are full screen only in these versions of the game.",
+          "Choose a title's renderer in Properties, Launch. DirectDraw can run in a window; Direct3D and OpenGL are full screen only in these versions of the game.",
+          "The same page sets perspective, low quality, vertical sync, gamma and uncompressed sprites. Titles on 1.13 and later also get no fixed aspect ratio and sound in the background.",
           "Glide needs a Glide wrapper (glide3x.dll), such as D2GL or dgVoodoo. Setup copies the one in your Diablo II folder, if there is one, and a mod can bring its own. With Glide the window belongs to the wrapper, so its window settings are the wrapper's own, not Exordium's.",
         ],
       },
@@ -311,7 +315,7 @@ export const TOPICS: HelpTopicContent[] = [
         heading: "Common messages",
         list: [
           "**Needs core 1.10f, which this install does not have**: press Install core on the mod's page, or install it from Browse, Cores.",
-          "**PlugY is turned on, but no PlugY.dll was found**: a warning, not a stop; the game starts without PlugY. To use it, put PlugY in the mod's folder or its core's folder, or set a PlugY folder in Settings, Launching. Or turn PlugY off in the title's Properties.",
+          "**PlugY is turned on, but no PlugY.dll was found**: a warning, not a stop; the game starts without PlugY. To use it, put PlugY in the mod's folder or the library's plugy folder. Or turn PlugY off in the title's Properties.",
           "**The mod changed since the running copy started**: a file in the box changed while a copy was running. Close every copy, then start again.",
           "**Cannot bootstrap gfx: D2Win.dll or D2Gfx.dll did not load**: the game's own DLLs are incomplete. Rebuild the box (Properties, Files); if it persists, the core is damaged, so reinstall it.",
           "**Battle.net could not be closed for this core**: the mod replaces the game's D2Launch.dll with one Exordium does not recognise. Tell the mod's author.",
@@ -320,7 +324,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "The game window",
         list: [
-          "**Black screen or wrong size**: switch the renderer to DirectDraw and tick windowed in Properties, General.",
+          "**Black screen or wrong size**: switch the renderer to DirectDraw and tick windowed in Properties, Launch.",
           "**Glide shows nothing**: the mod needs a Glide wrapper; see Video and windowed mode.",
         ],
       },
@@ -590,8 +594,8 @@ export const TOPICS: HelpTopicContent[] = [
           {
             name: "automatic",
             type: "true or false",
-            default: "false",
-            example: "true",
+            default: "true",
+            example: "false",
             text: "Fills in the Automatic updates switch in Properties. It does nothing else yet.",
           },
           {
@@ -605,7 +609,7 @@ export const TOPICS: HelpTopicContent[] = [
       },
       {
         heading: "launch",
-        paragraphs: ["The mod's defaults. Players can change them in Properties."],
+        paragraphs: ["How the mod starts. Properties, Launch edits it."],
         code: `"launch": {
   "renderer": "glide",
   "windowed": true,
@@ -694,6 +698,62 @@ export const TOPICS: HelpTopicContent[] = [
             default: "none",
             example: "2",
             text: "New single-player characters start in this act: 1 to 5 (-act2 and so on).",
+          },
+          {
+            name: "seedEnabled, startActEnabled, gammaEnabled",
+            type: "true or false",
+            default: "on",
+            example: "false",
+            text: "false keeps the value in the file but leaves it out of the launch.",
+          },
+          {
+            name: "perspective",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Perspective (-per), on the Glide, OpenGL and Direct3D renderers.",
+          },
+          {
+            name: "lowQuality",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Low quality (-lq).",
+          },
+          {
+            name: "gamma",
+            type: "number",
+            default: "none",
+            example: "180",
+            text: "Gamma (-gamma), 1 to 255. The game's own default is 155.",
+          },
+          {
+            name: "vsync",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Vertical sync (-vsync).",
+          },
+          {
+            name: "noCompress",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Keep sprites uncompressed in memory (-nocompress).",
+          },
+          {
+            name: "noFixAspect",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "No fixed aspect ratio (-nofixaspect). 1.13 and later.",
+          },
+          {
+            name: "backgroundSound",
+            type: "true or false",
+            default: "false",
+            example: "true",
+            text: "Keep the sound playing behind other windows (-sndbkg). 1.13 and later.",
           },
         ],
       },
@@ -796,7 +856,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Plugins and PlugY",
         paragraphs: [
-          "Ship PlugY.dll at the mod's root, or in a PlugY folder as D2SE mods do, if the mod uses PlugY. Exordium does not provide one. Without it, a player's own PlugY (in the core's folder, or the PlugY folder in Settings) is used if they have one; otherwise the game starts without PlugY, with a warning. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
+          "Ship PlugY.dll at the mod's root, or in a PlugY folder as D2SE mods do, if the mod uses PlugY. Exordium does not provide one. Without it, the player's own PlugY in the library's plugy folder is used if they have one; otherwise the game starts without PlugY, with a warning. D2SE's own plugin systems (its mod DLL and D2SE_Utility) are not loaded.",
         ],
       },
       {
@@ -886,7 +946,7 @@ export const TOPICS: HelpTopicContent[] = [
           "**portrait**: the card on the library home. Use a portrait 2:3 image; 600x900 is recommended.",
         ],
         paragraphs: [
-          "Name them under art in exordium.mod.json, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, its initials. Players can replace any of them in Properties, Artwork, without touching the mod.",
+          "Name them under art in exordium.mod.json, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, its initials. Properties, Art sets them too: a chosen image is saved in the title's folder and named here.",
         ],
       },
       {
@@ -948,6 +1008,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         paragraphs: [
           "Exordium closes official Battle.net for every mod, unless the mod names its own server. Give realm a gateway address, and Battle.net stays open for your mod; -skiptobnet goes straight to the login.",
+          "Properties, Realm edits these fields, and Check now shows whether the server answers on that port. It runs only when asked, and not in Local-only mode. An answer means the server is listening, not that you can log in.",
           "**Not done yet:** Exordium doesn't put these values into the game. It only checks that gateway is set, so the game still uses whichever gateway its registry already holds. Players have to point it at your server themselves for now.",
         ],
         code: `"realm": {
@@ -995,7 +1056,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Which versions of the game are supported?",
     a: [
-      "Every patch from 1.00 to 1.13d. 1.14 launches too, through Blizzard's own Game.exe, but without plugins, custom MPQs or the Battle.net lockdown.",
+      "Every patch from 1.00 to 1.13d. 1.14 runs too, on Blizzard's own Game.exe copied from your install, but without plugins, custom MPQs, a private registry or the Battle.net lockdown.",
     ],
   },
   {
@@ -1023,7 +1084,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Does it work with PlugY, D2Mod and other plugins?",
     a: [
-      "Yes. D2Mod and other plugin DLLs load when the mod brings and lists them. PlugY is the mod's own, else one you put in the core's folder or set in Settings, Launching; Exordium ships none. D2SE's own plugin systems are not loaded.",
+      "Yes. D2Mod and other plugin DLLs load when the mod brings and lists them. PlugY is the mod's own, else the one you keep in the library's plugy folder; Exordium ships none. D2SE's own plugin systems are not loaded.",
     ],
   },
   {
@@ -1053,7 +1114,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Does Exordium need the internet?",
     a: [
-      "Only for Browse, cores, updates, Discord and Translate, which sends that one description to Google. With Local-only mode on (Settings, Privacy) it never goes online, and games still launch.",
+      "Only for Browse, cores, updates, Discord, a realm check and Translate, which sends that one description to Google. With Local-only mode on (Settings, Privacy) it never goes online, and games still launch.",
     ],
   },
   {

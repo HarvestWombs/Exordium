@@ -59,6 +59,14 @@ export const D2SE_FOLDERS: LayoutFolders = { game: "", cores: "D2SE/CORES", mods
 /** Exordium's library: `game\`, `cores\<version>`, `mods\<folder>`. */
 export const LIBRARY_FOLDERS: LayoutFolders = { game: "game", cores: "cores", mods: "mods" };
 
+/** The library's `plugy\` folder: the player's own PlugY, for a title whose mod brings none. */
+export const LIBRARY_PLUGY = "plugy";
+
+/** Whether these files hold PlugY: at their root, or in a `PlugY` folder as D2SE mods do. */
+export function holdsPlugY(files: readonly { path: string }[]): boolean {
+  return files.some((file) => /^(plugy\/)?plugy\.dll$/i.test(file.path));
+}
+
 /** `root` joined with one of its layout folders, and a name under it. */
 export function layoutPath(root: string, folder: string, name?: string): string {
   return [root.replace(/[\\/]+$/, ""), folder, name].filter((part) => part).join("/");
@@ -169,8 +177,8 @@ export async function readD2SE(root: string, options: ImportOptions): Promise<D2
     layout.folders.game ? files.map((f) => ({ ...f, source: `${layout.folders.game}/${f.source}` })) : files;
   const archives = fromRoot(await scanNamed(gameDir, GAME_ARCHIVES, options));
   const present = new Set(archives.map((f) => f.path.toLowerCase()));
-  // No PlugY from the install (D2SE's "PlugY folder" fallback): a mod that wants PlugY ships it, and
-  // Exordium loads the mod's copy (2026-10-14).
+  // No PlugY from the install (D2SE's "PlugY folder" fallback): a mod that wants PlugY ships it, or
+  // the player keeps one in the library's plugy folder (LIBRARY_PLUGY).
   const wrappers = fromRoot(await scanNamed(gameDir, [...RENDERER_WRAPPERS, ...INSTALL_FILES], options));
   const game = [...archives, ...wrappers];
 
@@ -260,7 +268,10 @@ export function modProblems(
   }
   for (const system of ["nefex", "d2extra"] as const) {
     if (setup.loads[system]) {
-      problems.push({ level: "warning", message: `Uses ${system}, which Exordium's loader does not load yet.` });
+      problems.push({
+        level: "warning",
+        message: `Uses ${system}: Exordium's loader loads its DLL but does not start it yet.`,
+      });
     }
   }
   return problems;

@@ -1,6 +1,6 @@
 import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
-import { RefreshIcon } from "../../components/icons.tsx";
+import { CloseIcon, RefreshIcon } from "../../components/icons.tsx";
 import { Cores } from "./Cores.tsx";
 import { Downloads } from "./Downloads.tsx";
 import { InstallModModal } from "./InstallModModal.tsx";
@@ -176,6 +176,7 @@ export function Browse(
     else list.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
     return list;
   }, [matches, archiveSort]);
+  const archiveFetchedAt = data?.sources.find((source) => source.id === "archive")?.fetchedAt ?? null;
 
   // ModDB lists a mod's page and its download separately; "All" shows one, the download first.
   const modDbMatches = React.useMemo(() => {
@@ -481,10 +482,9 @@ export function Browse(
           ))}
           {view === "cores" && <span className="browse-context">{tr("CORES")}</span>}
           {view === "downloads" && <span className="browse-context">{tr("DOWNLOADS")}</span>}
-          <div className="grow" />
           {(view === "archive" || view === "moddb") && (
-            <>
-              <label className="search browse-search">
+            <div className="browse-search-tools">
+              <div className="search browse-search">
                 <input
                   type="text"
                   value={search}
@@ -492,7 +492,19 @@ export function Browse(
                   placeholder={tr("Search by name…")}
                   aria-label={tr("Search mods")}
                 />
-              </label>
+                {search && (
+                  <button
+                    type="button"
+                    className="search-clear-button"
+                    aria-label={tr("Clear")}
+                    data-tooltip={tr("Clear")}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setSearch("")}
+                  >
+                    <CloseIcon />
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 className={`browse-refresh ${(view === "moddb" ? modDbLoading : loading) ? "loading" : ""}`}
@@ -503,8 +515,9 @@ export function Browse(
               >
                 <RefreshIcon />
               </button>
-            </>
+            </div>
           )}
+          {(view === "cores" || view === "downloads") && <div className="grow" />}
         </nav>
 
         {view === "cores" && <Cores root={root} onStarted={onCoreStarted} />}
@@ -568,6 +581,15 @@ export function Browse(
           )
           : (
             <div className="browse-list">
+              {data && (
+                <p className="muted small pad">
+                  {tr(
+                    "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
+                  )}
+                  {archiveFetchedAt &&
+                    tr(" Internet Archive read {date}.", { date: formatDateTime(archiveFetchedAt) })}
+                </p>
+              )}
               {error && <div className="banner-error" role="alert">{error}</div>}
               {!data && !error && <p className="muted pad">{tr("Reading sources…")}</p>}
               {data && sorted.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}

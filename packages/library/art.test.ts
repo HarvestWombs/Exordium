@@ -1,5 +1,5 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { ArtError, ArtStore, isPng, pngSize } from "./mod.ts";
+import { assertEquals, assertThrows } from "@std/assert";
+import { ArtError, checkArt, chosenArtPath, isPng, pngSize } from "./mod.ts";
 
 /** The smallest thing that reads as a PNG here: signature and an IHDR with the given size. */
 function png(width: number, height: number): Uint8Array {
@@ -18,21 +18,14 @@ Deno.test("a PNG is recognised and sized from its header", () => {
   assertThrows(() => pngSize(new Uint8Array(40)), ArtError, "Not a PNG");
 });
 
-Deno.test("the store keeps PNG artwork by title, refuses anything else, and stays in its folder", async () => {
-  const root = await Deno.makeTempDir({ prefix: "exordium-art-" });
-  try {
-    const store = new ArtStore(root);
-    assertEquals(await store.has("mod-the-black-soul", "banner"), false);
-    await store.save("mod-the-black-soul", "banner", png(1920, 500));
-    assertEquals(await store.has("mod-the-black-soul", "banner"), true);
-    assertEquals(await store.read("mod-the-black-soul", "banner"), png(1920, 500));
-    await store.save("mod-the-black-soul", "icon", png(256, 256));
-    await assertRejects(() => store.save("mod-the-black-soul", "icon", png(512, 512)), ArtError, "256×256");
-    await assertRejects(() => store.save("mod-the-black-soul", "portrait", new Uint8Array(40)), ArtError, "Not a PNG");
-    assertThrows(() => store.path("../escape", "icon"), ArtError, "not a valid art key");
-    await store.remove("mod-the-black-soul", "banner");
-    assertEquals(await store.read("mod-the-black-soul", "banner"), null);
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
+Deno.test("a chosen image must be a PNG, an icon one that fits Game.exe", () => {
+  checkArt("banner", png(1920, 480));
+  checkArt("icon", png(256, 256));
+  assertThrows(() => checkArt("icon", png(512, 512)), ArtError, "256×256");
+  assertThrows(() => checkArt("portrait", new Uint8Array(40)), ArtError, "Not a PNG");
+});
+
+Deno.test("a chosen image has a name of its own, never one a mod would ship", () => {
+  assertEquals(chosenArtPath("banner"), "art/chosen-banner.png");
+  assertEquals(chosenArtPath("icon"), "art/chosen-icon.png");
 });

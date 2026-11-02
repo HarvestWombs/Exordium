@@ -5,17 +5,26 @@
  *   <Exordium>/library/
  *     exordium-library.json      the marker; the D2SE reader reads a folder with it (findD2SE)
  *     game/                      the install's game layer: its MPQs, D2.LNG, video DLLs and graphics
- *                                wrappers (PlugY comes with each mod that uses it)
- *     cores/<version>/           cores, copied from the install's D2SE or installed from the Cores tab
+ *                                wrappers
+ *     cores/<version>/           cores, copied from the install's D2SE or installed from the Cores tab;
+ *                                a 1.14 install's own core is copied here too (copyInstallCore)
  *     mods/<folder>/             mods, imported from the install (with their exordium.mod.json) or
  *                                installed from Browse
+ *     plugy/                     the player's own PlugY, for a title whose mod brings none
  *
  * The folders are LIBRARY_FOLDERS; the install keeps D2SE's own (D2SE_FOLDERS), and the reader takes
  * either. Automatic game setup prefers symbolic links, falls back to hardlinks on the same volume,
  * then copies. The player can still explicitly copy or move the files instead.
  */
 
-import { GAME_ARCHIVES, INSTALL_FILES, LIBRARY_FOLDERS, LIBRARY_MARKER, RENDERER_WRAPPERS } from "@exordium/d2se";
+import {
+  GAME_ARCHIVES,
+  INSTALL_FILES,
+  LIBRARY_FOLDERS,
+  LIBRARY_MARKER,
+  LIBRARY_PLUGY,
+  RENDERER_WRAPPERS,
+} from "@exordium/d2se";
 
 /** Without these the game cannot start at all: Diablo II's data and Lord of Destruction's. */
 const REQUIRED = ["d2data.mpq", "d2exp.mpq"];
@@ -117,7 +126,9 @@ export async function checkInstall(install: string): Promise<InstallCheck> {
 /** Makes the library's folders and marker. Existing contents are left as they are. */
 export async function createLibrary(library: string, install: string): Promise<void> {
   const root = slash(library);
-  for (const folder of Object.values(LIBRARY_FOLDERS)) await Deno.mkdir(`${root}/${folder}`, { recursive: true });
+  for (const folder of [...Object.values(LIBRARY_FOLDERS), LIBRARY_PLUGY]) {
+    await Deno.mkdir(`${root}/${folder}`, { recursive: true });
+  }
   const marker = `${root}/${LIBRARY_MARKER}`;
   if (!(await isLibrary(root))) {
     await Deno.writeTextFile(

@@ -1,32 +1,22 @@
-import { FilterIcon, SearchIcon } from "../../components/icons.tsx";
+import { CloseIcon, FilterIcon, GripIcon, SearchIcon } from "../../components/icons.tsx";
 import { ImportRow, ListSection } from "../../components/sidebar.tsx";
 import { tr } from "../../lib/i18n.ts";
 import type { Incoming } from "../../lib/incoming.ts";
+import { startPointerDrag } from "../../lib/pointer-drag.ts";
+import { moveInOrder } from "../../lib/shelf-order.ts";
 import { readStored, writeStored } from "../../lib/util.ts";
-import type { Collection, Filter, Scan, SidebarSection, Title } from "../../types.ts";
+import type { Collection, Scan, SidebarSection, Title } from "../../types.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
 
-const FILTERS: Filter[] = ["mods", "cores", "favorites", "recent", "updates", "issues", "hidden"];
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 520;
+type SectionDrop = { id: string; edge: "before" | "after" };
 
 export interface SidebarAppearance {
   iconSize: number;
   showStatus: boolean;
   rail: boolean;
-}
-
-function filterLabel(filter: Filter): string {
-  return {
-    mods: tr("Mods"),
-    cores: tr("Cores"),
-    favorites: tr("Favorites"),
-    recent: tr("Recently played"),
-    updates: tr("Updates"),
-    issues: tr("Issues"),
-    hidden: tr("Hidden"),
-  }[filter];
 }
 
 /** The searchable, filterable and resizable library sidebar. */
@@ -37,9 +27,6 @@ export function Sidebar({
   onSearch,
   scan,
   scanning,
-  filters,
-  onFilters,
-  filterCounts,
   onRead,
   soloSection,
   onClearSolo,
@@ -59,9 +46,6 @@ export function Sidebar({
   onSearch: (search: string) => void;
   scan: Scan | null;
   scanning: boolean;
-  filters: Set<Filter>;
-  onFilters: (filters: Set<Filter>) => void;
-  filterCounts: Record<Filter, number> & { all: number };
   onRead: (() => void) | null;
   soloSection: SidebarSection | null;
   onClearSolo: () => void;
@@ -83,9 +67,31 @@ export function Sidebar({
   const [textSize, setTextSize] = React.useState(() => readStored("exordium.sidebarTextSize", 13));
   const [showCounts, setShowCounts] = React.useState(() => readStored("exordium.sidebarCounts", true));
   const [showStatus, setShowStatus] = React.useState(() => readStored("exordium.sidebarStatus", true));
+  const [hiddenSections, setHiddenSections] = React.useState<Set<string>>(() =>
+    new Set(readStored<string[]>("exordium.sidebarHiddenSections", []))
+  );
+  const [sectionOrder, setSectionOrder] = React.useState<string[]>(() =>
+    readStored<string[]>("exordium.sidebarSectionOrder", [])
+  );
+  const [draggedSection, setDraggedSection] = React.useState<string | null>(null);
+  const [sectionDrop, setSectionDrop] = React.useState<SectionDrop | null>(null);
   const filterMenu = React.useRef<HTMLDivElement>(null);
+  const sectionList = React.useRef<HTMLDivElement>(null);
   const resize = React.useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const widthRef = React.useRef(width);
+  const order = new Map(sectionOrder.map((id, index) => [id, index]));
+  const orderedSections = sections
+    .map((section, index) => ({ section, index }))
+    .sort((a, b) => {
+      const aOrder = order.get(a.section.id);
+      const bOrder = order.get(b.section.id);
+      if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+      if (aOrder !== undefined) return -1;
+      if (bOrder !== undefined) return 1;
+      return a.index - b.index;
+    })
+    .map(({ section }) => section);
+  const visibleSections = orderedSections.filter((section) => !hiddenSections.has(section.id));
 
   React.useEffect(() => {
     widthRef.current = width;
@@ -111,16 +117,67 @@ export function Sidebar({
     document.body.style.userSelect = "";
   }, []);
 
-  function toggleFilter(filter: Filter) {
-    const next = new Set(filters);
-    if (next.has(filter)) next.delete(filter);
-    else next.add(filter);
-    onFilters(next);
-  }
-
   function remember<T>(key: string, value: T, setValue: (value: T) => void) {
     setValue(value);
     writeStored(key, value);
+  }
+
+  function toggleSectionVisible(id: string) {
+    setHiddenSections((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeStored("exordium.sidebarHiddenSections", [...next]);
+      return next;
+    });
+  }
+
+  function moveSection(source: string, target: string, edge: "before" | "after") {
+    const next = moveInOrder(sectionOrder, orderedSections.map((section) => section.id), source, target, edge);
+    setSectionOrder(next);
+    writeStored("exordium.sidebarSectionOrder", next);
+  }
+
+  function nudgeSection(id: string, direction: -1 | 1) {
+    const index = orderedSections.findIndex((section) => section.id === id);
+    const target = orderedSections[index + direction];
+    if (target) moveSection(id, target.id, direction < 0 ? "before" : "after");
+  }
+
+  function sectionDropAt(source: string, y: number): SectionDrop | null {
+    const rows = [...(sectionList.current?.querySelectorAll<HTMLElement>("[data-category]") ?? [])];
+    const from = rows.findIndex((row) => row.dataset.category === source);
+    const below = rows.findIndex((row) => {
+      const rect = row.getBoundingClientRect();
+      return y < rect.top + rect.height / 2;
+    });
+    const at = below < 0 ? rows.length : below;
+    if (at === from || at === from + 1) return null;
+    return at < rows.length
+      ? { id: rows[at]!.dataset.category!, edge: "before" }
+      : { id: rows[at - 1]!.dataset.category!, edge: "after" };
+  }
+
+  function dragSection(event: React.PointerEvent<HTMLElement>, id: string, label: string) {
+    let drop: SectionDrop | null = null;
+    startPointerDrag(event, {
+      label,
+      onStart: () => setDraggedSection(id),
+      onMove: (_x, y) => {
+        const menu = sectionList.current?.closest(".sidebar-filter-menu");
+        const rect = menu?.getBoundingClientRect();
+        if (menu && rect) menu.scrollTop += y > rect.bottom - 28 ? 12 : y < rect.top + 28 ? -12 : 0;
+        drop = sectionDropAt(id, y);
+        setSectionDrop(drop);
+      },
+      onDrop: () => {
+        if (drop) moveSection(id, drop.id, drop.edge);
+      },
+      onEnd: () => {
+        setDraggedSection(null);
+        setSectionDrop(null);
+      },
+    });
   }
 
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -169,7 +226,7 @@ export function Sidebar({
       {!rail && (
         <div className="sidebar-head">
           <div className="sidebar-search-row">
-            <label className="search sidebar-search">
+            <div className="search sidebar-search">
               <SearchIcon />
               <input
                 value={search}
@@ -177,13 +234,25 @@ export function Sidebar({
                 placeholder={tr("Search the library")}
                 aria-label={tr("Search the library")}
               />
-            </label>
+              {search && (
+                <button
+                  type="button"
+                  className="search-clear-button"
+                  aria-label={tr("Clear")}
+                  data-tooltip={tr("Clear")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onSearch("")}
+                >
+                  <CloseIcon />
+                </button>
+              )}
+            </div>
             <div className="sidebar-filter-holder" ref={filterMenu}>
               <button
                 type="button"
-                className={filterOpen || filters.size > 0 ? "sidebar-filter-button on" : "sidebar-filter-button"}
-                aria-label={tr("Filters")}
-                data-tooltip={tr("Filters")}
+                className={filterOpen || hiddenSections.size > 0 ? "sidebar-filter-button on" : "sidebar-filter-button"}
+                aria-label={tr("Sorting/Appearance")}
+                data-tooltip={tr("Sorting/Appearance")}
                 aria-expanded={filterOpen}
                 aria-controls="sidebar-filter-menu"
                 onClick={() => setFilterOpen((open) => !open)}
@@ -192,28 +261,49 @@ export function Sidebar({
               </button>
               {filterOpen && (
                 <div id="sidebar-filter-menu" className="sidebar-filter-menu">
-                  <strong>{tr("Filters")}</strong>
-                  <div className="grid-category-list">
-                    <label>
-                      <input type="checkbox" checked={filters.size === 0} onChange={() => onFilters(new Set())} />
-                      <span>{tr("All titles")}</span>
-                      <small>{filterCounts.all}</small>
-                    </label>
-                    {FILTERS.map((option) => (
-                      <label key={option}>
-                        <input
-                          type="checkbox"
-                          checked={filters.has(option)}
-                          disabled={option === "hidden" && filterCounts.hidden === 0}
-                          onChange={() => toggleFilter(option)}
-                        />
-                        <span>{filterLabel(option)}</span>
-                        <small>{filterCounts[option]}</small>
-                      </label>
-                    ))}
+                  <div className="grid-customizer-section">
+                    <strong>{tr("Sections")}</strong>
+                    <div className="grid-category-list" ref={sectionList}>
+                      {orderedSections.map((section) => (
+                        <div
+                          key={section.id}
+                          data-category={section.id}
+                          className={[
+                            "grid-category-row",
+                            draggedSection === section.id ? "dragging" : "",
+                            sectionDrop?.id === section.id ? `drop-${sectionDrop.edge}` : "",
+                          ].filter(Boolean).join(" ")}
+                        >
+                          <button
+                            type="button"
+                            className="grid-category-grip"
+                            aria-label={tr("Reorder")}
+                            data-tooltip={tr("Reorder")}
+                            onPointerDown={(event) => dragSection(event, section.id, section.name)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                                event.preventDefault();
+                                nudgeSection(section.id, event.key === "ArrowUp" ? -1 : 1);
+                              }
+                            }}
+                          >
+                            <GripIcon />
+                          </button>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={!hiddenSections.has(section.id)}
+                              onChange={() => toggleSectionVisible(section.id)}
+                            />
+                            <span>{section.name}</span>
+                            <small>{section.titles.length}</small>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="sidebar-appearance">
-                    <strong>{tr("Appearance")}</strong>
+                  <div className="grid-customizer-section">
+                    <strong>{tr("Display")}</strong>
                     <label className="grid-slider">
                       <span>
                         {tr("Row height")}
@@ -259,6 +349,9 @@ export function Sidebar({
                           remember("exordium.sidebarTextSize", Number(event.currentTarget.value), setTextSize)}
                       />
                     </label>
+                  </div>
+                  <div className="grid-customizer-section">
+                    <strong>{tr("Rows")}</strong>
                     <div className="grid-option-list">
                       <label>
                         <input
@@ -317,7 +410,7 @@ export function Sidebar({
             ))}
           </ListSection>
         )}
-        {sections.map((section) => {
+        {visibleSections.map((section) => {
           const collection = section.collection;
           const onContextMenu = (event: React.MouseEvent) => {
             event.preventDefault();

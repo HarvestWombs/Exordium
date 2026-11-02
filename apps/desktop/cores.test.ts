@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   cancelCoreInstall,
+  type Catalog,
   catalog,
+  copyInstallCore,
   coreEntries,
   type CoreEntry,
   CoreInstallError,
@@ -114,6 +116,53 @@ Deno.test("installs a core into the library from the catalog, and never over one
     if (previous === undefined) Deno.env.delete("EXORDIUM_CORES_URL");
     else Deno.env.set("EXORDIUM_CORES_URL", previous);
     await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+/** The bytes of a `Game.exe` whose version resource reads `1.14.3.71`: all fileVersion looks at. */
+function game114(): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(32);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 0xFEEF04BD, true);
+  view.setUint32(16, (1 << 16) | 14, true);
+  view.setUint32(20, (3 << 16) | 71, true);
+  return bytes;
+}
+
+Deno.test("a 1.14 install's core is listed and copied into the library, leaving the install alone", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const install = `${dir}/Diablo II`;
+  const root = `${dir}/library`;
+  await Deno.mkdir(install);
+  await Deno.mkdir(`${root}/cores`, { recursive: true });
+  try {
+    await Deno.writeFile(`${install}/Game.exe`, game114());
+    await Deno.writeTextFile(`${install}/Patch_D2.mpq`, "patch");
+    await Deno.writeTextFile(`${install}/D2Client.dll`, "a leftover from an older patch");
+    const list: Catalog = { version: 1, cores: [] };
+
+    const entry = async () => (await coreEntries(root, list, install)).find((c) => c.core === "1.14d");
+    assertEquals((await entry())?.status, "install");
+
+    const warmed: string[] = [];
+    await copyInstallCore(root, install, "1.14d", (core) => {
+      warmed.push(core);
+      return Promise.resolve();
+    });
+    for (let i = 0; i < 100 && (await entry())?.job?.state === "installing"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assertEquals((await entry())?.job?.state, "installed");
+    assertEquals((await entry())?.status, "installed");
+    assertEquals(warmed, ["1.14d"]);
+    assertEquals(await Deno.readTextFile(`${root}/cores/1.14d/Patch_D2.mpq`), "patch");
+    assertEquals(await Deno.readTextFile(`${install}/Patch_D2.mpq`), "patch");
+    await assertRejects(() => Deno.stat(`${root}/cores/1.14d/D2Client.dll`), Deno.errors.NotFound);
+    await assertRejects(() => copyInstallCore(root, install, "1.14d"), CoreInstallError, "already");
+    await assertRejects(() => copyInstallCore(root, null, "1.14d"), CoreInstallError, "on that patch");
+    await assertRejects(() => copyInstallCore(root, install, "1.14b"), CoreInstallError, "on that patch");
+  } finally {
     await Deno.remove(dir, { recursive: true });
   }
 });

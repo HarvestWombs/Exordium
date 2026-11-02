@@ -499,7 +499,7 @@ button:disabled {
   background: var(--sidebar);
 }
 
-.settings-sidebar button {
+.settings-sidebar > button {
   height: 40px;
   padding: 0 12px;
   border: 0;
@@ -510,7 +510,7 @@ button:disabled {
   font-weight: 600;
 }
 
-.settings-sidebar button.on {
+.settings-sidebar > button.on {
   background: var(--raised);
   color: var(--text-strong);
 }
@@ -1199,33 +1199,12 @@ button:disabled {
   max-height: min(560px, calc(100vh - 96px));
   overflow-y: auto;
   display: grid;
-  gap: 12px;
+  gap: 0;
   padding: 16px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: var(--chrome);
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.48);
-}
-
-.sidebar-filter-menu > strong {
-  color: var(--text-dim);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sidebar-appearance {
-  display: grid;
-  gap: 12px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-
-.sidebar-appearance > strong {
-  color: var(--text-dim);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .sidebar-filter-menu .grid-slider {
@@ -1359,6 +1338,30 @@ button:disabled {
   outline: none;
   background: transparent;
   font-size: 13px;
+}
+
+.search-clear-button {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-mute);
+}
+
+.search-clear-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.search-clear-button:hover,
+.search-clear-button:focus-visible {
+  background: var(--raised);
+  color: var(--text-strong);
 }
 
 .list {
@@ -2068,6 +2071,115 @@ fieldset legend {
   gap: 12px;
 }
 
+/* Properties, General: the option groups as columns, each a list. Fewer fit in a small dialog. */
+.option-switch {
+  color: var(--text-mute);
+  white-space: nowrap;
+}
+
+.option-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 22px 28px;
+  align-items: start;
+}
+
+.option-columns > * {
+  min-width: 0;
+}
+
+.option-columns > .option-section > input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.realm-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.realm-page input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.realm-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.realm-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-mute);
+}
+
+.realm-status.good .realm-dot {
+  background: var(--good);
+}
+
+.realm-status.bad .realm-dot {
+  background: var(--bad);
+}
+
+.art-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.art-file input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.option-section textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Fields start at the same place in a list, right after their labels. */
+.option-list label:has(input[type="text"], select) > span {
+  min-width: 76px;
+}
+
+.option-list input[type="text"],
+.option-list select {
+  width: 96px;
+  min-width: 0;
+  flex: none;
+}
+
+.option-list input[type="text"]:disabled,
+.option-list select:disabled {
+  opacity: 0.45;
+}
+
 .art-slot {
   display: flex;
   flex-direction: column;
@@ -2492,8 +2604,19 @@ fieldset legend {
   letter-spacing: 0.08em;
 }
 
+.browse-search-tools {
+  width: 362px;
+  min-width: 180px;
+  flex: 0 1 362px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-left: 16px;
+}
+
 .browse-search {
-  width: 260px;
+  width: min(320px, calc(100% - 42px));
 }
 
 .browse-refresh {
@@ -2553,6 +2676,7 @@ fieldset legend {
   border: 0;
   cursor: pointer;
   background: var(--well);
+  min-height: 220px;
 }
 
 .mod-cover img {
@@ -2561,6 +2685,26 @@ fieldset legend {
   min-height: 220px;
   object-fit: cover;
   display: block;
+}
+
+.mod-cover-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 0;
+}
+
+.mod-cover-image {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.mod-cover-image.loaded {
+  opacity: 1;
+}
+
+.mod-cover .ribbon {
+  z-index: 2;
 }
 
 .ribbon {
@@ -2603,6 +2747,20 @@ fieldset legend {
 
 .mod-description.open {
   display: block;
+}
+
+.mod-description.loading {
+  display: block;
+  min-height: 56px;
+}
+
+.mod-description.loading .skeleton-line {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.mod-description.loading .skeleton-line:nth-child(2) {
+  width: 92%;
 }
 
 .mod-info > .small-button {
@@ -2661,11 +2819,52 @@ fieldset legend {
   min-width: 0;
 }
 
+.shot-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shot-skeleton-main,
+.shot-skeleton-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
 .shot-main-button {
   padding: 0;
   border: 0;
   background: transparent;
   cursor: zoom-in;
+}
+
+.shot-image-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--well);
+}
+
+.shot-image-frame > .skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.shot-image-frame > img {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.shot-image-frame > img.loaded {
+  opacity: 1;
 }
 
 .shot-main {
@@ -2729,6 +2928,11 @@ fieldset legend {
 .mod-size {
   color: var(--text-mute);
   font-size: 13px;
+}
+
+.mod-file-skeleton {
+  width: 104px;
+  height: 14px;
 }
 
 .mod-filetype {
@@ -3384,14 +3588,11 @@ fieldset legend {
   width: 100%;
   height: 34px;
   margin-bottom: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
+  padding: 0 8px 0 10px;
   border-radius: 6px;
-  background: var(--ground);
-  font-size: 13px;
 }
 
-.settings-sidebar:has(.help-search) button {
+.settings-sidebar:has(.help-search) > button {
   height: 32px;
   flex-shrink: 0;
 }
@@ -3864,55 +4065,105 @@ fieldset legend {
   gap: 14px;
 }
 
-.converter-grid {
+.converter-workspace {
+  flex: 1;
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 18px;
 }
 
-.converter-grid label,
-.converter-description,
+.manifest-import-form,
 .converter-json {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--text-mute);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
 }
 
-.converter-grid input,
-.converter-description textarea,
-.converter-json textarea {
+.manifest-import-nav {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.manifest-import-nav button {
+  position: relative;
+  height: 42px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-mute);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manifest-import-nav button::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  left: 10px;
+  height: 2px;
+  background: transparent;
+}
+
+.manifest-import-nav button:hover,
+.manifest-import-nav button.on {
+  color: var(--text-strong);
+}
+
+.manifest-import-nav button.on::after {
+  background: var(--accent);
+}
+
+.manifest-import-page {
+  min-height: 0;
+  padding: 18px;
+}
+
+.manifest-import-page .option-section > input[type="text"],
+.manifest-import-page .option-section > textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--text);
-  font: inherit;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
-.converter-grid input {
-  height: 36px;
-  padding: 0 10px;
+.manifest-check-columns {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 22px;
 }
 
-.converter-description textarea {
-  min-height: 88px;
-  padding: 10px;
-  resize: vertical;
+.converter-json {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
 }
 
 .converter-json textarea {
-  min-height: 300px;
+  flex: 1;
+  height: auto;
+  min-height: 320px;
   padding: 12px;
   resize: vertical;
   font: 12px/1.45 "Cascadia Mono", Consolas, monospace;
+}
+
+@media (min-width: 1500px) {
+  .converter-workspace {
+    grid-template-columns: minmax(500px, 1fr) minmax(320px, 0.72fr);
+  }
+
+  .converter-json {
+    position: sticky;
+    top: 0;
+  }
 }
 
 .ghost.danger {

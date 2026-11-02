@@ -23,7 +23,7 @@ Deno.test("classification: saves are the player's, D2SE's own files and logs sta
   assertEquals(classify("core", "data/local/use").kind, "excluded");
   assertEquals(classify("core", "Backup/D2Common.dll").kind, "excluded");
   assertEquals(classify("core", "Language_KOR/KOR.mpq").kind, "language");
-  // Except PlugY's own folder, beside a PlugY.dll the player put in the core.
+  // Except PlugY's own folder, beside the PlugY.dll a core copied from D2SE can carry.
   assertEquals(classify("core", "PlugY.dll"), { kind: "layer" });
   assertEquals(classify("core", "PlugY/EmptyPage.dc6"), { kind: "layer" });
 });

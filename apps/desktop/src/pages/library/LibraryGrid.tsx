@@ -1,7 +1,16 @@
 import { tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import type { ReactNode } from "react";
-import { FilterIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, SearchIcon, TitleIcon } from "../../components/icons.tsx";
+import {
+  CloseIcon,
+  FilterIcon,
+  GripIcon,
+  HeartIcon,
+  PlayIcon,
+  PlusIcon,
+  SearchIcon,
+  TitleIcon,
+} from "../../components/icons.tsx";
 import { PopupMenu } from "../../components/menus.tsx";
 import { PreviewCard } from "../../components/PreviewCard.tsx";
 import type { Incoming } from "../../lib/incoming.ts";
@@ -125,8 +134,8 @@ function CapsulePreview(
       <dl>
         <dt>{tr("PLAY TIME")}</dt>
         <dd>{playtime ? playTime(playtime.seconds) : "—"}</dd>
-        <dt>{t.kind === "core" ? tr("CORE") : tr("MOD")}</dt>
-        <dd>{t.core ?? "—"}</dd>
+        <dt>{t.kind === "core" ? tr("CORE") : tr("VERSION")}</dt>
+        <dd>{(t.kind === "core" ? t.core : t.version) ?? "—"}</dd>
       </dl>
     </PreviewCard>
   );
@@ -393,7 +402,7 @@ export function LibraryGrid(
       <div className="grid-head">
         <h1>{collectionsPage ? tr("Collections") : tr("Library")}</h1>
         <div className="grid-search-row">
-          <label className="search grid-search">
+          <div className="search grid-search">
             <SearchIcon />
             <input
               value={search}
@@ -401,13 +410,25 @@ export function LibraryGrid(
               placeholder={tr("Search the library")}
               aria-label={tr("Search the library")}
             />
-          </label>
+            {search && (
+              <button
+                type="button"
+                className="search-clear-button"
+                aria-label={tr("Clear")}
+                data-tooltip={tr("Clear")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSearch("")}
+              >
+                <CloseIcon />
+              </button>
+            )}
+          </div>
           <div className="grid-customizer" ref={customizer}>
             <button
               type="button"
               className={customizerOpen ? "grid-customizer-button on" : "grid-customizer-button"}
-              aria-label={tr("Filters")}
-              data-tooltip={tr("Filters")}
+              aria-label={tr("Sorting/Appearance")}
+              data-tooltip={tr("Sorting/Appearance")}
               aria-expanded={customizerOpen}
               aria-controls="grid-customizer-menu"
               onClick={() => setCustomizerOpen((open) => !open)}
@@ -758,7 +779,7 @@ export function LibraryGrid(
                     <div className="capsule-sub">
                       {t.kind === "core"
                         ? tr("Core · {core}", { core: t.core ?? "" })
-                        : tr("Mod · {core}", { core: t.core ?? "?" })}
+                        : tr("Mod · {version}", { version: t.version ?? "—" })}
                     </div>
                   )}
                 </div>

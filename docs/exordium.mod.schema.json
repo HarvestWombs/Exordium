@@ -26,7 +26,7 @@
     },
     "author": {
       "type": ["string", "null"],
-      "description": "Shown as \"BY …\" at the top of the mod's page. The player can also set it in Properties → About."
+      "description": "Shown as \"BY …\" at the top of the mod's page."
     },
     "description": {
       "type": ["string", "null"],
@@ -56,7 +56,7 @@
         },
         "automatic": {
           "type": ["boolean", "null"],
-          "default": false,
+          "default": true,
           "description": "Fills in the Automatic updates switch in Properties. Nothing acts on it yet."
         },
         "background": {
@@ -70,11 +70,11 @@
     "updates": { "$ref": "#/properties/update" },
     "art": {
       "type": ["object", "null"],
-      "description": "Artwork the mod ships, as image files in its folder. Artwork the player sets in Properties → Artwork takes precedence.",
+      "description": "Artwork, as image files in the mod's folder. Properties, Art saves a chosen image there and names it here.",
       "properties": {
         "banner": {
           "type": ["string", "null"],
-          "description": "The page header, shown full width. PNG, JPEG, WebP, GIF or BMP, about 1920×500 or larger.",
+          "description": "The page header, shown full width. PNG, JPEG, WebP, GIF or BMP, wide, 4:1; 1920×480 is suggested.",
           "examples": ["art/banner.png"]
         },
         "icon": {
@@ -84,7 +84,7 @@
         },
         "portrait": {
           "type": ["string", "null"],
-          "description": "For the grid view. PNG, JPEG, WebP, GIF or BMP, 600×900.",
+          "description": "The card on the library home. PNG, JPEG, WebP, GIF or BMP, 2:3; 600×900 is suggested.",
           "examples": ["art/portrait.png"]
         }
       },
@@ -128,7 +128,7 @@
         "plugY": {
           "type": ["boolean", "null"],
           "default": false,
-          "description": "Load PlugY: the mod's own PlugY.dll, else one in its core's folder, else the PlugY folder in Settings. Without any, the game starts without PlugY."
+          "description": "Load PlugY: the mod's own PlugY.dll, else the one in the library's plugy folder. Without either, the game starts without PlugY. Not on 1.14 cores."
         },
         "language": {
           "type": ["string", "null"],
@@ -148,6 +148,46 @@
         "startAct": {
           "enum": [1, 2, 3, 4, 5, null],
           "description": "-actN: new single-player characters start in Act N."
+        },
+        "perspective": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "-per: perspective, on the Glide, OpenGL and Direct3D renderers."
+        },
+        "lowQuality": { "type": ["boolean", "null"], "default": false, "description": "-lq: low quality." },
+        "gamma": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 255,
+          "description": "-gamma <number>: 1 to 255. The game's own default is 155."
+        },
+        "vsync": { "type": ["boolean", "null"], "default": false, "description": "-vsync: vertical sync." },
+        "noCompress": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "-nocompress: keep sprites uncompressed in memory."
+        },
+        "noFixAspect": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "-nofixaspect: no fixed aspect ratio. 1.13 and later."
+        },
+        "backgroundSound": {
+          "type": ["boolean", "null"],
+          "default": false,
+          "description": "-sndbkg: keep the sound playing behind other windows. 1.13 and later."
+        },
+        "seedEnabled": {
+          "type": ["boolean", "null"],
+          "description": "false keeps seed in the file but leaves it out of the launch."
+        },
+        "startActEnabled": {
+          "type": ["boolean", "null"],
+          "description": "false keeps startAct in the file but leaves it out of the launch."
+        },
+        "gammaEnabled": {
+          "type": ["boolean", "null"],
+          "description": "false keeps gamma in the file but leaves it out of the launch."
         }
       },
       "additionalProperties": false

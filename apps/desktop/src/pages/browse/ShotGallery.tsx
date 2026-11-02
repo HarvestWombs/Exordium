@@ -4,13 +4,48 @@ import { Lightbox } from "../../components/Lightbox.tsx";
 import { smallerModDbImage } from "./browse-util.ts";
 import type { Shot } from "./types.ts";
 
+function ShotImage({ src, className, lazy = false }: { src: string; className: string; lazy?: boolean }) {
+  const [loadedSource, setLoadedSource] = React.useState<string | null>(null);
+  const [failedSource, setFailedSource] = React.useState<string | null>(null);
+  const ready = loadedSource === src || failedSource === src;
+
+  return (
+    <span className="shot-image-frame">
+      {!ready && <span className="skeleton" aria-hidden="true" />}
+      <img
+        className={`${className}${loadedSource === src ? " loaded" : ""}`}
+        src={src}
+        alt=""
+        loading={lazy ? "lazy" : "eager"}
+        onLoad={() => setLoadedSource(src)}
+        onError={(event) => {
+          const before = event.currentTarget.src;
+          smallerModDbImage(event);
+          if (event.currentTarget.src === before) setFailedSource(src);
+        }}
+      />
+    </span>
+  );
+}
+
 /** A card's screenshots: the one shown large, a strip of four, and the full gallery on click. */
-export function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) {
+export function ShotGallery(
+  { shots, empty, loading = false }: { shots: Shot[]; empty: string; loading?: boolean },
+) {
   const [shot, setShot] = React.useState(0);
   const [gallery, setGallery] = React.useState(false);
   return (
     <div className="mod-shots">
-      {shots.length > 0
+      {loading
+        ? (
+          <div className="shot-skeleton" aria-hidden="true">
+            <span className="skeleton shot-skeleton-main" />
+            <div className="shot-strip">
+              {Array.from({ length: 4 }, (_, index) => <span key={index} className="skeleton shot-skeleton-thumb" />)}
+            </div>
+          </div>
+        )
+        : shots.length > 0
         ? (
           <>
             <button
@@ -19,7 +54,7 @@ export function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) 
               data-tooltip={tr("Open the gallery")}
               onClick={() => setGallery(true)}
             >
-              <img className="shot-main" src={shots[shot]?.full} alt="" onError={smallerModDbImage} />
+              <ShotImage className="shot-main" src={shots[shot]?.full ?? shots[0]?.full ?? ""} />
             </button>
             <div className="shot-strip">
               {shots.slice(0, 4).map((s, i) => (
@@ -29,7 +64,7 @@ export function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) 
                   className={i === shot ? "shot on" : "shot"}
                   onClick={() => setShot(i)}
                 >
-                  <img src={s.thumb} alt="" loading="lazy" />
+                  <ShotImage className="shot-thumb" src={s.thumb} lazy />
                 </button>
               ))}
             </div>

@@ -1,5 +1,50 @@
 import { launchSettings, type ModSetup } from "@exordium/d2se";
 
+/** Launch settings a manifest may also write at its top level; `launch` wins when it has both. */
+const FLAT_LAUNCH = [
+  "renderer",
+  "windowed",
+  "noSound",
+  "direct",
+  "txt",
+  "hardcore",
+  "plugY",
+  "language",
+  "skipToBNet",
+  "seed",
+  "startAct",
+] as const;
+
+function group(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/**
+ * A manifest in its one spelling, for Properties to edit: `name`, `updates`, `update.manifest` and the
+ * flat launch and load fields moved to where the forms read them. Anything else, unknown keys and
+ * `$schema` included, is kept as it is.
+ */
+export function normalizeManifest(raw: Record<string, unknown>): Record<string, unknown> {
+  const { name, updates, mpqs, dlls, ...rest } = raw;
+  const launch = { ...group(rest.launch) };
+  for (const key of FLAT_LAUNCH) {
+    launch[key] ??= rest[key];
+    if (launch[key] === undefined) delete launch[key];
+    delete rest[key];
+  }
+  const { manifest: endpoint, ...update } = group(rest.update ?? updates);
+  update.endpoint ??= endpoint ?? null;
+  const loads = group(rest.loads);
+  const title = rest.title ?? name;
+  return {
+    ...rest,
+    ...(title === undefined ? {} : { title }),
+    update,
+    launch,
+    loads: { ...loads, mpqs: loads.mpqs ?? mpqs ?? [], dlls: loads.dlls ?? dlls ?? [] },
+  };
+}
+
 export function exordiumManifestFromD2SE(setup: ModSetup): Record<string, unknown> {
   const launch = launchSettings(setup);
   return {
@@ -14,7 +59,7 @@ export function exordiumManifestFromD2SE(setup: ModSetup): Record<string, unknow
       endpoint: null,
       manifest: null,
       channel: "stable",
-      automatic: false,
+      automatic: true,
       background: true,
     },
     art: {
@@ -38,6 +83,13 @@ export function exordiumManifestFromD2SE(setup: ModSetup): Record<string, unknow
       skipToBNet: launch.skipToBNet,
       seed: launch.seed,
       startAct: launch.startAct,
+      perspective: launch.perspective,
+      lowQuality: launch.lowQuality,
+      gamma: launch.gamma,
+      vsync: launch.vsync,
+      noCompress: launch.noCompress,
+      noFixAspect: launch.noFixAspect,
+      backgroundSound: launch.backgroundSound,
     },
     loads: {
       nefex: setup.loads.nefex,

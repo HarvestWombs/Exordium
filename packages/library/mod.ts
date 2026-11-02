@@ -12,4 +12,4 @@ export {
 export { type EntryChanges, hasChanges, refresh, type Refreshed } from "./refresh.ts";
 export { allFiles, pin, type PinOptions, sourcePath, verifyStored } from "./pin.ts";
 export { entryLayer } from "./layers.ts";
-export { ART_KINDS, ArtError, type ArtKind, ArtStore, isPng, pngSize } from "./art.ts";
+export { ART_KINDS, ArtError, type ArtKind, checkArt, chosenArtPath, isPng, pngSize } from "./art.ts";
