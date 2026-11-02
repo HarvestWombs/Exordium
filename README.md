@@ -74,8 +74,10 @@ The difference is where the work happens. D2SE runs mods out of your Diablo II i
 
 ### The library
 
-- **Home and Collections.** A grid of cards with Steam-style menus: hover Library or Browse for its pages. Latest uploads and updates for your mods sit at the top of Home.
-- **Organize your way.** Favorites, collections with drag and drop, foldable sections, hide and uninstall.
+- **Home and Collections.** A grid of cards with Steam-style menus: hover Library or Browse for its pages. Latest uploads and updates for your mods sit at the top of Home. Hover a card or an upload for a preview, and sort by library order, name, last played or playtime.
+- **Organize your way.** Favorites, collections, foldable sections, hide and uninstall. Drag titles into collections, and drag collections and home shelves into your own order.
+- **Search and filters.** Search by name, author, folder, version or core. Filter the sidebar by mods, cores, favorites, recent, updates, issues or hidden, in any combination.
+- **Your layout.** Resize the sidebar or fold it to a strip of icons, and set row height, icon, card and text sizes, card spacing, metadata and hover previews.
 - **Live progress.** Anything importing or downloading gets a card and a sidebar row with a spinner. Hover for its status, or click for its page, which fills in as it lands. Everything can be cancelled while it copies or downloads.
 - **Always in view.** Active downloads show in the middle of the status bar on every page, and clicking them opens Downloads.
 - **A steady layout.** Messages arrive as toasts with a countdown, so nothing on the page moves. You choose their size in Settings.
@@ -83,6 +85,7 @@ The difference is where the work happens. D2SE runs mods out of your Diablo II i
 ### Getting mods
 
 - **Browse and install.** Mods from the Internet Archive and ModDB, unpacked with a bundled 7-Zip.
+- **See the file type first.** Entries show what you'd download, such as ZIP, RAR or EXE. Installers are marked in amber and Exordium never runs one for you, so a ModDB installer opens on its page instead.
 - **D2SE import.** A converter shows the `exordium.mod.json` it will write, and imports run in the background, one at a time.
 - **Any archive or folder.** Import a `.zip`, `.7z` or `.rar`, or a mod already unpacked somewhere.
 - **Cores catalog.** Every patch from 1.00 to 1.13d, each with all twelve languages, downloaded from [Exordium-Cores](https://github.com/HarvestWombs/Exordium-Cores) and checked against published SHA-256 checksums.
@@ -108,6 +111,7 @@ The difference is where the work happens. D2SE runs mods out of your Diablo II i
 - Discord Rich Presence with your character's class and level.
 - Light and dark themes.
 - A searchable Help, in the app.
+- Middle-click scrolling.
 
 ## Requirements
 
@@ -141,9 +145,11 @@ The tabs:
 
 ### The library
 
-**Sections.** The sidebar lists Favorites, your collections, Recent, Mods and Cores. Click a section's header to fold it. Right-click it to view only that section, or to fold every collection at once. The « button folds the whole sidebar to a strip of icons. Recent can be turned off in Settings, Library.
+**Sections.** The sidebar lists Favorites, your collections, Recent, Mods and Cores. Click a section's header to fold it. Right-click it to view only that section, or to fold every collection at once. The button in the sidebar footer folds the whole sidebar to a strip of icons. Recent can be turned off in Settings, Library.
 
-The chips under the search box filter the list: All, Mods, Cores, Issues (titles with problems) and, once you hide something, Hidden.
+Search the library from the top of the sidebar. Its filter button filters by mods, cores, favorites, recently played titles, available updates, issues or hidden titles. Filters can be combined, and All titles clears them.
+
+The filter menu also adjusts row height, icon and text sizes, section counts and status indicators. Drag the sidebar's right edge to resize it, and double-click the edge to restore its default width.
 
 **Favorites and collections.** A favorite moves out of Mods or Cores into Favorites. Unfavorite it and it goes back.
 
@@ -158,6 +164,8 @@ A title can be in several collections. Right-click it inside one to remove it fr
 **The home screen** shows every title as a card. The Latest uploads row above them shows new mods from the Internet Archive and ModDB, and updates waiting for mods you have. Turn the row off in Settings, Library.
 
 Click a shelf's heading to fold it. The home screen remembers its folds separately from the sidebar's. The Library tab always brings you back here.
+
+Use the filter button beside the home search to choose which shelves show and to adjust the cards. Drag categories by their handles to reorder the shelves, and the home screen remembers their order.
 
 **Hiding and uninstalling.** Hide takes a title out of the list without touching its files, and the Hidden filter brings it back. Uninstall deletes the mod from the library, and can keep a copy of its characters first.
 
@@ -501,9 +509,9 @@ Two layouts that work:
 
 | Art | Where it shows | Size |
 |---|---|---|
-| `banner` | The header of the mod's page. | 1920x500 or larger |
-| `icon` | The sidebar, and the game's own icon in the taskbar and on desktop shortcuts. | Square, 256x256 |
-| `portrait` | The card on the library home. | 600x900 (2:3) |
+| `banner` | The header of the mod's page. | Wide, 4:1. 1920x480 is recommended |
+| `icon` | The sidebar, and the game's own icon in the taskbar and on desktop shortcuts. | Square, 1:1. 256x256 is recommended, and the largest stored |
+| `portrait` | The card on the library home. | Portrait, 2:3. 600x900 is recommended |
 
 Name them under `art` in `exordium.mod.json`, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, it shows its initials. Players can replace any of them in Properties, Artwork, without touching the mod.
 
