@@ -42,7 +42,15 @@ export function Toasts(
               </button>
             </div>
           </div>
-          <button type="button" className="toast-close" aria-label={tr("Close")} onClick={reminder.onDismiss}>×</button>
+          <button
+            type="button"
+            className="toast-close"
+            aria-label={tr("Close")}
+            data-tooltip={tr("Close")}
+            onClick={reminder.onDismiss}
+          >
+            ×
+          </button>
         </div>
       )}
       {toasts.map((toast) => (
@@ -55,6 +63,7 @@ export function Toasts(
             type="button"
             className="toast-close"
             aria-label={tr("Close")}
+            data-tooltip={tr("Close")}
             onClick={() =>
               onDismiss(toast.id)}
           >

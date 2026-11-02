@@ -23,16 +23,18 @@ export interface BuildLoaderPlanOptions {
    * Exordium defaults to the common Lord of Destruction path.
    */
   expansion?: boolean;
+  /** Settings, Launching: false leaves Battle.net open for every title. On unless turned off. */
+  battlenetLockdown?: boolean;
 }
 
 /**
- * Battle.net is allowed only when the mod declares a custom realm with a server address. A mod with
- * no realm (the usual case) must not connect to official Battle.net through Exordium's loader, so the
- * loader greys the main-menu Battle.net button and blocks the connect. The gateway address is what a
- * realm needs: a realm object without one does not count.
+ * With the lockdown on (the default), Battle.net is allowed only when the mod declares a custom realm
+ * with a server address. A mod with no realm (the usual case) must not connect to official Battle.net
+ * through Exordium's loader, so the loader greys the main-menu Battle.net button and blocks the
+ * connect. The gateway address is what a realm needs: a realm object without one does not count.
  */
-export function battlenetAllowed(setup: ModSetup): boolean {
-  return (setup.realm?.gateway ?? "").trim().length > 0;
+export function battlenetAllowed(setup: ModSetup, lockdown = true): boolean {
+  return !lockdown || (setup.realm?.gateway ?? "").trim().length > 0;
 }
 
 export function buildLoaderPlan(
@@ -156,7 +158,7 @@ export function buildLoaderPlan(
 
   return {
     settings,
-    battlenetAllowed: battlenetAllowed(setup),
+    battlenetAllowed: battlenetAllowed(setup, options.battlenetLockdown),
     commandLine: gameCommandLine(settings),
     gameVersion: gameVersion(setup.mod.core),
     core: setup.mod.core?.trim().toLowerCase() || null,

@@ -497,7 +497,7 @@ export function Browse(
                 type="button"
                 className={`browse-refresh ${(view === "moddb" ? modDbLoading : loading) ? "loading" : ""}`}
                 disabled={view === "moddb" ? modDbLoading : loading}
-                title={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
+                data-tooltip={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
                 aria-label={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
                 onClick={() => void (view === "moddb" ? loadModDb(true) : load(true))}
               >
@@ -510,6 +510,15 @@ export function Browse(
         {view === "cores" && <Cores root={root} onStarted={onCoreStarted} />}
         {view === "moddb" && (
           <div className="browse-list">
+            {modDb && (
+              <p className="muted small pad">
+                {tr(
+                  "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
+                )}
+                {modDb.fetchedAt &&
+                  tr(" ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
+              </p>
+            )}
             {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}
             {!modDb && !modDbError && <p className="muted pad">{tr("Reading ModDB…")}</p>}
             {modDb && modDbMatches.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}
@@ -540,15 +549,6 @@ export function Browse(
               >
                 {tr("Show more ({count} left)", { count: modDbMatches.length - shown })}
               </button>
-            )}
-            {modDb && (
-              <p className="muted small pad">
-                {tr(
-                  "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
-                )}
-                {modDb.fetchedAt &&
-                  tr(" ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
-              </p>
             )}
           </div>
         )}

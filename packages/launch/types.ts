@@ -43,7 +43,8 @@ export interface LaunchProblem {
 export interface LoaderPlan {
   settings: LoaderSettings;
   /**
-   * Whether the game may reach Battle.net. True only when the mod declares a custom realm; otherwise
+   * Whether the game may reach Battle.net. True when the mod declares a custom realm or the player
+   * turned the lockdown off; otherwise
    * the loader greys the main-menu Battle.net button and blocks the connect, so Exordium is never a
    * way onto official Battle.net. See battlenetAllowed in @exordium/launch.
    */

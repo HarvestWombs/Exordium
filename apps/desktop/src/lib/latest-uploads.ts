@@ -8,6 +8,27 @@ import type { Upload } from "../types.ts";
 let kept: Upload[] | null = null;
 let pending: Promise<Upload[]> | null = null;
 
+/** Descriptions read from uploads' own pages, by key: each is asked for once. */
+const pageDescriptions = new Map<string, string>();
+
+/**
+ * An upload's description from its own page, for one the list has no words for. Rejects when the page
+ * cannot be read, so a card only ever says there is no description when the page has none.
+ */
+export async function pageDescription(upload: Upload): Promise<string> {
+  const kept = pageDescriptions.get(upload.key);
+  if (kept !== undefined) return kept;
+  if (upload.source === "update") return "";
+  const url = upload.source === "moddb"
+    ? `/api/browse/moddb-item?page=${encodeURIComponent(upload.page ?? "")}`
+    : `/api/browse/item?id=${encodeURIComponent(upload.key.slice("archive:".length))}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  const description = String((await response.json()).description ?? "");
+  pageDescriptions.set(upload.key, description);
+  return description;
+}
+
 /** What is kept so far, or null before the first answer. */
 export function keptUploads(): Upload[] | null {
   return kept;

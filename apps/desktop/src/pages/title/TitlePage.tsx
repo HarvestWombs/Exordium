@@ -124,7 +124,9 @@ export function TitlePage(
               type="button"
               className="play"
               disabled={coreJob !== null}
-              title={tr("This mod runs on core {missingCore}, which is not in your library yet.", { missingCore })}
+              data-tooltip={tr("This mod runs on core {missingCore}, which is not in your library yet.", {
+                missingCore,
+              })}
               onClick={() => onInstallCore(missingCore)}
             >
               {coreJob
@@ -142,7 +144,7 @@ export function TitlePage(
               type="button"
               className="play"
               disabled={starting || errors.length > 0}
-              title={running > 0 ? tr("{running} running — start another copy", { running }) : undefined}
+              data-tooltip={running > 0 ? tr("{running} running — start another copy", { running }) : undefined}
               onClick={onPlay}
             >
               {starting ? tr("STARTING…") : (
@@ -173,12 +175,18 @@ export function TitlePage(
           className={favorite ? "square favorite on" : "square favorite"}
           aria-label={favorite ? tr("Remove from favorites") : tr("Add to favorites")}
           aria-pressed={favorite}
-          title={favorite ? tr("Remove from favorites") : tr("Add to favorites")}
+          data-tooltip={favorite ? tr("Remove from favorites") : tr("Add to favorites")}
           onClick={onFavorite}
         >
           <HeartIcon filled={favorite} />
         </button>
-        <button type="button" className="square" aria-label={tr("Properties")} onClick={onProperties}>
+        <button
+          type="button"
+          className="square"
+          aria-label={tr("Properties")}
+          data-tooltip={tr("Properties")}
+          onClick={onProperties}
+        >
           <GearIcon />
         </button>
       </div>
@@ -278,7 +286,7 @@ export function TitlePage(
                           <button
                             type="button"
                             className="small-button"
-                            title={link.url}
+                            data-tooltip={link.url}
                             onClick={() => void openLink(link.url)}
                           >
                             {link.label} ↗
@@ -370,7 +378,7 @@ export function TitlePage(
                   type="button"
                   className="screenshot"
                   key={shot.name}
-                  title={shot.name}
+                  data-tooltip={shot.name}
                   onClick={() => setGallery(i)}
                 >
                   <img src={screenshotUrl(root, t.key, shot.name)} alt={shot.name} loading="lazy" />

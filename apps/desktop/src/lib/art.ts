@@ -12,9 +12,21 @@ export function screenshotUrl(root: string, key: string, name: string): string {
 }
 
 export const ART_SLOTS: { kind: ArtKind; label: string; hint: string }[] = [
-  { kind: "banner", label: tr("BANNER"), hint: tr("The title's page header. 1920×500 or larger.") },
-  { kind: "icon", label: tr("ICON"), hint: tr("The library list and Game.exe in the taskbar. Square, 256×256.") },
-  { kind: "portrait", label: tr("PORTRAIT"), hint: tr("The grid view's capsule. 600×900.") },
+  {
+    kind: "banner",
+    label: tr("BANNER"),
+    hint: tr("The title's page header. Wide, 4:1. Suggested: 1920×480."),
+  },
+  {
+    kind: "icon",
+    label: tr("ICON"),
+    hint: tr("The library list and Game.exe in the taskbar. Square, 1:1. Suggested: 256×256."),
+  },
+  {
+    kind: "portrait",
+    label: tr("PORTRAIT"),
+    hint: tr("The grid view's capsule. Portrait, 2:3. Suggested: 600×900."),
+  },
 ];
 
 /** What the picker offers. Anything the WebView can decode works; these are the usual ones. */

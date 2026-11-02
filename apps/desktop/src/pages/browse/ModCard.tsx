@@ -1,8 +1,10 @@
 import { formatDate, formatNumber, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { useTranslation } from "../../hooks/useTranslation.tsx";
+import { FileType } from "./FileType.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
+import { useCoverHeight } from "./useCoverHeight.ts";
 import { ACTIVE, baseName, formatBytes, jobLabel, jobProgress, openLink } from "./browse-util.ts";
 import type { Details, Item, Job } from "./types.ts";
 
@@ -67,6 +69,7 @@ export function ModCard(
   const job = jobs.find((j) => baseName(j.file) === baseName(file)) ?? jobs[0];
   const description = details?.description ?? "";
   const translation = useTranslation(description);
+  const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
@@ -74,9 +77,10 @@ export function ModCard(
   return (
     <article ref={ref} className="mod-card">
       <button
+        ref={heights.cover}
         type="button"
         className="mod-cover"
-        title={tr("Open its archive.org page")}
+        data-tooltip={tr("Open its archive.org page")}
         onClick={() => onOpen("page")}
       >
         {
@@ -89,7 +93,7 @@ export function ModCard(
 
       <div className="mod-info">
         <h2 className="mod-title">{item.title}</h2>
-        <p className={expanded ? "mod-description open" : "mod-description"}>
+        <p ref={heights.description} className={expanded ? "mod-description open" : "mod-description"}>
           {details === null
             ? "…"
             : translation.text || tr("The uploader gave no description, and none was found in the archive.")}
@@ -111,7 +115,7 @@ export function ModCard(
               type="button"
               key={link.url}
               className="small-button"
-              title={link.url}
+              data-tooltip={link.url}
               onClick={() => openLink(link.url)}
             >
               {link.label} ↗
@@ -165,6 +169,7 @@ export function ModCard(
             {details.archives.map((a) => <option key={a.name} value={a.name}>{a.name} ({formatBytes(a.size)})</option>)}
           </select>
         )}
+        <FileType name={file} />
         <span className="mod-size">
           {formatBytes(details?.archives.find((a) => a.name === file)?.size ?? item.size)}
         </span>
@@ -172,7 +177,7 @@ export function ModCard(
           type="button"
           className="download"
           disabled={!details || !file || !root || running || job?.state === "installed"}
-          title={root ? undefined : tr("Choose the Diablo II install first")}
+          data-tooltip={root ? undefined : tr("Choose the Diablo II install first")}
           onClick={() => onInstall(file, job?.state === "downloaded")}
         >
           {job ? jobLabel(job) : details && !file ? tr("NO FILES") : tr("INSTALL")}

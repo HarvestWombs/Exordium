@@ -117,7 +117,7 @@ export function Cores(
                 {c.status === "install" && (
                   <span
                     className="muted small"
-                    title={tr("1.14 is the whole game in one Game.exe, from Blizzard's installer")}
+                    data-tooltip={tr("1.14 is the whole game in one Game.exe, from Blizzard's installer")}
                   >
                     {tr("Comes with Diablo II itself")}
                   </span>

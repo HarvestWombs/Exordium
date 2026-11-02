@@ -1299,7 +1299,10 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     language,
     await plugYFolderFor(setup, appSettingsFromState(state), { hash: true, cache }),
   );
-  const loader = buildLoaderPlan(plan, setup, loaderPlanOptions(setup));
+  const loader = buildLoaderPlan(plan, setup, {
+    ...loaderPlanOptions(setup),
+    battlenetLockdown: appSettingsFromState(state).launch.battlenetLockdown,
+  });
   if (loader.problems.some((problem) => problem.level === "error")) {
     throw new HttpError(422, loader.problems.map((problem) => problem.message).join("\n"));
   }
@@ -1592,6 +1595,8 @@ interface AppSettings {
     /** Minimize Exordium's window once a game has started. It keeps running: it follows the run. */
     minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
+    /** Close official Battle.net to every mod without its own realm (battlenetAllowed in @exordium/launch). */
+    battlenetLockdown: boolean;
     /**
      * A folder holding PlugY.dll (and its PlugY folder): layered into the box of a title with PlugY on,
      * below its core and mod, so a PlugY of their own wins. Empty: none. Exordium ships no PlugY.
@@ -1676,6 +1681,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   launch: {
     minimizeOnLaunch: false,
     showLogsOnFailure: true,
+    battlenetLockdown: true,
     plugYFolder: "",
     wineRunner: "",
   },
@@ -2604,6 +2610,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     extraFolders: "string[]",
   });
   mergeObject(next.launch, record.launch, {
+    battlenetLockdown: "boolean",
     minimizeOnLaunch: "boolean",
     plugYFolder: "string",
     showLogsOnFailure: "boolean",
@@ -4652,8 +4659,9 @@ async function installNativeLoader(
         gameVersion: loader.gameVersion ?? "",
         core: loader.core ?? "",
         singleExe: loader.singleExe,
-        // Battle.net is reachable only for a mod with a custom realm. Off: exordium-game greys the
-        // main-menu Battle.net button and blocks every way onto it (lock_battlenet in main.cpp).
+        // Battle.net is reachable for a mod with a custom realm, or with the lockdown setting off.
+        // Otherwise exordium-game greys the main-menu Battle.net button and blocks every way onto it
+        // (lock_battlenet in main.cpp).
         battlenetAllowed: loader.battlenetAllowed,
         game: GAME_EXE,
         // The title's icon, which the loader puts on the game window (the taskbar's icon).

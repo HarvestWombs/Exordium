@@ -235,9 +235,21 @@ export interface LatestUpload {
   key: string;
   source: "archive" | "moddb";
   title: string;
+  /** The start of the list's description: a hover card's few lines, not the whole text. May be empty. */
+  description: string;
+  /** The entry's own page, which can have a description when the list has none. */
+  page: string;
   addedAt: string;
   cover: string;
   sourceLabel: string;
+}
+
+const UPLOAD_DESCRIPTION_LENGTH = 400;
+
+/** A cache file from before descriptions were kept has none. */
+function uploadDescription(item: { description?: string }): string {
+  const text = item.description ?? "";
+  return text.length > UPLOAD_DESCRIPTION_LENGTH ? `${text.slice(0, UPLOAD_DESCRIPTION_LENGTH).trimEnd()}…` : text;
 }
 
 /** Lists being fetched again in the background, by name: one refresh at a time each. */
@@ -281,6 +293,8 @@ export async function latestUploads(cacheDir: string, limit = 16): Promise<Lates
         key: `archive:${item.id}`,
         source: "archive",
         title: item.title,
+        description: uploadDescription(item),
+        page: item.page,
         addedAt: item.addedAt,
         cover: item.cover,
         sourceLabel: "Internet Archive",
@@ -293,6 +307,8 @@ export async function latestUploads(cacheDir: string, limit = 16): Promise<Lates
         key: `moddb:${item.id}`,
         source: "moddb",
         title: item.title,
+        description: uploadDescription(item),
+        page: item.page,
         addedAt: item.addedAt,
         cover: modDbImage(item.cover, "thumb_620x2000"),
         sourceLabel: item.sourceLabel ? `ModDB · ${item.sourceLabel}` : "ModDB",

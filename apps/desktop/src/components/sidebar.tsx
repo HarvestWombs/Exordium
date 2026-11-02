@@ -33,7 +33,7 @@ export function ListSection(
   );
 }
 
-/** A mod on its way into the library. Its status replaces its name on hover; folded to icons, it is a tooltip. */
+/** A mod on its way into the library. Its status replaces its name on hover; folded to icons, both are a tooltip. */
 export function ImportRow(
   { item, rail, selected, onOpen }: {
     item: Incoming;
@@ -46,7 +46,8 @@ export function ImportRow(
     <button
       type="button"
       className={selected ? "row importing on" : "row importing"}
-      title={rail ? `${item.title} · ${item.status}` : item.title}
+      data-tooltip={rail ? `${item.title} · ${item.status}` : undefined}
+      data-tooltip-placement="right"
       onClick={onOpen}
     >
       <span className="spinner small" aria-hidden="true" />
@@ -57,13 +58,17 @@ export function ImportRow(
 }
 
 export function TitleRow(
-  { t, root, art, selected, running, favorite, onSelect, onMenu, dnd }: {
+  { t, root, art, selected, running, favorite, iconSize, showStatus, rail, onSelect, onMenu, dnd }: {
     t: Title;
     root: string | null;
     art: number;
     selected: boolean;
     running: boolean;
     favorite: boolean;
+    iconSize: number;
+    showStatus: boolean;
+    /** Folded to icons: the name is a tooltip, since it is not on the row. */
+    rail: boolean;
     onSelect: (key: string) => void;
     onMenu: (x: number, y: number) => void;
     /** Drag handlers: every row drags onto a collection, and rows in one reorder it. */
@@ -75,23 +80,26 @@ export function TitleRow(
     <button
       type="button"
       {...dnd}
-      title={t.title}
-      className={[selected ? "row on" : "row", running ? "live" : ""].filter(Boolean).join(" ")}
+      data-tooltip={rail ? t.title : undefined}
+      data-tooltip-placement="right"
+      className={[selected ? "row on" : "row", running ? "live" : "", dnd?.className].filter(Boolean).join(" ")}
       onClick={() => onSelect(t.key)}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
     >
-      <TitleIcon t={t} root={root} art={art} size={24} />
+      <TitleIcon t={t} root={root} art={art} size={iconSize} />
       <span className="row-title">{t.title}</span>
-      {favorite && <span className="row-star" title={tr("Favorite")}>★</span>}
-      {running ? <span className="row-live">{tr("RUNNING")}</span> : (
+      {favorite && <span className="row-star" data-tooltip={tr("Favorite")}>★</span>}
+      {showStatus && (running ? <span className="row-live">{tr("RUNNING")}</span> : (
         <span
           className={`dot ${health}`}
-          title={health === "good" ? tr("Ready") : plural(t.problems.length, "{count} problem", "{count} problems")}
+          data-tooltip={health === "good"
+            ? tr("Ready")
+            : plural(t.problems.length, "{count} problem", "{count} problems")}
         />
-      )}
+      ))}
     </button>
   );
 }

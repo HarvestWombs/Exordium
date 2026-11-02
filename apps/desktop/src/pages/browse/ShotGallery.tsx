@@ -16,7 +16,7 @@ export function ShotGallery({ shots, empty }: { shots: Shot[]; empty: string }) 
             <button
               type="button"
               className="shot-main-button"
-              title={tr("Open the gallery")}
+              data-tooltip={tr("Open the gallery")}
               onClick={() => setGallery(true)}
             >
               <img className="shot-main" src={shots[shot]?.full} alt="" onError={smallerModDbImage} />

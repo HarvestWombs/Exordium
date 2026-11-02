@@ -209,7 +209,7 @@ export function Downloads(
                     type="button"
                     className="square"
                     aria-label={tr("Cancel download")}
-                    title={tr("Cancel download")}
+                    data-tooltip={tr("Cancel download")}
                     disabled={!hero.item?.cancellable}
                     onClick={() => hero.item && onCancel(hero.item)}
                   >
@@ -220,7 +220,7 @@ export function Downloads(
                       type="button"
                       className="square dl-pause"
                       aria-label={hero.item.paused ? tr("Resume download") : tr("Pause download")}
-                      title={hero.item.paused ? tr("Resume download") : tr("Pause download")}
+                      data-tooltip={hero.item.paused ? tr("Resume download") : tr("Pause download")}
                       disabled={!hero.item.cancellable}
                       onClick={() => void hero.item?.setPaused?.(!hero.item.paused)}
                     >

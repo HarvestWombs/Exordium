@@ -111,6 +111,11 @@ export function smallerModDbImage(event: React.SyntheticEvent<HTMLImageElement>)
 
 export const INSTALLER_FILE = /\.(exe|msi|bat|cmd|com|scr)$/i;
 
+/** A file name's extension in capitals ("ZIP"), or nothing when it has none. */
+export function fileExtension(name: string): string {
+  return /\.([a-z0-9]{1,5})$/i.exec(name.trim())?.[1]?.toUpperCase() ?? "";
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return "";
   if (bytes < 1024 * 1024) return tr("{value} KB", { value: (bytes / 1024).toFixed(0) });

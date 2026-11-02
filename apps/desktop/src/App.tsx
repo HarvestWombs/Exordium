@@ -4,6 +4,7 @@ import { Browse } from "./pages/browse/Browse.tsx";
 import { titleKey } from "./pages/browse/browse-util.ts";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { Toasts } from "./components/Toasts.tsx";
+import { TooltipLayer } from "./components/TooltipLayer.tsx";
 import { ConfirmDialog, NameDialog } from "./components/dialogs.tsx";
 import { TitleMenu } from "./components/menus.tsx";
 import { SectionMenu } from "./components/SectionMenu.tsx";
@@ -27,7 +28,7 @@ import { HelpPage, type HelpPageId } from "./pages/help/Help.tsx";
 import { ImportDialog } from "./pages/ImportDialog.tsx";
 import { LatestUploads, pendingUpdates } from "./pages/library/LatestUploads.tsx";
 import { LibraryGrid } from "./pages/library/LibraryGrid.tsx";
-import { Sidebar } from "./pages/library/Sidebar.tsx";
+import { Sidebar, type SidebarAppearance } from "./pages/library/Sidebar.tsx";
 import { Properties } from "./pages/properties/Properties.tsx";
 import { AppSettings } from "./pages/settings/Settings.tsx";
 import { SetupPage } from "./pages/Setup.tsx";
@@ -88,8 +89,9 @@ export function App() {
   // The main area is the library's home, a grid of every title, until one is opened.
   const [gridHome, setGridHome] = React.useState(true);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
-  const [filter, setFilter] = React.useState<Filter>("all");
-  const [search, setSearch] = React.useState("");
+  const [filters, setFilters] = React.useState<Set<Filter>>(() => new Set());
+  const [sidebarSearch, setSidebarSearch] = React.useState("");
+  const [homeSearch, setHomeSearch] = React.useState("");
   // The one sidebar section shown alone (View only), if any.
   const [solo, setSolo] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<Tab>("overview");
@@ -225,14 +227,25 @@ export function App() {
     }
   }
 
-  const { favorites, hidden, collections, sectionsOn, soloSection, shownSections, missingCore } = libraryView({
+  const sidebarView = libraryView({
     titles,
     status,
     scan,
-    filter,
-    search,
+    filters,
+    search: sidebarSearch,
     solo,
   });
+  const homeView = libraryView({
+    titles,
+    status,
+    scan,
+    filters: new Set<Filter>(),
+    search: homeSearch,
+    solo: null,
+  });
+  const { favorites, hidden, collections, soloSection, missingCore } = sidebarView;
+  const sidebarSections = sidebarView.shownSections;
+  const homeSections = homeView.shownSections;
   const { collectionAction, setMember, headDnd, rowDnd, newCollection, renameCollection } = useCollections({
     collections,
     setStatus,
@@ -240,6 +253,15 @@ export function App() {
     reportError,
     setNameDialog,
   });
+  function deleteCollection(collection: Collection) {
+    setConfirmBox({
+      title: tr("Delete {name}?", { name: collection.name }),
+      body: tr("The collection goes; the titles in it stay in your library."),
+      action: tr("Delete"),
+      danger: true,
+      run: () => collectionAction({ action: "delete", id: collection.id }),
+    });
+  }
   const { folderImport, setFolderImport, importArchive, importFolder, installCore } = useImports({
     root,
     load,
@@ -343,7 +365,7 @@ export function App() {
     onPlay: (t) => void play(t),
   });
 
-  const row = (t: Title, prefix: string, collection: Collection | null) => (
+  const row = (t: Title, prefix: string, collection: Collection | null, appearance: SidebarAppearance) => (
     <TitleRow
       key={prefix + t.key}
       t={t}
@@ -352,11 +374,29 @@ export function App() {
       selected={t.key === selectedKey && !gridHome && !reviewShown && !importPage}
       running={runningKeys.has(t.key)}
       favorite={favorites.has(t.key)}
+      iconSize={appearance.iconSize}
+      showStatus={appearance.showStatus}
+      rail={appearance.rail}
       onSelect={openTitle}
       onMenu={(x, y) => setMenu(collection ? { x, y, t, from: collection } : { x, y, t })}
       dnd={rowDnd(t, collection)}
     />
   );
+
+  const visibleForFilters = titles.filter((t) =>
+    !hidden.has(t.key) &&
+    !(status?.appSettings.settings.library.hideUnsupported && t.problems.some((problem) => problem.level === "error"))
+  );
+  const filterCounts: Record<Filter, number> & { all: number } = {
+    all: visibleForFilters.length,
+    mods: visibleForFilters.filter((t) => t.kind === "mod").length,
+    cores: visibleForFilters.filter((t) => t.kind === "core").length,
+    favorites: visibleForFilters.filter((t) => favorites.has(t.key)).length,
+    recent: visibleForFilters.filter((t) => status?.playedAt[t.key]).length,
+    updates: visibleForFilters.filter((t) => t.updateCheck?.available).length,
+    issues: titles.filter((t) => t.problems.length > 0 && !hidden.has(t.key)).length,
+    hidden: hidden.size,
+  };
 
   function showView(next: AppView) {
     // From a title's page, Library goes back to the library home; Browse opens unfiltered.
@@ -366,6 +406,17 @@ export function App() {
       setImportPage(null);
     }
     setView(next);
+  }
+
+  async function setLatestUploads(show: boolean) {
+    const response = await fetch("/api/app-settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ library: { showLatestUploads: show } }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? tr("Could not save app settings."));
+    await refreshStatus();
   }
   function openLibrary(page: LibraryPage) {
     setLibraryPage(page);
@@ -401,6 +452,7 @@ export function App() {
 
   return (
     <div className={appClass}>
+      <TooltipLayer />
       {desktop && !maximized && <ResizeHandles />}
       <TopBar
         view={view}
@@ -468,21 +520,15 @@ export function App() {
           section={sectionMenu.section}
           solo={solo}
           collapsed={collapsed.has(sectionMenu.section.id)}
-          hasCollections={collections.length > 0}
+          hasCollections={sidebarSections.some((section) => section.isCollection)}
           onClose={() => setSectionMenu(null)}
           onSolo={setSolo}
           onToggle={() => toggleSection(sectionMenu.section.id)}
-          onFoldCollections={(shut) => fold(collections.map((c) => `collection:${c.id}`), shut)}
+          onFoldCollections={(shut) =>
+            fold(sidebarSections.filter((section) => section.isCollection).map((section) => section.id), shut)}
           onRename={renameCollection}
           onNewCollection={() => newCollection()}
-          onDelete={(c) =>
-            setConfirmBox({
-              title: tr("Delete {name}?", { name: c.name }),
-              body: tr("The collection goes; the titles in it stay in your library."),
-              action: tr("Delete"),
-              danger: true,
-              run: () => collectionAction({ action: "delete", id: c.id }),
-            })}
+          onDelete={deleteCollection}
         />
       )}
       {nameDialog && <NameDialog request={nameDialog} onClose={() => setNameDialog(null)} />}
@@ -539,17 +585,17 @@ export function App() {
         <Sidebar
           rail={rail}
           onToggleRail={toggleRail}
-          search={search}
-          onSearch={setSearch}
+          search={sidebarSearch}
+          onSearch={setSidebarSearch}
           scan={scan}
           scanning={scanning}
-          filter={filter}
-          onFilter={setFilter}
-          hiddenCount={hidden.size}
+          filters={filters}
+          onFilters={setFilters}
+          filterCounts={filterCounts}
           onRead={root ? () => void load(root) : null}
           soloSection={soloSection}
           onClearSolo={() => setSolo(null)}
-          sections={shownSections}
+          sections={sidebarSections}
           collapsed={collapsed}
           onToggleSection={toggleSection}
           onSectionMenu={(x, y, section) => setSectionMenu({ x, y, section })}
@@ -591,14 +637,15 @@ export function App() {
             : gridHome && scan
             ? (
               <LibraryGrid
-                shelves={shownSections.filter((section) => libraryPage === "home" || section.collection).map((
+                shelves={homeSections.filter((section) => libraryPage === "home" || section.isCollection).map((
                   section,
                 ) => ({
                   id: section.id,
                   label: section.label,
                   titles: section.titles,
+                  ...(section.collection ? { collection: section.collection } : {}),
                 }))}
-                before={libraryPage === "home" && sectionsOn && !soloSection &&
+                before={libraryPage === "home" && homeView.sectionsOn &&
                     status?.appSettings.settings.library.showLatestUploads !== false
                   ? (
                     <LatestUploads
@@ -618,9 +665,15 @@ export function App() {
                     />
                   )
                   : null}
+                search={homeSearch}
+                onSearch={setHomeSearch}
                 onImport={() => setImportOpen(true)}
                 collectionsPage={libraryPage === "collections"}
                 onNewCollection={() => newCollection()}
+                onRenameCollection={renameCollection}
+                onDeleteCollection={deleteCollection}
+                showLatestUploads={status?.appSettings.settings.library.showLatestUploads !== false}
+                onShowLatestUploads={(show) => setLatestUploads(show).catch(reportError)}
                 incoming={libraryPage === "home" ? incoming : []}
                 onOpenImport={openImport}
                 onCancelImport={askCancel}
@@ -633,7 +686,7 @@ export function App() {
                 starting={starting}
                 onOpen={openTitle}
                 onPlay={(t) => void play(t)}
-                onMenu={(x, y, t) => setMenu({ x, y, t })}
+                onMenu={(x, y, t, from) => setMenu(from ? { x, y, t, from } : { x, y, t })}
               />
             )
             : selected && root

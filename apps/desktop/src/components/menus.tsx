@@ -98,7 +98,7 @@ export function TitleMenu(
       type="button"
       role="menuitem"
       disabled={disabled}
-      title={title}
+      data-tooltip={title}
       onClick={() => onAction(action)}
     >
       {label}

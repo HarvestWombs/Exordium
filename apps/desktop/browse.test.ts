@@ -264,6 +264,7 @@ Deno.test("latest uploads come from the caches, newest first, one card per same-
           {
             id: "m1",
             title: "LO Mod (D2GL English)",
+            description: "x".repeat(1000),
             addedAt: "2026-10-13T16:42:00Z",
             cover: "x",
             sourceLabel: "Files",
@@ -284,6 +285,9 @@ Deno.test("latest uploads come from the caches, newest first, one card per same-
     assert(Date.now() - started < 1000);
     assertEquals(uploads.map((u) => u.key), ["moddb:m1", "archive:a1"]);
     assertEquals(uploads[0]!.sourceLabel, "ModDB · Files");
+    // Only the start of a description travels, and a cache without one still reads.
+    assertEquals(uploads[0]!.description, `${"x".repeat(400)}…`);
+    assertEquals(uploads[1]!.description, "");
   } finally {
     await Deno.remove(dir, { recursive: true }).catch(() => {});
   }

@@ -19,7 +19,13 @@ export function StatusBar(
   },
 ) {
   const middle = download && (
-    <button type="button" className="statusbar-download" title={download.text} onClick={onDownloads}>
+    <button
+      type="button"
+      className="statusbar-download"
+      data-tooltip={download.text}
+      data-tooltip-placement="top"
+      onClick={onDownloads}
+    >
       <span className="spinner small" aria-hidden="true" />
       <span className="statusbar-download-text">{download.text}</span>
       {download.percent !== null && (
@@ -36,7 +42,7 @@ export function StatusBar(
     return (
       <footer className="statusbar accent" role="status">
         <div className="statusbar-side">
-          <span className="statusbar-text" title={detail}>
+          <span className="statusbar-text" data-tooltip={detail} data-tooltip-placement="top">
             <strong>{tr("Exordium {version} is ready.", { version: update.version })}</strong> {detail}
           </span>
         </div>

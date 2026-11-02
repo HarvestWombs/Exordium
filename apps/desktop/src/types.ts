@@ -150,6 +150,9 @@ export interface SidebarSection {
   /** As menus name it: "View only Mods". */
   name: string;
   titles: Title[];
+  /** Favorites and user-created collections both appear on the Collections page. */
+  isCollection?: boolean;
+  /** Present only for a user-created collection; built-in Favorites cannot be renamed or deleted. */
   collection?: Collection;
 }
 
@@ -162,6 +165,10 @@ export interface Upload {
   source: "archive" | "moddb" | "update";
   titleKey?: string;
   title: string;
+  /** A few lines for the hover card; the Browse card has the whole text. May be empty. */
+  description: string;
+  /** The entry's own page, for a description the list does not have. Updates have none. */
+  page?: string;
   addedAt: string;
   cover: string;
   sourceLabel: string;
@@ -251,6 +258,8 @@ export interface AppPreferences {
   launch: {
     minimizeOnLaunch: boolean;
     showLogsOnFailure: boolean;
+    /** Close official Battle.net to every mod without its own realm. */
+    battlenetLockdown: boolean;
     /** A folder holding PlugY.dll, used by titles with PlugY on that bring none. Empty: none. */
     plugYFolder: string;
     /** Off Windows: a detected runner's id, or a path to a Wine or Proton build. Empty: the first found. */
@@ -323,7 +332,7 @@ export interface Screenshot {
   modifiedAt: string | null;
 }
 
-export type Filter = "all" | "mods" | "cores" | "issues" | "hidden";
+export type Filter = "mods" | "cores" | "favorites" | "recent" | "updates" | "issues" | "hidden";
 
 export type Tab = "overview" | "documentation" | "changelogs" | "screenshots" | "backups" | "logs";
 

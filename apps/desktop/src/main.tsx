@@ -1,5 +1,11 @@
 import { createRoot } from "react-dom/client";
+import { installAutoscroll } from "./lib/autoscroll.ts";
 import { setLanguage } from "./lib/i18n.ts";
+
+// Dragging is startPointerDrag's. Left alone, any image or link starts a Windows drag: its no-entry
+// cursor and "Move" label over the page.
+document.addEventListener("dragstart", (event) => event.preventDefault());
+installAutoscroll();
 
 // The language comes first: some modules keep labels in constants, read as they load.
 void (async () => {

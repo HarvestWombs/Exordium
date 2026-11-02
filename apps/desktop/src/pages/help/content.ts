@@ -81,8 +81,9 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Sections",
         paragraphs: [
-          "The sidebar lists Favorites, your collections, Recent, Mods and Cores. Click a section's header to fold it; right-click it to view only that section, or to fold every collection at once. The « button folds the whole sidebar to a strip of icons. Recent can be turned off in Settings, Library.",
-          "The chips under the search box filter the list: All, Mods, Cores, Issues (titles with problems) and, once you hide something, Hidden.",
+          "The sidebar lists Favorites, your collections, Recent, Mods and Cores. Click a section's header to fold it; right-click it to view only that section, or to fold every collection at once. The button in the sidebar footer folds the whole sidebar to a strip of icons. Recent can be turned off in Settings, Library.",
+          "Search the library from the top of the sidebar. Its filter button filters by mods, cores, favorites, recently played titles, available updates, issues or hidden titles. Filters can be combined; All titles clears them.",
+          "The filter menu also adjusts row height, icon and text sizes, section counts and status indicators. Drag the sidebar's right edge to resize it; double-click the edge to restore its default width.",
         ],
       },
       {
@@ -96,6 +97,7 @@ export const TOPICS: HelpTopicContent[] = [
         heading: "The home screen",
         paragraphs: [
           "The home screen shows every title as a card, with Latest uploads above: new mods from the Internet Archive and ModDB, and updates waiting for mods you have. Turn the row off in Settings, Library. Click a shelf's heading to fold it; the home screen remembers its folds apart from the sidebar's. Click the Library tab at any time to come back here.",
+          "Use the filter button beside home search to choose visible shelves and adjust card appearance. Drag categories by their handles to reorder the shelves; the home screen remembers their order.",
         ],
       },
       {
@@ -227,7 +229,7 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Official Battle.net",
         paragraphs: [
-          "For every other mod, Exordium does not connect to Blizzard's Battle.net: the Battle.net button is greyed out, and Open Battle.net does nothing. Modded games do not belong on Blizzard's servers.",
+          "For every other mod, Exordium does not connect to Blizzard's Battle.net: the Battle.net button is greyed out, and Open Battle.net does nothing. Modded games do not belong on Blizzard's servers. Battle.net lockdown in Settings, Launching turns this off for every mod, at your own risk.",
         ],
       },
     ],
@@ -879,9 +881,9 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Art",
         list: [
-          "**banner**: the header of the mod's page. 1920x500 or larger.",
-          "**icon**: the sidebar, and the game's own icon in the taskbar and on desktop shortcuts. Square, 256x256.",
-          "**portrait**: the card on the library home. 600x900 (2:3).",
+          "**banner**: the header of the mod's page. Use a wide 4:1 image; 1920x480 is recommended.",
+          "**icon**: the sidebar, and the game's own icon in the taskbar and on desktop shortcuts. Use a square 1:1 image; 256x256 is recommended and is the maximum stored size.",
+          "**portrait**: the card on the library home. Use a portrait 2:3 image; 600x900 is recommended.",
         ],
         paragraphs: [
           "Name them under art in exordium.mod.json, as paths in the mod's folder. A banner or portrait can be PNG, JPEG, WebP, GIF or BMP; an icon must be PNG. A mod without a portrait shows its icon and name over its banner; without either, its initials. Players can replace any of them in Properties, Artwork, without touching the mod.",
@@ -999,7 +1001,7 @@ export const FAQ: FaqEntry[] = [
   {
     q: "Why is the Battle.net button grey?",
     a: [
-      "Exordium does not connect modded games to Blizzard's Battle.net. A mod with its own realm names it in its exordium.mod.json, and for that mod Battle.net is open. TCP/IP games always work.",
+      "Exordium does not connect modded games to Blizzard's Battle.net. A mod with its own realm names it in its exordium.mod.json, and for that mod Battle.net is open. Turning off Battle.net lockdown in Settings, Launching opens it for every mod. TCP/IP games always work.",
     ],
   },
   {

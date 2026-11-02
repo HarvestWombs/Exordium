@@ -1,9 +1,9 @@
 /**
  * A title's artwork, as PNG in Exordium's library, never in the mod's folder.
  *
- * - **banner**: the header of the mod's page, 1920×500 or larger.
- * - **icon**: the library list, and the box's Game.exe (the taskbar). At most 256×256.
- * - **portrait**: for a grid view later, 600×900.
+ * - **banner**: the header of the mod's page, 4:1; 1920×480 is suggested.
+ * - **icon**: the library list and the box's Game.exe (the taskbar), 1:1; 256×256 is suggested and the maximum.
+ * - **portrait**: the library grid card, 2:3; 600×900 is suggested.
  *
  * This is the format for Exordium's own titles. A D2SE import has none of these; its
  * `ModBanner=<file>.bmp` (a 250×60 strip) is shown as it is, from the mod's folder, when no banner

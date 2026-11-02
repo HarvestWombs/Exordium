@@ -8,7 +8,8 @@ export function WindowControls({ maximized, onToggleMaximize }: { maximized: boo
       <button
         type="button"
         className="window-control"
-        title={tr("Minimize")}
+        aria-label={tr("Minimize")}
+        data-tooltip={tr("Minimize")}
         onClick={() => post("/api/window/minimize")}
       >
         <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -18,7 +19,8 @@ export function WindowControls({ maximized, onToggleMaximize }: { maximized: boo
       <button
         type="button"
         className="window-control"
-        title={maximized ? tr("Restore") : tr("Maximize")}
+        aria-label={maximized ? tr("Restore") : tr("Maximize")}
+        data-tooltip={maximized ? tr("Restore") : tr("Maximize")}
         onClick={onToggleMaximize}
       >
         <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -28,7 +30,8 @@ export function WindowControls({ maximized, onToggleMaximize }: { maximized: boo
       <button
         type="button"
         className="window-control close"
-        title={tr("Close")}
+        aria-label={tr("Close")}
+        data-tooltip={tr("Close")}
         onClick={() => post("/api/window/close")}
       >
         <svg viewBox="0 0 10 10" aria-hidden="true">

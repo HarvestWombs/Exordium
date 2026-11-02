@@ -49,6 +49,7 @@ export function Lightbox(
               type="button"
               className="lightbox-nav prev"
               aria-label={tr("Previous")}
+              data-tooltip={tr("Previous")}
               onClick={(event) => {
                 keep(event);
                 move(-1);
@@ -60,6 +61,7 @@ export function Lightbox(
               type="button"
               className="lightbox-nav next"
               aria-label={tr("Next")}
+              data-tooltip={tr("Next")}
               onClick={(event) => {
                 keep(event);
                 move(1);
@@ -75,7 +77,15 @@ export function Lightbox(
           {index + 1} / {count}
           {image.caption ? ` · ${image.caption}` : ""}
         </span>
-        <button type="button" className="lightbox-close" aria-label={tr("Close")} onClick={onClose}>✕</button>
+        <button
+          type="button"
+          className="lightbox-close"
+          aria-label={tr("Close")}
+          data-tooltip={tr("Close")}
+          onClick={onClose}
+        >
+          ✕
+        </button>
       </div>
       {count > 1 && (
         <div className="lightbox-strip" ref={strip}>
@@ -84,6 +94,8 @@ export function Lightbox(
               type="button"
               key={img.src}
               className={i === index ? "lightbox-thumb on" : "lightbox-thumb"}
+              aria-label={img.caption}
+              data-tooltip={img.caption}
               onClick={(event) => {
                 keep(event);
                 setIndex(i);

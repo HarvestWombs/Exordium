@@ -1,8 +1,10 @@
 import { formatDate, formatNumber, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { useTranslation } from "../../hooks/useTranslation.tsx";
+import { FileType } from "./FileType.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
+import { useCoverHeight } from "./useCoverHeight.ts";
 import {
   ACTIVE,
   formatBytes,
@@ -38,6 +40,16 @@ export function ModDbCard(
   const [details, setDetails] = React.useState<ModDbDetails | null>(null);
   const [detailsError, setDetailsError] = React.useState<string | null>(null);
   const [file, setFile] = React.useState("");
+  // A mod's page does not say what its files are; each file's own page does, by its page.
+  const [fileNames, setFileNames] = React.useState<Record<string, string | null>>({});
+
+  React.useEffect(() => {
+    if (item.kind !== "mod" || !file || file in fileNames) return;
+    void fetch(`/api/browse/moddb-item?page=${encodeURIComponent(file)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then((body: ModDbDetails | null) => setFileNames((names) => ({ ...names, [file]: body?.filename ?? null })));
+  }, [item.kind, file, fileNames]);
 
   React.useEffect(() => {
     const node = ref.current;
@@ -63,23 +75,31 @@ export function ModDbCard(
   const running = job ? ACTIVE.includes(job.state) : false;
   const description = details?.description || item.description;
   const translation = useTranslation(description);
+  const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
   const isMod = item.kind === "mod";
   const chosen = isMod ? details?.files.find((f) => f.page === file) ?? null : null;
   const size = isMod ? chosen?.size ?? null : details?.size ?? null;
-  const installer = !isMod && INSTALLER_FILE.test(details?.filename ?? "");
+  const filename = isMod ? fileNames[file] ?? null : details?.filename ?? null;
+  const installer = INSTALLER_FILE.test(filename ?? "");
   const target = isMod ? chosen?.page ?? item.installPage : item.installPage || item.page;
 
   return (
     <article ref={ref} className="mod-card">
-      <button type="button" className="mod-cover" title={tr("Open its ModDB page")} onClick={() => openLink(item.page)}>
+      <button
+        ref={heights.cover}
+        type="button"
+        className="mod-cover"
+        data-tooltip={tr("Open its ModDB page")}
+        onClick={() => openLink(item.page)}
+      >
         <img src={shots[0]?.full ?? item.cover} alt="" loading="lazy" onError={smallerModDbImage} />
         {installed && <span className="ribbon">{tr("IN LIBRARY")}</span>}
       </button>
 
       <div className="mod-info">
         <h2 className="mod-title">{item.title}</h2>
-        <p className={expanded ? "mod-description open" : "mod-description"}>
+        <p ref={heights.description} className={expanded ? "mod-description open" : "mod-description"}>
           {translation.text || (details ? tr("The author gave no description.") : "…")}
         </p>
         <div className="mod-under">
@@ -94,7 +114,7 @@ export function ModDbCard(
               type="button"
               key={link.url}
               className="small-button"
-              title={link.url}
+              data-tooltip={link.url}
               onClick={() => openLink(link.url)}
             >
               {link.label} ↗
@@ -174,13 +194,16 @@ export function ModDbCard(
             ))}
           </select>
         )}
+        <FileType name={filename} />
         {size !== null && <span className="mod-size">{formatBytes(size)}</span>}
         {installer
           ? (
             <button
               type="button"
               className="download"
-              title={tr("An installer: Exordium never runs one for you. Open its page and install it yourself.")}
+              data-tooltip={tr(
+                "An installer: Exordium never runs one for you. Open its page and install it yourself.",
+              )}
               onClick={() => openLink(item.page)}
             >
               {tr("INSTALLER ↗")}
@@ -192,7 +215,7 @@ export function ModDbCard(
               className="download"
               disabled={!details || !root || running || job?.state === "installed" ||
                 (isMod && !chosen && details.files.length > 0)}
-              title={root ? undefined : tr("Choose the Diablo II install first")}
+              data-tooltip={root ? undefined : tr("Choose the Diablo II install first")}
               onClick={() => onInstall(target)}
             >
               {job ? jobLabel(job) : tr("INSTALL")}

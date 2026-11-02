@@ -205,6 +205,17 @@ export function SettingsSectionView(
             onChange={(value) => onPatch({ launch: { showLogsOnFailure: value } })}
           />
         </SettingsGroup>
+        <SettingsGroup title="Battle.net">
+          <ToggleRow
+            label={tr("Battle.net lockdown")}
+            hint={tr(
+              "Keeps modded games off official Battle.net: the button is greyed out unless a mod names its own realm. Off opens it for every mod, and playing modded on Blizzard's servers risks your account.",
+            )}
+            checked={s.launch.battlenetLockdown}
+            disabled={busy}
+            onChange={(value) => onPatch({ launch: { battlenetLockdown: value } })}
+          />
+        </SettingsGroup>
         <SettingsGroup title="PlugY">
           <FolderRow
             label={tr("PlugY folder")}

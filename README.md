@@ -51,7 +51,7 @@ The difference is where the work happens. D2SE runs mods out of your Diablo II i
 - **Finding mods is built in.** Browse the Internet Archive and ModDB inside the app, with screenshots and descriptions, and install in one click.
 - **Every patch is one click away.** If a mod needs a core you don't have, its Play button becomes Install core.
 - **Your characters are protected.** Saves are backed up when a game closes, and you can restore any backup in a click.
-- **Official Battle.net stays safe.** Modded games can't reach Blizzard's servers unless a mod declares its own realm.
+- **Official Battle.net stays safe.** Modded games can't reach Blizzard's servers unless a mod declares its own realm, or you turn the lockdown off in Settings.
 - **Run several copies at once.** Press Play again to start another copy, for a TCP/IP game with yourself.
 - **It feels current.** A Steam-style library with collections, favorites, artwork, live download progress, and an interface in English, French, Spanish and German.
 - **Mod authors get more.** One manifest file gives your mod artwork, links, documentation, changelogs and update notices.
@@ -93,7 +93,7 @@ The difference is where the work happens. D2SE runs mods out of your Diablo II i
 - **The loader.** `exordium-game.exe` works on every core from 1.00 to 1.13d, so `-skiptobnet`, `-act` and `-seed` do too.
 - **Plugins.** PlugY, D2Mod and a mod's own DLLs load in the order the mod asks for. Exordium ships no PlugY: it uses the mod's, or one you provide.
 - **Newer MPQs on old patches.** An MPQ from the 1.14 installer loads on every core, without being rebuilt.
-- **Battle.net closed by default.** Unless a mod declares its own realm, the Battle.net button is greyed out and every route onto official Battle.net is blocked, on every core. TCP/IP is untouched.
+- **Battle.net closed by default.** Unless a mod declares its own realm, the Battle.net button is greyed out and every route onto official Battle.net is blocked, on every core. TCP/IP is untouched. The switch is in Settings, Launching.
 - **Several copies.** Each copy has its own registry and log.
 
 ### Keeping things safe
@@ -200,7 +200,7 @@ If a box ever looks wrong, **Properties, Files, Rebuild Box** brings its links a
 
 - **TCP/IP** works as it always has: one player hosts, the others join by address. Every player needs the same mod at the same version.
 - **Mod realms.** A mod that runs its own server names it in its `exordium.mod.json`, as a realm with a gateway address. For that mod, Battle.net stays open. Exordium doesn't point the game at the realm yet, so players set the gateway themselves for now.
-- **Official Battle.net.** For every other mod, Exordium does not connect to Blizzard's Battle.net. The Battle.net button is greyed out, and every other way onto Battle.net is blocked. Modded games do not belong on Blizzard's servers.
+- **Official Battle.net.** For every other mod, Exordium does not connect to Blizzard's Battle.net. The Battle.net button is greyed out, and every other way onto Battle.net is blocked. Modded games do not belong on Blizzard's servers. Battle.net lockdown in Settings, Launching turns this off for every mod, at your own risk.
 
 ### Video and windowed mode
 
@@ -273,7 +273,7 @@ In the mod's own save folder, inside Exordium's library. Right-click the title, 
 Every patch from 1.00 to 1.13d. 1.14 launches too, through Blizzard's own `Game.exe`, but without plugins, custom MPQs or the Battle.net lockdown.
 
 **Why is the Battle.net button grey?**
-Exordium does not connect modded games to Blizzard's Battle.net. A mod with its own realm names it in its `exordium.mod.json`, and for that mod Battle.net is open. TCP/IP games always work.
+Exordium does not connect modded games to Blizzard's Battle.net. A mod with its own realm names it in its `exordium.mod.json`, and for that mod Battle.net is open. Turning off Battle.net lockdown in Settings, Launching opens it for every mod. TCP/IP games always work.
 
 **Can I play with friends?**
 Yes: over TCP/IP, with everyone on the same mod and version, or on the mod's own realm if it has one.

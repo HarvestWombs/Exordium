@@ -33,7 +33,12 @@ export function ScreenshotStrip({ root, t }: { root: string; t: Title }) {
       </div>
       <div className="overview-shot-strip">
         {shots.map((shot, i) => (
-          <button type="button" key={shot.name} title={shot.name} onClick={() => setOpen(i)}>
+          <button
+            type="button"
+            key={shot.name}
+            data-tooltip={shot.name}
+            onClick={() => setOpen(i)}
+          >
             <img src={screenshotUrl(root, t.key, shot.name)} alt={shot.name} loading="lazy" />
           </button>
         ))}
@@ -127,7 +132,7 @@ export function ActivityFeed({ root, t, running }: { root: string; t: Title; run
             <span className="activity-dot" />
             <span className="activity-text">{item.text}</span>
             <span className="muted small">{item.detail}</span>
-            <time className="muted small" dateTime={item.at} title={formatDateTime(item.at)}>
+            <time className="muted small" dateTime={item.at} data-tooltip={formatDateTime(item.at)}>
               {relative(item.at)}
             </time>
           </li>

@@ -333,6 +333,17 @@ Deno.test("battlenet is allowed only for a mod with a custom realm gateway", () 
   assertEquals(withRealm.battlenetAllowed, true);
 });
 
+Deno.test("the lockdown setting decides battlenet only when turned off", () => {
+  const plan = resolve({ files: [], registry: [] });
+  const base = "[USERSETTINGS]\nLanguage=MOD\n[Protected]\nD2Core=1.10f\n";
+  assertEquals(buildLoaderPlan(plan, setup(base), { battlenetLockdown: true }).battlenetAllowed, false);
+  assertEquals(buildLoaderPlan(plan, setup(base), { battlenetLockdown: false }).battlenetAllowed, true);
+  const withRealm = buildLoaderPlan(plan, setup(`${base}RealmGateway=realm.example.net\n`), {
+    battlenetLockdown: true,
+  });
+  assertEquals(withRealm.battlenetAllowed, true);
+});
+
 Deno.test("the base releases 1.00 and 1.07 load patch_d2.mpq only when it is there", () => {
   const plan = resolve({ files: [], registry: [] });
   const patch = (core: string) =>

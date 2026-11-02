@@ -31,7 +31,13 @@ export function Properties(
           <h1>{t.title}</h1>
           <span className="muted">{tr("Properties")}</span>
           <div className="grow" />
-          <button type="button" className="square" aria-label={tr("Close")} onClick={onClose}>
+          <button
+            type="button"
+            className="square"
+            aria-label={tr("Close")}
+            data-tooltip={tr("Close")}
+            onClick={onClose}
+          >
             <CloseIcon />
           </button>
         </div>

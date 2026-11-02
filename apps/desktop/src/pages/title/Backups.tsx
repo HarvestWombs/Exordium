@@ -101,7 +101,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
           type="button"
           className="ghost"
           disabled={busy || closeFirst}
-          title={closeFirst ? tr("Close the game first") : undefined}
+          data-tooltip={closeFirst ? tr("Close the game first") : undefined}
           onClick={() => void create()}
         >
           {tr("Back up now")}
@@ -171,7 +171,7 @@ export function Backups({ root, titleKey, running }: { root: string; titleKey: s
                         type="button"
                         className="ghost"
                         disabled={busy || closeFirst}
-                        title={closeFirst
+                        data-tooltip={closeFirst
                           ? tr("Close the game first")
                           : tr("Writes these files back; characters made since stay")}
                         onClick={() => setConfirming({ id: backup.id, action: "restore" })}
