@@ -29,6 +29,27 @@ import {
   verifySignature,
 } from "./updater.ts";
 
+/**
+ * The gh CLI, found by walking PATH here: Deno's own lookup gives up on a PATH holding a stray quote
+ * (one machine's had `";C:/Program Files/CMake/bin"`), and then cannot find gh even though it is on
+ * PATH. `EXORDIUM_GH` names it outright.
+ */
+function ghPath(): string {
+  const named = Deno.env.get("EXORDIUM_GH");
+  if (named) return named;
+  const exe = Deno.build.os === "windows" ? "gh.exe" : "gh";
+  for (const entry of (Deno.env.get("PATH") ?? "").split(Deno.build.os === "windows" ? ";" : ":")) {
+    const folder = entry.replace(/"/g, "").trim().replace(/[\\/]+$/, "");
+    if (!folder) continue;
+    try {
+      if (Deno.statSync(`${folder}/${exe}`).isFile) return `${folder}/${exe}`;
+    } catch {
+      // Not in this folder.
+    }
+  }
+  return "gh";
+}
+
 /** What packaging makes (package-app.ts): files at the top, and whole folders. */
 const APP_FILES = ["Exordium.exe", "Exordium.dll", "LICENSE.txt", "NOTICE.txt", ".downloaded", ".deno-desktop-app"];
 const APP_FOLDERS = ["native", "bin"];
@@ -152,7 +173,7 @@ if (Deno.args.includes("--publish")) {
     ...(hasNotes ? ["--notes-file", notes] : ["--generate-notes"]),
     ...(/-/.test(APP_VERSION) ? ["--prerelease"] : []),
   ];
-  const result = await new Deno.Command("gh", { args, stdout: "inherit", stderr: "inherit" }).output();
+  const result = await new Deno.Command(ghPath(), { args, stdout: "inherit", stderr: "inherit" }).output();
   if (!result.success) Deno.exit(result.code);
 } else {
   console.log(`Publish with:  deno task release --publish   (gh release create v${APP_VERSION} on ${UPDATE_REPO})`);

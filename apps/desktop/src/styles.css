@@ -5684,6 +5684,14 @@ fieldset legend {
   transition: width 0.3s ease;
 }
 
+/* Under the version line, as wide as a line of text rather than the card. */
+.update-row .update-progress {
+  max-width: 320px;
+  margin: 8px 0 2px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
 .browse-tab .tab-count {
   margin-left: 6px;
   color: var(--text-mute);

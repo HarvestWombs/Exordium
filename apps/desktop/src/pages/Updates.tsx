@@ -66,6 +66,17 @@ export function UpdatesPanel({ status }: { status: Status }) {
         <div>
           <strong>{tr("Version {current}", { current: view.current })}</strong>
           <p className={view.phase === "failed" ? "bad-text small" : "muted small"}>{line}</p>
+          {view.phase === "downloading" && (
+            <div
+              className="update-progress"
+              role="progressbar"
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <span style={{ width: `${percent}%` }} />
+            </div>
+          )}
           {view.checkedAt && (
             <p className="muted small">
               {tr("Checked {date} · github.com/{repo}", {
@@ -108,17 +119,6 @@ export function UpdatesPanel({ status }: { status: Status }) {
             )}
         </div>
       </div>
-      {view.phase === "downloading" && (
-        <div
-          className="update-progress"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <span style={{ width: `${percent}%` }} />
-        </div>
-      )}
       {update && (view.phase === "available" || view.phase === "downloading" || view.phase === "ready") && (
         <div className="settings-row update-notes">
           <div>

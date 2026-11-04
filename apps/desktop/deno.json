@@ -1,6 +1,6 @@
 {
   "name": "@exordium/desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "exports": "./server.ts",
   "tasks": {
     "dev": "deno run -A dev.ts",
