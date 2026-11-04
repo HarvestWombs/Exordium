@@ -52,6 +52,72 @@ export function settingsLayer(settings: D2SERegistrySettings): RegistryLayer {
   return { id: "d2se-settings", role: "mod", entries };
 }
 
+/** Where the game keeps its gateway list. */
+export const BATTLENET_KEY = "HKCU\\Software\\Battle.net\\Configuration";
+export const GATEWAYS_VALUE = "Diablo II Battle.net gateways";
+
+/** A mod's own realm: what Properties > Realm and D2SE's `Realm*` settings hold. */
+export interface RealmSettings {
+  gateway: string | null;
+  timezone: string | null;
+  gatewayName: string | null;
+  selected: string | null;
+}
+
+/**
+ * The mod's realm as registry values: a gateway list holding only that realm, and `BNETIP`, which
+ * older Bnclients (1.09d) read as well. The list is the game's own format: `1002`, the selected
+ * entry as two digits, then host, timezone and name per gateway. Null without a gateway.
+ */
+export function realmLayer(realm: RealmSettings | null): RegistryLayer | null {
+  const host = realm?.gateway?.trim();
+  if (!host) return null;
+  const selected = Number.parseInt(realm?.selected?.trim() ?? "", 10);
+  const timezone = realm?.timezone?.trim() || "0";
+  return {
+    id: "realm",
+    role: "mod",
+    entries: [
+      {
+        key: BATTLENET_KEY,
+        name: GATEWAYS_VALUE,
+        value: {
+          type: "multi_sz",
+          data: [
+            "1002",
+            String(Number.isFinite(selected) && selected >= 0 ? selected : 0).padStart(2, "0"),
+            host,
+            timezone,
+            realm?.gatewayName?.trim() || host,
+          ],
+        },
+      },
+      { key: DIABLO_KEY, name: "BNETIP", value: { type: "sz", data: host } },
+    ],
+  };
+}
+
+/**
+ * The writable layer without the values a mod layer owns outright, the realm's: a run that rewrote
+ * the gateway list (the game puts Blizzard's back when it dislikes the one it finds) must not take
+ * the mod off its own realm on the next start.
+ */
+export function withoutOwned(writable: RegistryLayer, owner: RegistryLayer | null): RegistryLayer {
+  if (!owner) return writable;
+  const id = (key: string, name: string) => `${normalizeKey(key).toLowerCase()}|${name.toLowerCase()}`;
+  const owned = new Set(owner.entries.map((entry) => id(entry.key, entry.name ?? "")));
+  const ownedKeys = new Set(owner.entries.map((entry) => normalizeKey(entry.key).toLowerCase()));
+  return {
+    ...writable,
+    // A tombstone with no name deletes its whole key, the realm's values with it.
+    entries: writable.entries.filter((entry) =>
+      entry.name === undefined
+        ? !ownedKeys.has(normalizeKey(entry.key).toLowerCase())
+        : !owned.has(id(entry.key, entry.name))
+    ),
+  };
+}
+
 /** The layer id of the values a box owns; a run's changes to these are not kept. */
 export const BOX_LAYER = "box";
 

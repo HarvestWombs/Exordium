@@ -13,7 +13,9 @@ import {
   parseHiveText,
   parseRegFile,
   readWritableLayer,
+  realmLayer,
   settingsLayer,
+  withoutOwned,
   writeWritableLayer,
 } from "./mod.ts";
 
@@ -171,4 +173,46 @@ Deno.test("the mod layer carries what D2SE sets: hardcore, and the Glide wrapper
   assertEquals(settingsLayer({ renderer: "ddraw", windowed: true, hardcore: true }).entries, [
     { key: D2, name: "AllowHardcore", value: { type: "dword", data: 1 } },
   ]);
+});
+
+Deno.test("a mod's realm becomes a gateway list of its own, and BNETIP", () => {
+  assertEquals(realmLayer(null), null);
+  assertEquals(realmLayer({ gateway: " ", timezone: "1", gatewayName: "X", selected: null }), null);
+  const layer = realmLayer({ gateway: "realm.diablo09.com", timezone: "1", gatewayName: "Diablo 09", selected: "1" })!;
+  assertEquals(layer.role, "mod");
+  assertEquals(layer.entries, [
+    {
+      key: GATEWAYS,
+      name: "Diablo II Battle.net gateways",
+      value: { type: "multi_sz", data: ["1002", "01", "realm.diablo09.com", "1", "Diablo 09"] },
+    },
+    { key: D2, name: "BNETIP", value: { type: "sz", data: "realm.diablo09.com" } },
+  ]);
+  // Empty fields fall back to the game's own defaults: first entry, timezone 0, the host as its name.
+  assertEquals(
+    realmLayer({ gateway: "play.example.net", timezone: null, gatewayName: null, selected: null })!.entries[0],
+    {
+      key: GATEWAYS,
+      name: "Diablo II Battle.net gateways",
+      value: { type: "multi_sz", data: ["1002", "00", "play.example.net", "0", "play.example.net"] },
+    },
+  );
+});
+
+Deno.test("a run's rewrite of the gateway list does not outlive the mod's realm", () => {
+  const realm = realmLayer({ gateway: "realm.diablo09.com", timezone: "1", gatewayName: "Diablo 09", selected: null });
+  const writable = {
+    id: "writable",
+    role: "writable" as const,
+    entries: [
+      {
+        key: "hkcu\\software\\battle.net\\configuration",
+        name: "Diablo II Battle.net gateways",
+        value: { type: "multi_sz" as const, data: ["1002", "00", "uswest.battle.net", "8", "U.S. West"] },
+      },
+      { key: D2, name: "Gamma", value: { type: "dword" as const, data: 100 } },
+    ],
+  };
+  assertEquals(withoutOwned(writable, realm).entries.map((entry) => entry.name), ["Gamma"]);
+  assertEquals(withoutOwned(writable, null), writable);
 });

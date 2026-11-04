@@ -37,6 +37,9 @@ const SYMBOLS = {
   SetWindowPos: { parameters: ["pointer", "pointer", "i32", "i32", "i32", "i32", "u32"], result: "bool" },
   ShowWindow: { parameters: ["pointer", "i32"], result: "bool" },
   IsZoomed: { parameters: ["pointer"], result: "bool" },
+  IsIconic: { parameters: ["pointer"], result: "bool" },
+  SetForegroundWindow: { parameters: ["pointer"], result: "bool" },
+  AllowSetForegroundWindow: { parameters: ["u32"], result: "bool" },
   MonitorFromWindow: { parameters: ["pointer", "u32"], result: "pointer" },
   GetMonitorInfoW: { parameters: ["pointer", "buffer"], result: "bool" },
   GetCursorPos: { parameters: ["buffer"], result: "bool" },
@@ -67,6 +70,7 @@ const GWL_STYLE = -16;
 const WS_CAPTION = 0x00c00000;
 const WS_THICKFRAME = 0x00040000;
 const SW_HIDE = 0;
+const SW_SHOW = 5;
 const SW_MINIMIZE = 6;
 const SW_RESTORE = 9;
 const VK_LBUTTON = 0x01;
@@ -398,6 +402,37 @@ export function toggleMaximizeWindow(): { ok: boolean; maximized: boolean } {
   const user = lib();
   const hwnd = user && findOwnWindow(user);
   return { ok, maximized: user && hwnd ? maximized(user, hwnd) : restoreRect !== null };
+}
+
+/**
+ * Brings the window to the front, restored if it was minimized: what a second Exordium asks of
+ * this one before it exits. Windows lets a background process take the foreground only when the
+ * process the user just started allows it (allowForeground, called by that second Exordium).
+ */
+export function focusWindow(): boolean {
+  return withWindow((user, hwnd) => {
+    if (user.symbols.IsIconic(hwnd)) {
+      if (native) post(user, hwnd, WM_SYSCOMMAND, SC_RESTORE);
+      else user.symbols.ShowWindow(hwnd, SW_RESTORE);
+    }
+    user.symbols.SetForegroundWindow(hwnd);
+  });
+}
+
+/** Lets process `pid` take the foreground; see focusWindow. */
+export function allowForeground(pid: number): boolean {
+  const user = lib();
+  return user ? user.symbols.AllowSetForegroundWindow(pid) : false;
+}
+
+/** Hides the window: a second Exordium handing over to the first never shows its own. */
+export function hideWindow(): boolean {
+  return withWindow((user, hwnd) => user.symbols.ShowWindow(hwnd, SW_HIDE));
+}
+
+/** Shows the window again after hideWindow, when the hand-over failed. */
+export function showWindow(): boolean {
+  return withWindow((user, hwnd) => user.symbols.ShowWindow(hwnd, SW_SHOW));
 }
 
 export function closeWindow(): boolean {

@@ -41,7 +41,9 @@ import {
   machineSnapshot,
   parseHiveText,
   readWritableLayer,
+  realmLayer,
   settingsLayer,
+  withoutOwned,
   writeWritableLayer,
 } from "@exordium/registry";
 import {
@@ -134,10 +136,14 @@ import { translate } from "./translate.ts";
 import { powerShellLiteral, runPowerShellHidden } from "./windows-hidden-process.ts";
 import { hardenedWebViewEnv, startDetached, watchWebView } from "./webview.ts";
 import {
+  allowForeground,
   closeWindow,
+  focusWindow,
+  hideWindow,
   minimizeWindow,
   prepareWindow,
   setUpWindow,
+  showWindow,
   startWindowDrag,
   startWindowResize,
   toggleMaximizeWindow,
@@ -300,6 +306,8 @@ async function windowRoute(url: URL): Promise<Response> {
       return Response.json(toggleMaximizeWindow());
     case "close":
       return Response.json({ ok: closeWindow() });
+    case "focus":
+      return Response.json({ ok: focusWindow() });
     case "drag":
       return Response.json(startWindowDrag());
     case "resize":
@@ -1435,10 +1443,13 @@ async function realiseD2SEBox(
   lap("machineSnapshot");
   const base = { id: "machine", role: "base" as const, entries: snapshot.entries };
   const settings = settingsLayer(loader.settings);
+  // The mod's own realm, over the machine's gateway list; what earlier runs wrote there is dropped.
+  const realm = realmLayer(setup.realm);
+  const mods = realm ? [settings, realm] : [settings];
   const box = boxLayer(gamePath(realised.folder));
-  const writable = await readWritableLayer(exordiumRoot, id);
-  const registry = resolve({ files: [], registry: [base, settings, box, writable] }).registry;
-  const lowerRegistry = resolve({ files: [], registry: [base, settings, box] }).registry;
+  const writable = withoutOwned(await readWritableLayer(exordiumRoot, id), realm);
+  const registry = resolve({ files: [], registry: [base, ...mods, box, writable] }).registry;
+  const lowerRegistry = resolve({ files: [], registry: [base, ...mods, box] }).registry;
   const hive = await installRegistry(boxes.folder(id), registry, lowerRegistry, copy);
   lap("registry");
   const title = target.kind === "mod"
@@ -4188,17 +4199,20 @@ async function restartForUpdate(): Promise<void> {
   Deno.exit(0);
 }
 
-// ---- One Exordium at a time: `--play` from a desktop shortcut -------------------------------------
+// ---- One Exordium at a time -----------------------------------------------------------------------
 
 const instanceFile = `${exordiumRoot}/instance.json`;
 
 /**
- * Started with `--play <key>` (a desktop shortcut): when another Exordium is already open, it is
- * asked to play the title and this one exits; otherwise this one plays it.
+ * When another Exordium is already open, this one hands over to it and exits: started with
+ * `--play <key>` (a desktop shortcut) it asks that one to play the title; started plainly (the
+ * Start menu, the taskbar, the exe) it asks that one to come to the front. With no other Exordium,
+ * this one stays and plays the title, if it was given one.
  *
- * The Exordium a shortcut hands over to is the one recorded in `instance.json`. A new one claims
- * the file only when the recorded one no longer answers: a second Exordium opened alongside (a dev
- * server, say) must not take the shortcuts away from the one the player is looking at.
+ * The Exordium handed over to is the one recorded in `instance.json`. A new one claims the file
+ * only when the recorded one no longer answers: a second Exordium opened alongside (a dev server,
+ * say) must not take the shortcuts away from the one the player is looking at. A dev server never
+ * hands over, so it can run beside the installed app.
  */
 async function startInstance(): Promise<void> {
   const at = Deno.args.indexOf("--play");
@@ -4210,18 +4224,25 @@ async function startInstance(): Promise<void> {
     : null;
 
   const other = await answeringInstance();
-  if (body && other) {
+  if (other && (body || !isDev)) {
+    hideWindow();
+    // This process was just started by the player, so Windows lets it hand the foreground over.
+    allowForeground(other.pid);
     try {
-      const response = await fetch(`http://127.0.0.1:${other.port}/api/play`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(20_000),
-      });
+      const response = body
+        ? await fetch(`http://127.0.0.1:${other.port}/api/play`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          signal: AbortSignal.timeout(20_000),
+        })
+        : await fetch(`http://127.0.0.1:${other.port}/api/window/focus`, { signal: AbortSignal.timeout(5_000) });
+      await response.body?.cancel();
       if (response.ok || response.status === 409 || response.status === 422) Deno.exit(0);
     } catch {
-      // It stopped answering in between: this one plays.
+      // It stopped answering in between: this one stays.
     }
+    showWindow();
   }
   if (!other) {
     await Deno.mkdir(exordiumRoot, { recursive: true });
