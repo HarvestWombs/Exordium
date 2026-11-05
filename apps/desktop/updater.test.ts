@@ -3,8 +3,10 @@ import {
   compareVersions,
   FILE_LIST,
   type FileList,
+  newestFeedTag,
   pickRelease,
   type Release,
+  releaseNotes,
   sha256Hex,
   SIGNATURE_FILE,
   sweepUpdate,
@@ -249,3 +251,30 @@ for (
     }
   });
 }
+
+Deno.test("patch notes keep the newest releases, the installed one always, drafts never", () => {
+  const list = [
+    release("v0.2.1", { body: "two one" }),
+    release("v0.3.0-beta.1", { prerelease: true }),
+    release("v0.2.3", { name: "Exordium 0.2.3", body: "## Fixes\n- window" }),
+    release("v0.2.4", { draft: true }),
+    release("v0.2.2"),
+  ];
+  assertEquals(releaseNotes(list, "0.2.2", false).map((r) => r.version), ["0.2.3", "0.2.2", "0.2.1"]);
+  assertEquals(releaseNotes(list, "0.2.2", true).map((r) => r.version), ["0.3.0-beta.1", "0.2.3", "0.2.2", "0.2.1"]);
+  // Running a pre-release: its own notes stay, though pre-releases are not offered.
+  assertEquals(releaseNotes(list, "0.3.0-beta.1", false)[0]?.version, "0.3.0-beta.1");
+  const newest = releaseNotes(list, "0.2.2", false)[0]!;
+  assertEquals([newest.name, newest.notes], ["Exordium 0.2.3", "## Fixes\n- window"]);
+  assertEquals(releaseNotes([release("v0.2.1", { name: null })], "0.2.1", false)[0]?.name, "Exordium 0.2.1");
+});
+
+Deno.test("the releases feed names its newest version tag", () => {
+  const atom = `<feed>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/x/y/releases/tag/v0.2.2"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/x/y/releases/tag/v0.2.10"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/x/y/releases/tag/nightly"/></entry>
+  </feed>`;
+  assertEquals(newestFeedTag(atom), "0.2.10");
+  assertEquals(newestFeedTag("<feed></feed>"), null);
+});

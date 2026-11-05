@@ -520,7 +520,11 @@ button:disabled {
   min-width: 0;
   overflow-y: auto;
   padding: 32px;
-  max-width: 1080px;
+}
+
+.settings-column {
+  /* The page's old measure: 1080px less its padding. */
+  max-width: 1016px;
 }
 
 .settings-page-head {
@@ -872,16 +876,6 @@ button:disabled {
   width: 80px;
 }
 
-.statusbar.accent {
-  background: var(--accent-wash);
-  border-top-color: var(--accent);
-  color: var(--text);
-}
-
-.statusbar.accent strong {
-  color: var(--text-strong);
-}
-
 /* One line, whatever the message: the bar's height never changes. */
 .statusbar-text {
   flex: 1;
@@ -930,16 +924,24 @@ button:disabled {
   --toast-pad: 10px 12px;
 }
 
+/*
+ * Every toast: the card tinted by its tone (accent, good, bad), a badge, an eyebrow, then its words
+ * and actions. The tone sets --tone; text stays in the page's own colours.
+ */
 .toast {
+  --tone: var(--accent);
+  --tone-wash: var(--accent-wash);
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 14px;
   padding: var(--toast-pad);
-  border: 1px solid;
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, var(--line-strong));
   border-radius: 8px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tone) 10%, var(--card)), var(--card) 60%);
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.45);
+  color: var(--text);
   font-size: var(--toast-text);
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -947,46 +949,152 @@ button:disabled {
   animation: toast-in 0.15s ease-out;
 }
 
-.toast.bad {
-  --toast-ground: var(--bad-wash);
-  --toast-tone: var(--bad);
-  border-color: var(--bad-border);
-  background: var(--toast-ground);
-  color: var(--danger);
-}
-
 .toast.good {
-  --toast-ground: var(--good-wash);
-  --toast-tone: var(--good);
-  border-color: var(--good-border);
-  background: var(--toast-ground);
-  color: var(--good);
+  --tone: var(--good);
+  --tone-wash: var(--good-wash);
 }
 
-.toast.accent {
-  border-color: var(--accent);
-  background: var(--accent-wash);
-  color: var(--text);
+.toast.bad {
+  --tone: var(--bad);
+  --tone-wash: var(--bad-wash);
 }
 
-.toast.accent strong {
+.toast-badge {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 2.4em;
+  height: 2.4em;
+  border-radius: 50%;
+  background: var(--tone-wash);
+  color: var(--tone);
+}
+
+.toast-badge svg {
+  width: 55%;
+  height: 55%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toast.bad .toast-badge svg {
+  stroke-width: 2.8;
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-eyebrow {
+  color: var(--tone);
+  font-size: 0.68em;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.toast-title {
+  color: var(--text-strong);
+  font-family: var(--display);
+  font-size: 1.1em;
+}
+
+.toast-message {
   color: var(--text-strong);
 }
 
-/* The time left: a bar a step darker than the toast, emptying along a strip lighter than it. */
+.toast-text {
+  color: var(--text-dim);
+  font-size: 0.86em;
+}
+
+.toast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.74em;
+  font-variant-numeric: tabular-nums;
+}
+
+.toast-chip .next {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.toast-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0.45em 1em;
+  border: 0;
+  border-radius: 4px;
+  background: var(--action);
+  color: var(--action-ink);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+
+.toast-primary:hover {
+  background: var(--action-hover);
+}
+
+.toast-primary svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toast-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.86em;
+}
+
+.toast-link:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The time left on an error or notice: a thin bar in its tone along the bottom, emptying. */
 .toast-timer {
   position: absolute;
-  top: 0;
   left: 0;
   right: 0;
-  height: 6px;
-  background: color-mix(in srgb, var(--toast-ground) 55%, var(--toast-tone));
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--tone) 18%, transparent);
 }
 
 .toast-timer span {
   display: block;
   height: 100%;
-  background: color-mix(in srgb, var(--toast-ground) 75%, black);
+  background: var(--tone);
   transform-origin: left;
   animation: toast-countdown linear forwards;
 }
@@ -1001,22 +1109,8 @@ button:disabled {
   display: none;
 }
 
-.toast-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.toast-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.toast .ghost {
-  font-size: inherit;
+.toast-close:hover {
+  color: var(--text-strong);
 }
 
 .toast-close {
@@ -1024,7 +1118,7 @@ button:disabled {
   padding: 0 2px;
   border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--text-dim);
   font-size: 1.3em;
   line-height: 1.2;
 }
@@ -5673,25 +5767,110 @@ fieldset legend {
 }
 
 .update-row p,
-.update-notes p {
-  margin: 4px 0 0;
-}
-
 .update-row .row-actions {
   justify-content: flex-end;
 }
 
-.update-notes {
+.patch-notes {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.update-notes-text {
-  max-height: 220px;
-  overflow-y: auto;
-  white-space: pre-wrap;
+.patch-notes-list {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.patch-note + .patch-note {
+  border-top: 1px solid var(--line);
+}
+
+.patch-note-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.patch-note-head:hover {
+  background: var(--raised);
+}
+
+.patch-note-head .muted {
+  margin-left: auto;
+}
+
+.patch-note-chevron {
+  display: inline-block;
+  width: 10px;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+
+.patch-note.open .patch-note-chevron {
+  transform: rotate(90deg);
+}
+
+.patch-note-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.patch-note-tag.new {
+  border-color: var(--good-border);
+  background: var(--good-wash);
+  color: var(--good);
+}
+
+.patch-note-body {
+  padding: 2px 14px 14px 32px;
+}
+
+.release-notes-text {
   color: var(--text);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+
+.release-notes-text h4 {
+  margin: 12px 0 4px;
+  color: var(--text-strong);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.release-notes-text h4:first-child {
+  margin-top: 4px;
+}
+
+.release-notes-text ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.release-notes-text li + li {
+  margin-top: 4px;
+}
+
+.release-notes-text p {
+  margin: 6px 0;
+}
+
+.release-notes-text code {
+  font-size: 12px;
+}
+
+.patch-note-body .small-button {
+  margin-top: 8px;
 }
 
 .update-progress {

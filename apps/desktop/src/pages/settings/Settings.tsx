@@ -85,18 +85,21 @@ export function AppSettings(
           </button>
         ))}
       </aside>
+      {/* The page scrolls across its full width, so the scrollbar sits at the window's edge; the column inside keeps its measure. */}
       <div className="settings-page">
-        {problem && <p className="error">{problem}</p>}
-        {!app ? <p className="muted">{tr("Reading settings…")}</p> : (
-          <SettingsSectionView
-            section={section}
-            app={app}
-            status={status}
-            busy={busy}
-            onPatch={patchSettings}
-            onDiscordChanged={onChanged}
-          />
-        )}
+        <div className="settings-column">
+          {problem && <p className="error">{problem}</p>}
+          {!app ? <p className="muted">{tr("Reading settings…")}</p> : (
+            <SettingsSectionView
+              section={section}
+              app={app}
+              status={status}
+              busy={busy}
+              onPatch={patchSettings}
+              onDiscordChanged={onChanged}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -319,9 +322,9 @@ export function SettingsSectionView(
         <UpdatesPanel status={status} />
         <SettingsGroup title={tr("Policy")}>
           <ToggleRow
-            label={tr("Check on startup")}
+            label={tr("Check automatically")}
             hint={tr(
-              "Look for a new Exordium when it opens and download it in the background. Nothing changes until you restart to update.",
+              "Look for a new Exordium when it opens and every 15 minutes while it runs, and download it in the background. Nothing changes until you restart to update.",
             )}
             checked={s.updates.checkOnStartup}
             disabled={busy}

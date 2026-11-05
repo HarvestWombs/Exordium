@@ -1,5 +1,6 @@
 import { formatDate, formatDateTime, tr } from "../lib/i18n.ts";
 import * as React from "react";
+import { ReleaseNotesText } from "../components/ReleaseNotes.tsx";
 import { SettingsGroup } from "../components/settings-rows.tsx";
 import { openLink } from "../lib/util.ts";
 import type { Status, UpdateView } from "../types.ts";
@@ -13,6 +14,61 @@ export async function applyUpdate(): Promise<void> {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? tr("The update could not be applied."));
+}
+
+/**
+ * Every release's notes the last check brought, newest first, as an accordion: one open at a time,
+ * the newest to begin with. The installed version and the one on offer say so.
+ */
+function PatchNotes(
+  { releases, current, next }: { releases: UpdateView["releases"]; current: string; next: string | null },
+) {
+  // Null: the newest is open. "": the player closed them all.
+  const [open, setOpen] = React.useState<string | null>(null);
+  const shown = open ?? releases[0]?.version ?? "";
+  return (
+    <div className="settings-row patch-notes">
+      <div>
+        <strong>{tr("Patch notes")}</strong>
+        {releases.length === 0
+          ? <p className="muted small">{tr("Check for updates to read what each version changed.")}</p>
+          : (
+            <div className="patch-notes-list">
+              {releases.map((release) => {
+                const expanded = shown === release.version;
+                return (
+                  <section key={release.version} className={expanded ? "patch-note open" : "patch-note"}>
+                    <button
+                      type="button"
+                      className="patch-note-head"
+                      aria-expanded={expanded}
+                      onClick={() => setOpen(expanded ? "" : release.version)}
+                    >
+                      <span className="patch-note-chevron" aria-hidden="true">›</span>
+                      <strong>{release.name}</strong>
+                      {release.version === next && <span className="patch-note-tag new">{tr("New")}</span>}
+                      {release.version === current && <span className="patch-note-tag">{tr("Installed")}</span>}
+                      {release.prerelease && <span className="patch-note-tag">{tr("Pre-release")}</span>}
+                      {release.publishedAt && <span className="muted small">{formatDate(release.publishedAt)}</span>}
+                    </button>
+                    {expanded && (
+                      <div className="patch-note-body">
+                        {release.notes
+                          ? <ReleaseNotesText text={release.notes} />
+                          : <p className="muted small">{tr("No notes for this version.")}</p>}
+                        <button type="button" className="small-button" onClick={() => openLink(release.url)}>
+                          {tr("Release page ↗")}
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          )}
+      </div>
+    </div>
+  );
 }
 
 /** Settings > Updates: the running version, what GitHub has, and the one button that fits. */
@@ -119,25 +175,7 @@ export function UpdatesPanel({ status }: { status: Status }) {
             )}
         </div>
       </div>
-      {update && (view.phase === "available" || view.phase === "downloading" || view.phase === "ready") && (
-        <div className="settings-row update-notes">
-          <div>
-            <strong>
-              {update.name}
-              {update.prerelease ? tr(" · pre-release") : ""}
-            </strong>
-            {update.publishedAt && (
-              <p className="muted small">
-                {tr("Released {date}", { date: formatDate(update.publishedAt) })}
-              </p>
-            )}
-            {update.notes && <p className="update-notes-text">{update.notes}</p>}
-            <button type="button" className="small-button" onClick={() => openLink(update.url)}>
-              {tr("Release page ↗")}
-            </button>
-          </div>
-        </div>
-      )}
+      <PatchNotes releases={view.releases ?? []} current={view.current} next={update?.version ?? null} />
       {problem && <p className="bad-text small">{problem}</p>}
     </SettingsGroup>
   );

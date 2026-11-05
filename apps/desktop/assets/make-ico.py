@@ -6,9 +6,9 @@ later accept at any size, and which keeps the alpha channel.
 
 The artwork is the sealed cube alone on transparency (no tile; 2026-10-14, replacing the book). Its
 stone is dark grey, so the sizes up to 32px are lifted a little with contrast and brightness and
-sharpened, which keeps the stone from sinking into a dark taskbar while the orange seams carry the
-shape. 48px and up are the artwork as drawn. The source is `icon ideas/box 2.png`, cropped to the
-cube and padded square.
+sharpened, which keeps the stone from sinking into a dark taskbar while the glowing seams carry the
+shape. 48px and up are the artwork as drawn. The source is `icon ideas/box 3.png` (the cube
+recoloured blue, 2026-11-05), already square on transparency, scaled to 256px as exordium-icon.png.
 
 The .ico is committed; run this again when the artwork changes (needs Pillow):
 

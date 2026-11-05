@@ -71,8 +71,13 @@ export function playTime(seconds: number): string {
   return tr("{hours} h", { hours: hours < 100 ? formatDecimal(hours) : Math.round(hours) });
 }
 
+/**
+ * A title's folder, written the way its system writes paths: all backslashes for a Windows path (the
+ * library root arrives with forward slashes), all forward slashes otherwise.
+ */
 export function installLocation(root: string, t: Title): string {
-  return t.kind === "core" ? `${root}\\cores\\${t.folder}` : `${root}\\mods\\${t.folder}`;
+  const path = `${root}/${t.kind === "core" ? "cores" : "mods"}/${t.folder}`;
+  return /^[a-z]:|\\/i.test(root) ? path.replace(/\//g, "\\") : path.replace(/\\/g, "/");
 }
 
 export function relative(iso: string): string {

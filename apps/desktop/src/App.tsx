@@ -720,6 +720,14 @@ export function App() {
       <Toasts
         toasts={toasts}
         size={appearance?.toastSize ?? "large"}
+        update={readyUpdate
+          ? {
+            ...readyUpdate,
+            onRestart: () => void applyUpdate().catch(reportError),
+            onLater: () => setUpdateLater(readyUpdate.version),
+            onNotes: () => openSettings("updates"),
+          }
+          : null}
         onDismiss={dismissToast}
         reminder={view === "library" && !reviewMods && !reminderClosed && scan?.root === root &&
             scan && scan.importableMods.length > 0 && status?.appSettings.settings.library.importReminder
@@ -739,7 +747,6 @@ export function App() {
           : null}
       />
       <StatusBar
-        update={readyUpdate}
         download={downloadStatus}
         onDownloads={() => openBrowse("downloads")}
         activity={preparationSummary(status?.preparing[0]) ?? activity ??
@@ -755,8 +762,6 @@ export function App() {
             cores: plural(scan.cores.length, "{count} core", "{count} cores"),
           })
           : tr("Library: not read yet")}
-        onRestart={() => void applyUpdate().catch(reportError)}
-        onLater={() => setUpdateLater(status?.update.version ?? null)}
       />
 
       {dialog && selected && root && (

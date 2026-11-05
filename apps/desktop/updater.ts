@@ -78,12 +78,62 @@ export interface AvailableUpdate {
 
 export type UpdatePhase = "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "failed";
 
+/** One release's notes, for the patch notes on the Updates page. */
+export interface ReleaseNotes {
+  version: string;
+  name: string;
+  notes: string;
+  url: string;
+  publishedAt: string | null;
+  prerelease: boolean;
+}
+
+/** How many releases' notes a check keeps. */
+const NOTES_KEPT = 10;
+
+/**
+ * The newest releases' notes, newest first: drafts never, pre-releases only when asked for, and the
+ * running version's own always, so the page can say what the installed version brought.
+ */
+export function releaseNotes(releases: Release[], current: string, includePrereleases: boolean): ReleaseNotes[] {
+  return releases
+    .filter((release) => !release.draft && parseVersion(release.tag_name))
+    .map((release) => ({ release, version: release.tag_name.replace(/^v/, "") }))
+    .filter(({ release, version }) => !release.prerelease || includePrereleases || version === current)
+    .sort((a, b) => compareVersions(b.version, a.version))
+    .slice(0, NOTES_KEPT)
+    .map(({ release, version }) => ({
+      version,
+      name: release.name?.trim() || `Exordium ${version}`,
+      notes: release.body?.trim() ?? "",
+      url: release.html_url,
+      publishedAt: release.published_at,
+      prerelease: release.prerelease,
+    }));
+}
+
+/**
+ * The newest version tag in a repository's releases feed (`releases.atom`), or null. The feed is a
+ * plain page, outside the API's 60-an-hour limit, so a running Exordium can look at it often and
+ * read the releases from the API only when it names something new.
+ */
+export function newestFeedTag(atom: string): string | null {
+  let newest: string | null = null;
+  for (const match of atom.matchAll(/\/releases\/tag\/([^"'<>\s]+)/g)) {
+    const tag = decodeURIComponent(match[1]!).replace(/^v/, "");
+    if (parseVersion(tag) && (newest === null || compareVersions(tag, newest) > 0)) newest = tag;
+  }
+  return newest;
+}
+
 export interface UpdateState {
   phase: UpdatePhase;
   current: string;
   repo: string;
   checkedAt: string | null;
   update: AvailableUpdate | null;
+  /** The newest releases' notes from the last check that reached GitHub. */
+  releases: ReleaseNotes[];
   received: number;
   error: string | null;
 }
@@ -261,6 +311,7 @@ export class Updater {
       repo: this.repo,
       checkedAt: null,
       update: null,
+      releases: [],
       received: 0,
       error: null,
     };
@@ -285,6 +336,22 @@ export class Updater {
     return headers;
   }
 
+  /** The newest version the releases feed names (newestFeedTag); null when it cannot be read. */
+  async feedVersion(): Promise<string | null> {
+    try {
+      const response = await this.#fetch(`https://github.com/${this.repo}/releases.atom`, {
+        headers: this.#headers("application/atom+xml"),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        return null;
+      }
+      return newestFeedTag(await response.text());
+    } catch {
+      return null;
+    }
+  }
+
   /** Reads the releases; an update already downloaded and ready stays ready. */
   async check(includePrereleases: boolean): Promise<UpdateState> {
     if (this.busy) return this.state;
@@ -302,12 +369,21 @@ export class Updater {
         await response.body?.cancel();
         throw new UpdateError(`GitHub did not answer (${response.status}).`);
       }
-      const update = pickRelease(await response.json() as Release[], this.#state.current, includePrereleases);
+      const list = await response.json() as Release[];
+      const update = pickRelease(list, this.#state.current, includePrereleases);
+      const releases = releaseNotes(list, this.#state.current, includePrereleases);
       const checkedAt = new Date().toISOString();
       if (ready && update && ready.version === update.version) {
-        this.#state = { ...this.#state, phase: "ready", update: ready, checkedAt };
+        this.#state = { ...this.#state, phase: "ready", update: ready, releases, checkedAt };
       } else {
-        this.#state = { ...this.#state, phase: update ? "available" : "current", update, checkedAt, received: 0 };
+        this.#state = {
+          ...this.#state,
+          phase: update ? "available" : "current",
+          update,
+          releases,
+          checkedAt,
+          received: 0,
+        };
       }
     } catch (error) {
       this.#state = {

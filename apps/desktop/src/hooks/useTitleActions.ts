@@ -1,6 +1,7 @@
 import { plural, tr } from "../lib/i18n.ts";
 import type * as React from "react";
 import type { ConfirmRequest, Status, Title, TitleAction } from "../types.ts";
+import { installLocation } from "../lib/util.ts";
 
 async function library(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const response = await fetch(`/api/library/${path}`, {
@@ -103,7 +104,8 @@ export function useTitleActions(
           const characters = response.ok ? ((await response.json()).characters as unknown[]).length : 0;
           confirm({
             title: tr("Uninstall {title}?", { title: t.title }),
-            body: tr("This deletes {path} from Exordium's library.", { path: `${root}\\mods\\${t.folder}` }) +
+            body:
+              tr("This deletes {path} from Exordium's library.", { path: root ? installLocation(root, t) : t.folder }) +
               (characters
                 ? plural(
                   characters,

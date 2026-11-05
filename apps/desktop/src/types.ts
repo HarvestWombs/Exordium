@@ -469,6 +469,15 @@ export interface UpdateView {
     prerelease: boolean;
     asset: { name: string; size: number };
   } | null;
+  /** The newest releases' notes, newest first, from the last check that reached GitHub. */
+  releases: {
+    version: string;
+    name: string;
+    notes: string;
+    url: string;
+    publishedAt: string | null;
+    prerelease: boolean;
+  }[];
 }
 
 export interface LogFile {

@@ -132,7 +132,7 @@ import {
   type TransferMode,
   type UnpackedMod,
 } from "./library-setup.ts";
-import { APP_VERSION, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
+import { APP_VERSION, compareVersions, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
 import { translate } from "./translate.ts";
 import { powerShellLiteral, runPowerShellHidden } from "./windows-hidden-process.ts";
@@ -4233,6 +4233,32 @@ async function checkAndDownload(includePrereleases: boolean): Promise<void> {
   notify("status");
 }
 
+/** How often a running Exordium looks at the releases feed. */
+const RELEASE_POLL_MS = 15 * 60_000;
+/** The newest version the feed named last time: only a new one is read from the API. */
+let feedSeen: string | null = null;
+
+/**
+ * GitHub cannot call a desktop app (a webhook needs a server it can reach), so a running Exordium
+ * looks instead: the releases feed every RELEASE_POLL_MS, which costs no API calls, and the full check
+ * and download only when the feed names a version newer than this one that it has not named before.
+ */
+async function pollReleases(): Promise<void> {
+  const settings = appSettingsFromState(await readState());
+  if (!settings.updates.checkOnStartup || settings.privacy.localOnly || updater.busy) return;
+  const newest = await updater.feedVersion();
+  if (newest === null || newest === feedSeen) return;
+  feedSeen = newest;
+  if (compareVersions(newest, updater.state.current) <= 0) return;
+  if (updater.state.phase === "ready" && updater.state.update?.version === newest) return;
+  await checkAndDownload(settings.updates.includePrereleases);
+}
+
+setInterval(
+  () => void pollReleases().catch((error) => appLog("warn", `release feed: ${error.message}`)),
+  RELEASE_POLL_MS,
+);
+
 /**
  * GET: the updater's state. POST `{ action }`: "check" (and download what it finds), "download", or
  * "apply", which swaps the files in and restarts Exordium. Applying waits for every game to close:
@@ -4377,7 +4403,9 @@ async function restartApp(): Promise<void> {
 async function answeringInstance(): Promise<{ pid: number; port: number } | null> {
   try {
     const other = JSON.parse(await Deno.readTextFile(instanceFile)) as { pid: number; port: number };
-    if (other.pid === Deno.pid) return null;
+    // A record left by a run that did not exit cleanly can name the port this one now has: what
+    // answers there is this very server, not another Exordium to hand over to.
+    if (other.pid === Deno.pid || other.port === server.addr.port) return null;
     const response = await fetch(`http://127.0.0.1:${other.port}/api/status`, { signal: AbortSignal.timeout(2_000) });
     await response.body?.cancel();
     return response.ok ? other : null;

@@ -31,6 +31,13 @@ function readTip(target: HTMLElement): Tip | null {
 export function TooltipLayer() {
   const [tip, setTip] = React.useState<Tip | null>(null);
   const timer = React.useRef<number | null>(null);
+  // The tip's own width, once drawn: a tip above or below is kept inside the window by that, so
+  // neighbouring targets near an edge (the window controls) each keep their tip beside them.
+  const box = React.useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = React.useState(0);
+  React.useLayoutEffect(() => {
+    setWidth(box.current?.offsetWidth ?? 0);
+  }, [tip?.target, tip?.text]);
 
   React.useEffect(() => {
     const cancel = () => {
@@ -108,7 +115,7 @@ export function TooltipLayer() {
     ? tip.rect.right + 8
     : placement === "left"
     ? tip.rect.left - 8
-    : Math.min(globalThis.innerWidth - 132, Math.max(132, tip.rect.left + tip.rect.width / 2));
+    : Math.min(globalThis.innerWidth - width / 2 - 8, Math.max(width / 2 + 8, tip.rect.left + tip.rect.width / 2));
   const top = placement === "bottom"
     ? tip.rect.bottom + 8
     : placement === "top"
@@ -117,6 +124,7 @@ export function TooltipLayer() {
 
   return (
     <div
+      ref={box}
       className="app-tooltip"
       data-placement={placement}
       role="tooltip"
