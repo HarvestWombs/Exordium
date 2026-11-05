@@ -9,8 +9,9 @@
  * The version is this folder's deno.json `version`: bump it before releasing. The zip holds only the
  * app's own files (APP_FILES), never what a run leaves beside them (exordium.json, boxes, logs...),
  * plus exordium-files.json listing each with its size and SHA-256, and exordium-files.json.sig, its
- * Ed25519 signature. Release notes come from release-notes.md beside this file when it exists, else
- * GitHub writes them from the commits.
+ * Ed25519 signature. `--publish` needs release notes, `release-notes/<version>.md` beside this file:
+ * what changed, for the player, not GitHub's link to the commits. Without them it stops before
+ * publishing anything.
  *
  * The signing key is a private JWK outside the repository: `EXORDIUM_SIGNING_KEY` names the file,
  * else `%USERPROFILE%\.exordium\release-signing-key.jwk`. `--keygen` writes it and prints the public
@@ -159,8 +160,12 @@ console.log(`Wrote ${zip}: ${list.files.length} files, ${(size / 1024 / 1024).to
 
 if (Deno.args.includes("--publish")) {
   const repo = Deno.env.get("EXORDIUM_UPDATE_REPO") ?? UPDATE_REPO;
-  const notes = `${here}/release-notes.md`;
-  const hasNotes = await Deno.stat(notes).then((s) => s.isFile, () => false);
+  const notes = `${here}/release-notes/${APP_VERSION}.md`;
+  const text = await Deno.readTextFile(notes).catch(() => "");
+  if (!text.trim()) {
+    console.error(`No release notes at ${notes}: write what changed in ${APP_VERSION} there, then publish again.`);
+    Deno.exit(1);
+  }
   const args = [
     "release",
     "create",
@@ -170,7 +175,8 @@ if (Deno.args.includes("--publish")) {
     repo,
     "--title",
     `Exordium ${APP_VERSION}`,
-    ...(hasNotes ? ["--notes-file", notes] : ["--generate-notes"]),
+    "--notes-file",
+    notes,
     ...(/-/.test(APP_VERSION) ? ["--prerelease"] : []),
   ];
   const result = await new Deno.Command(ghPath(), { args, stdout: "inherit", stderr: "inherit" }).output();

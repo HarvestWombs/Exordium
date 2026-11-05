@@ -4270,6 +4270,8 @@ async function updateRoute(request: Request): Promise<Response> {
       if (error instanceof UpdateError) return Response.json({ error: error.message }, { status: 500 });
       throw error;
     }
+    // The new copy opens where this one was: saved now, not on the next 3-second tick.
+    rememberPlacement();
     // After the answer has gone out, so the page knows to expect the restart.
     setTimeout(() => void restartForUpdate(), 300);
     return Response.json({ ok: true, restarting: true });
@@ -4355,6 +4357,7 @@ async function restartApp(): Promise<void> {
     appLog("error", "the WebView2 died again within ten minutes of a restart; not restarting again");
     return;
   }
+  rememberPlacement();
   await Deno.remove(instanceFile).catch(() => {});
   const args = Deno.args.filter((arg, i, all) => arg !== "--play" && all[i - 1] !== "--play");
   // The new one inherits this environment: when it was restarted, and the flag that keeps its
