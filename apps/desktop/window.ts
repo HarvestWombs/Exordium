@@ -24,8 +24,8 @@ import { nativeLibrary } from "./native.ts";
 const TITLE = "Exordium";
 const WIDTH = 1280;
 const HEIGHT = 800;
-const MIN_WIDTH = 1024;
-const MIN_HEIGHT = 640;
+const MIN_WIDTH = 1280;
+const MIN_HEIGHT = 720;
 
 const SYMBOLS = {
   FindWindowExW: { parameters: ["pointer", "pointer", "buffer", "pointer"], result: "pointer" },
@@ -41,6 +41,9 @@ const SYMBOLS = {
   SetForegroundWindow: { parameters: ["pointer"], result: "bool" },
   AllowSetForegroundWindow: { parameters: ["u32"], result: "bool" },
   MonitorFromWindow: { parameters: ["pointer", "u32"], result: "pointer" },
+  MonitorFromRect: { parameters: ["buffer", "u32"], result: "pointer" },
+  GetWindowPlacement: { parameters: ["pointer", "buffer"], result: "bool" },
+  SetWindowPlacement: { parameters: ["pointer", "buffer"], result: "bool" },
   GetMonitorInfoW: { parameters: ["pointer", "buffer"], result: "bool" },
   GetCursorPos: { parameters: ["buffer"], result: "bool" },
   GetAsyncKeyState: { parameters: ["i32"], result: "i16" },
@@ -75,6 +78,13 @@ const SW_MINIMIZE = 6;
 const SW_RESTORE = 9;
 const VK_LBUTTON = 0x01;
 const MONITOR_DEFAULTTONEAREST = 2;
+const MONITOR_DEFAULTTONULL = 0;
+const SW_SHOWNORMAL = 1;
+const SW_SHOWMINIMIZED = 2;
+const SW_SHOWMAXIMIZED = 3;
+const WPF_RESTORETOMAXIMIZED = 2;
+/** WINDOWPLACEMENT: length, flags, showCmd, ptMinPosition, ptMaxPosition, rcNormalPosition. */
+const PLACEMENT_SIZE = 44;
 // SWP_NOZORDER | SWP_NOACTIVATE
 const SWP_MOVE_ONLY = 0x0004 | 0x0010;
 // SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED
@@ -198,12 +208,70 @@ export function windowState(): { maximized: boolean } {
 }
 
 /**
- * Sizes the window at startup: WIDTH x HEIGHT, centred, never past the work area. Retried: the
- * window exists before this module runs but isn't always findable the moment the server binds.
+ * Where the window is: its restored rectangle (workspace coordinates, as Get/SetWindowPlacement
+ * use them) and whether it is maximized, also while minimized from maximized.
  */
-export async function setUpWindow(): Promise<boolean> {
+export interface WindowPlacement {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  maximized: boolean;
+}
+
+/** Re-maximized once the native frame is attached (prepareWindow), so it keeps clear of the taskbar. */
+let pendingMaximize = false;
+/** Set while a second Exordium hands over: its window stays hidden and is never placed. */
+let hidden = false;
+
+/** The window's placement now, or null without a window. */
+export function windowPlacement(): WindowPlacement | null {
+  const user = lib();
+  const hwnd = user && findOwnWindow(user);
+  if (!user || !hwnd || hidden) return null;
+  const buffer = new Int32Array(PLACEMENT_SIZE / 4);
+  buffer[0] = PLACEMENT_SIZE;
+  if (!user.symbols.GetWindowPlacement(hwnd, new Uint8Array(buffer.buffer))) return null;
+  const [, flags = 0, showCmd = 0] = buffer;
+  const [left = 0, top = 0, right = 0, bottom = 0] = buffer.slice(7, 11);
+  // Without the native frame, maximize is done by hand (restoreRect): the placement then holds the
+  // maximized rectangle as its normal one, which is not worth keeping.
+  if (!native && restoreRect) return null;
+  const maximized = showCmd === SW_SHOWMAXIMIZED ||
+    (showCmd === SW_SHOWMINIMIZED && (flags & WPF_RESTORETOMAXIMIZED) !== 0) ||
+    user.symbols.IsZoomed(hwnd);
+  return { left, top, right, bottom, maximized };
+}
+
+/** Whether a saved placement can come back: a sane size, with its middle on a monitor still there. */
+function placeable(user: User32, saved: WindowPlacement): boolean {
+  const width = saved.right - saved.left;
+  const height = saved.bottom - saved.top;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 200 || height < 150) return false;
+  const middleX = Math.round(saved.left + width / 2);
+  const middleY = Math.round(saved.top + height / 2);
+  const probe = new Int32Array([middleX, middleY, middleX + 1, middleY + 1]);
+  return user.symbols.MonitorFromRect(new Uint8Array(probe.buffer), MONITOR_DEFAULTTONULL) !== null;
+}
+
+/**
+ * Sizes the window at startup: where it was last time (`saved`), else WIDTH x HEIGHT, centred, never
+ * past the work area. Retried: the window exists before this module runs but isn't always findable
+ * the moment the server binds.
+ */
+export async function setUpWindow(saved: WindowPlacement | null = null): Promise<boolean> {
   for (let attempt = 0; attempt < 20; attempt++) {
+    if (hidden) return true;
     const done = withWindow((user, hwnd) => {
+      if (saved && placeable(user, saved)) {
+        const buffer = new Int32Array(PLACEMENT_SIZE / 4);
+        buffer[0] = PLACEMENT_SIZE;
+        buffer[2] = SW_SHOWNORMAL;
+        buffer.set([saved.left, saved.top, saved.right, saved.bottom], 7);
+        user.symbols.SetWindowPlacement(hwnd, new Uint8Array(buffer.buffer));
+        pendingMaximize = saved.maximized;
+        return;
+      }
       const rect = windowRect(user, hwnd);
       const area = workArea(user, hwnd);
       if (!rect || !area) return;
@@ -347,9 +415,11 @@ export async function prepareWindow(): Promise<boolean> {
   }
   if (native) {
     nudgeSize(user, hwnd);
+    if (pendingMaximize && !user.symbols.IsZoomed(hwnd)) post(user, hwnd, WM_SYSCOMMAND, SC_MAXIMIZE);
+    pendingMaximize = false;
     return true;
   }
-  return withWindow((user, hwnd) => {
+  const ok = withWindow((user, hwnd) => {
     // Both flags go: WS_CAPTION alone leaves WS_THICKFRAME's sizing border, which DWM paints and
     // claims a large top resize band over the page.
     const style = user.symbols.GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -357,6 +427,9 @@ export async function prepareWindow(): Promise<boolean> {
     user.symbols.SetWindowPos(hwnd, null, 0, 0, 0, 0, SWP_FRAME_ONLY);
     nudgeSize(user, hwnd);
   });
+  if (ok && pendingMaximize && !maximized(user, hwnd)) toggleMaximizeWindow();
+  pendingMaximize = false;
+  return ok;
 }
 
 /** A system command through the window's own procedure, so Windows animates it as usual. */
@@ -427,11 +500,13 @@ export function allowForeground(pid: number): boolean {
 
 /** Hides the window: a second Exordium handing over to the first never shows its own. */
 export function hideWindow(): boolean {
+  hidden = true;
   return withWindow((user, hwnd) => user.symbols.ShowWindow(hwnd, SW_HIDE));
 }
 
 /** Shows the window again after hideWindow, when the hand-over failed. */
 export function showWindow(): boolean {
+  hidden = false;
   return withWindow((user, hwnd) => user.symbols.ShowWindow(hwnd, SW_SHOW));
 }
 

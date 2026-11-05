@@ -179,6 +179,38 @@ Deno.test("a hashed import stacks into a box: game, core, mod, saves", async () 
   }
 });
 
+/** A mod imported by linking is file symlinks into the original folder; they count as its files. */
+Deno.test("file symlinks count as the mod's files; folder links and dangling links do not", async () => {
+  const root = await install();
+  const original = await Deno.makeTempDir({ prefix: "exordium-linked-" });
+  try {
+    const mod = `${root}/MODS/Linked`;
+    await Deno.mkdir(`${mod}/save`, { recursive: true });
+    await Deno.mkdir(`${original}/folder`);
+    await Deno.writeTextFile(`${original}/Linked.mpq`, "mod archive");
+    await Deno.writeTextFile(`${original}/Hero.d2s`, "a character");
+    await Deno.writeTextFile(`${original}/folder/inside.txt`, "behind a folder link");
+    await Deno.writeTextFile(
+      `${mod}/D2SE_SETUP.ini`,
+      "[Protected]\nD2Core=1.10f\nModMPQ1=Linked.mpq\n[END]\nendoffile=4711\n",
+    );
+    await Deno.symlink(`${original}/Linked.mpq`, `${mod}/Linked.mpq`, { type: "file" });
+    await Deno.symlink(`${original}/Hero.d2s`, `${mod}/save/Hero.d2s`, { type: "file" });
+    await Deno.symlink(`${original}/folder`, `${mod}/folder`, { type: "junction" });
+    await Deno.symlink(`${original}/gone.dll`, `${mod}/gone.dll`, { type: "file" });
+
+    const found = await readD2SE(root, { hash: false });
+    const linked = found!.mods.find((m) => m.folder === "Linked")!;
+    assertEquals(linked.problems, []);
+    assertEquals(linked.scan.layer.map((f) => [f.path, f.size]), [["Linked.mpq", 11]]);
+    assertEquals(linked.scan.writable.map((f) => f.path), ["save/Hero.d2s"]);
+    assertEquals(linked.scan.excluded.map((f) => f.path).sort(), ["D2SE_SETUP.ini", "folder", "gone.dll"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+    await Deno.remove(original, { recursive: true });
+  }
+});
+
 Deno.test("a folder that is not a D2SE install reads as null", async () => {
   const root = await Deno.makeTempDir();
   try {

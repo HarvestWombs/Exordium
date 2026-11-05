@@ -263,9 +263,6 @@ export function App() {
   }
   const { folderImport, setFolderImport, importArchive, importFolder, installCore } = useImports({
     root,
-    load,
-    openTitle,
-    say,
     reportError,
     onCoreStarted: () => void refreshCores(),
   });
@@ -284,7 +281,17 @@ export function App() {
     say,
     reportError,
     onSettled: incomingSettled,
+    // An archive is unpacked: its mods open in the converter, as a chosen folder's does.
+    onUnpacked: (archive, found) =>
+      setFolderImport(
+        found.map((mod) => ({ folder: mod.folder, title: mod.title, core: mod.core, path: mod.path, archive })),
+      ),
   });
+  // The converter lists the mods going in; an archive still unpacking is not one yet.
+  const converterImports = React.useMemo(
+    () => Object.fromEntries(Object.entries(conversions).filter(([, entry]) => entry.mode !== "unpack")),
+    [conversions],
+  );
   const { incoming: downloads, refresh: refreshDownloads, expectDraft } = useDownloads({
     root,
     load,
@@ -468,7 +475,10 @@ export function App() {
             void importFolder();
           }}
           onArchive={async () => {
-            if (await importArchive()) setImportOpen(false);
+            const started = await importArchive();
+            if (!started) return;
+            addConversion(started);
+            setImportOpen(false);
           }}
         />
       )}
@@ -590,7 +600,7 @@ export function App() {
               root={root}
               mods={reviewMods}
               hidden={!reviewShown}
-              queued={conversions}
+              queued={converterImports}
               onQueued={addConversion}
               onConfirm={setConfirmBox}
               onClose={() => {

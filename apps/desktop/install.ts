@@ -228,6 +228,108 @@ export interface InstallOptions {
 }
 
 /**
+ * How many bytes a zip unpacks to, from its central directory; 0 for any other archive, a Zip64 one,
+ * or one that cannot be read. Progress only: nothing depends on it being right.
+ */
+export async function zipUnpackedSize(archive: string): Promise<number> {
+  if (!/\.zip$/i.test(archive)) return 0;
+  let file: Deno.FsFile | null = null;
+  try {
+    file = await Deno.open(archive, { read: true });
+    const size = (await file.stat()).size;
+    // The end record is the last 22 bytes, plus a comment of up to 64 KB.
+    const tailLength = Math.min(size, 22 + 0xffff);
+    const tail = new Uint8Array(tailLength);
+    await file.seek(size - tailLength, Deno.SeekMode.Start);
+    if ((await readFull(file, tail)) < tailLength) return 0;
+    const view = new DataView(tail.buffer);
+    let end = -1;
+    for (let i = tailLength - 22; i >= 0; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        end = i;
+        break;
+      }
+    }
+    if (end < 0) return 0;
+    const count = view.getUint16(end + 10, true);
+    const directorySize = view.getUint32(end + 12, true);
+    const directoryOffset = view.getUint32(end + 16, true);
+    if (count === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) return 0;
+    const directory = new Uint8Array(directorySize);
+    await file.seek(directoryOffset, Deno.SeekMode.Start);
+    if ((await readFull(file, directory)) < directorySize) return 0;
+    const entries = new DataView(directory.buffer);
+    let total = 0;
+    for (let at = 0, i = 0; i < count; i++) {
+      if (at + 46 > directorySize || entries.getUint32(at, true) !== 0x02014b50) return 0;
+      const unpacked = entries.getUint32(at + 24, true);
+      if (unpacked === 0xffffffff) return 0;
+      total += unpacked;
+      at += 46 + entries.getUint16(at + 28, true) + entries.getUint16(at + 30, true) + entries.getUint16(at + 32, true);
+    }
+    return total;
+  } catch {
+    return 0;
+  } finally {
+    file?.close();
+  }
+}
+
+async function readFull(file: Deno.FsFile, into: Uint8Array): Promise<number> {
+  let read = 0;
+  while (read < into.length) {
+    const n = await file.read(into.subarray(read));
+    if (n === null) break;
+    read += n;
+  }
+  return read;
+}
+
+/**
+ * Unpacks `archive` into `workDir` for the converter to review, rather than straight into MODS.
+ * Returns every mod folder in it (a D2SE_SETUP.ini or exordium.mod.json, however deep), or, when it
+ * holds none or its files sit at its top, everything it unpacked as one folder named after `title`:
+ * an old mod with neither file is still a mod, as Import folder takes it.
+ */
+export async function unpackArchive(
+  archive: string,
+  workDir: string,
+  title: string,
+  onExtract?: (written: number) => void,
+): Promise<string[]> {
+  if (!canExtract(archive)) {
+    throw new InstallError(`${archive.split(/[\\/]/).pop()} is not an archive Exordium can unpack.`);
+  }
+  await Deno.remove(workDir, { recursive: true }).catch(() => {});
+  const into = `${workDir}/unpacked`;
+  let polling = true;
+  const poll = (async () => {
+    while (polling) {
+      onExtract?.(await treeBytes(into));
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  })();
+  try {
+    await extract(archive, into);
+    let mods = await findMods(into);
+    if (mods.length === 0) {
+      for (const inner of await nestedArchives(into)) await extract(inner, `${inner}.unpacked`);
+      mods = await findMods(into);
+    }
+    polling = false;
+    await poll;
+    onExtract?.(await treeBytes(into));
+    if (mods.length > 0 && !mods.includes(into)) return mods;
+    const named = `${workDir}/${folderName(title)}`;
+    if (named !== into) await Deno.rename(into, named);
+    return [named];
+  } finally {
+    polling = false;
+    await poll;
+  }
+}
+
+/**
  * Unpacks `archive` into `workDir` and moves every mod found into `modsDir`. Put `workDir` on the same
  * drive as `modsDir` and the move is a rename. When the archive holds no mod its files are kept (in
  * `keepDir` when given) for the player to look at. Never overwrites a mod folder.

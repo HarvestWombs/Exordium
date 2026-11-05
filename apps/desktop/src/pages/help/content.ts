@@ -117,15 +117,15 @@ export const TOPICS: HelpTopicContent[] = [
       {
         heading: "Import",
         list: [
-          "**From your Diablo II install**: your D2SE mods, each reviewed in the converter before it is copied. Tick Move instead of copy to take it out of the install and save the space.",
+          "**From your Diablo II install**: your D2SE mods, each reviewed in the converter. Import asks whether to link, copy or move it into the library.",
           "**From a folder**: a mod already unpacked somewhere. Choose the folder holding its MPQs or its D2SE_SETUP.ini; the converter drafts the rest for you to check.",
-          "**From an archive**: a .zip, .7z or .rar as downloaded, unpacked into the library.",
+          "**From an archive**: a .zip, .7z or .rar as downloaded. It unpacks in the background, shown in the library with its progress, then opens in the converter like the others. Import moves it in, since the unpacked files are Exordium's own copy.",
         ],
       },
       {
         heading: "The converter",
         paragraphs: [
-          "The converter shows the exordium.mod.json it will write: the fields on top, the JSON below, which you can edit directly. Nothing is copied until you press Import, and your install is never changed unless you chose Move. Imports queue up and run one at a time in the background, so you can leave the converter while they finish: each mod shows in the library with a spinner, and hovering it shows its progress.",
+          "The converter shows the exordium.mod.json it will write: the fields on top, the JSON below, which you can edit directly. Nothing goes into the library until you press Import, and your install is never changed unless you choose Move. Imports queue up and run one at a time in the background, so you can leave the converter while they finish: each mod shows in the library with a spinner, and hovering it shows its progress.",
         ],
       },
       {

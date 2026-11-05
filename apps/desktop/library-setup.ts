@@ -64,6 +64,17 @@ async function namesIn(folder: string, dirs: boolean): Promise<string[]> {
 /** A file's or folder's size in bytes; links are not followed. */
 export const folderSize = sizeOf;
 
+/** How many files a file or folder holds, links not followed: what a linking job counts by. */
+async function filesIn(path: string): Promise<number> {
+  const info = await Deno.lstat(path).catch(() => null);
+  if (!info || info.isSymlink) return 0;
+  if (info.isFile) return 1;
+  if (!info.isDirectory) return 0;
+  let total = 0;
+  for await (const entry of Deno.readDir(path)) total += await filesIn(`${path}/${entry.name}`);
+  return total;
+}
+
 /** The install's mod folders: those with a D2SE_SETUP.ini or an exordium.mod.json. */
 export async function installModFolders(install: string): Promise<string[]> {
   const root = slash(install);
@@ -157,7 +168,17 @@ export async function recordLibraryTransfer(
 
 // ---- Copy jobs --------------------------------------------------------------------------------------
 
-export type CopyKind = "game" | "core" | "mod";
+/** `archive`: a mod archive unpacked for the converter to review (startTask), not yet in the library. */
+export type CopyKind = "game" | "core" | "mod" | "archive";
+
+/** A mod an unpacked archive holds, for the converter to review and move into the library. */
+export interface UnpackedMod {
+  folder: string;
+  /** The unpacked folder, `/`-separated. */
+  path: string;
+  title: string;
+  core: string | null;
+}
 
 export interface CopyJob {
   id: string;
@@ -170,11 +191,28 @@ export interface CopyJob {
   cancelling: boolean;
   copied: number;
   total: number;
+  /**
+   * How the files are placed. Linking takes the same time for a large file as for a small one, so a
+   * linking job's progress is `filesDone` of `files` rather than bytes. `unpack`: an archive being
+   * unpacked, `copied` of `total` bytes written (`total` is 0 when the archive does not say).
+   */
+  mode: TransferMode | "unpack";
+  files: number;
+  filesDone: number;
+  step: CopyStep | null;
+  /** What an unpacked archive holds, once it is unpacked. */
+  found: UnpackedMod[] | null;
   error: string | null;
   startedAt: string;
   /** Files placed by each method. Automatic jobs can use more than one fallback. */
   methods: Record<UsedTransferMode, number>;
 }
+
+/**
+ * What a job is doing once its files are in, while its `then` runs: copying a 1.14 install's core,
+ * or reading the new files' hashes. Null while files are still being placed, and once it is done.
+ */
+export type CopyStep = { kind: "core"; core: string } | { kind: "hashes" };
 
 class CopyCancelled extends Error {}
 
@@ -230,6 +268,7 @@ async function transferTree(from: string, to: string, job: CopyJob, mode: Transf
     if (job.cancelling) throw new CopyCancelled();
     await transferFile(from, to, job, mode);
     job.copied += info.size;
+    job.filesDone++;
     return;
   }
   await Deno.mkdir(to, { recursive: true });
@@ -251,6 +290,53 @@ async function transferTree(from: string, to: string, job: CopyJob, mode: Transf
  * With `queue`, the copy waits (`queued`) until every queued copy before it has finished: the
  * converter queues each mod it imports and moves on, so the player keeps working while they copy.
  */
+function newJob(kind: CopyKind, label: string, mode: CopyJob["mode"], state: CopyJob["state"]): CopyJob {
+  const job: CopyJob = {
+    id: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
+    kind,
+    label,
+    state,
+    cancelling: false,
+    copied: 0,
+    total: 0,
+    mode,
+    files: 0,
+    filesDone: 0,
+    step: null,
+    found: null,
+    error: null,
+    startedAt: new Date().toISOString(),
+    methods: { symlink: 0, hardlink: 0, copy: 0, move: 0 },
+  };
+  jobs.set(job.id, job);
+  return job;
+}
+
+/**
+ * Work that is not a copy, followed like one: the same job list, progress and status. `work` keeps
+ * the job's `copied`, `total` and `step` up to date as it goes. It starts at once, outside the copy
+ * queue, and cannot be cancelled.
+ */
+export function startTask(
+  kind: CopyKind,
+  label: string,
+  mode: CopyJob["mode"],
+  work: (job: CopyJob) => Promise<void>,
+): CopyJob {
+  const job = newJob(kind, label, mode, "copying");
+  void (async () => {
+    try {
+      await work(job);
+      job.step = null;
+      job.state = "done";
+    } catch (error) {
+      job.state = "failed";
+      job.error = (error as Error).message;
+    }
+  })();
+  return { ...job };
+}
+
 export function startCopy(
   kind: CopyKind,
   label: string,
@@ -260,30 +346,20 @@ export function startCopy(
     move?: boolean;
     mode?: TransferMode;
     queue?: boolean;
-    then?: (job: Readonly<CopyJob>) => Promise<void>;
+    /** Runs once the files are in; `step` says what it is doing, for the job's status. */
+    then?: (job: Readonly<CopyJob>, step: (step: CopyStep) => void) => Promise<void>;
   } = {},
 ): CopyJob {
   const running = [...jobs.values()].find((j) =>
     j.kind === kind && j.label === label && (j.state === "copying" || j.state === "queued")
   );
   if (running) return { ...running };
-  const job: CopyJob = {
-    id: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
-    kind,
-    label,
-    state: options.queue ? "queued" : "copying",
-    cancelling: false,
-    copied: 0,
-    total: 0,
-    error: null,
-    startedAt: new Date().toISOString(),
-    methods: { symlink: 0, hardlink: 0, copy: 0, move: 0 },
-  };
-  jobs.set(job.id, job);
+  const job = newJob(kind, label, options.move ? "move" : options.mode ?? "copy", options.queue ? "queued" : "copying");
   const run = async () => {
     if (job.state === "cancelled") return;
     job.state = "copying";
-    const todo: { from: string; to: string; bytes: number }[] = [];
+    const todo: { from: string; to: string; bytes: number; files: number }[] = [];
+    const linking = job.mode === "auto" || job.mode === "symlink" || job.mode === "hardlink";
     try {
       for (const pair of pairs) {
         const from = slash(pair.from);
@@ -293,10 +369,12 @@ export function startCopy(
           throw new Error(`${to.split("/").pop()} is already in Exordium's library; it was not replaced.`);
         }
         const bytes = await sizeOf(from);
+        const files = linking ? await filesIn(from) : 0;
         job.total += bytes;
-        todo.push({ from, to, bytes });
+        job.files += files;
+        todo.push({ from, to, bytes, files });
       }
-      for (const { from, to, bytes } of todo) {
+      for (const { from, to, bytes, files } of todo) {
         if (job.cancelling) throw new CopyCancelled();
         await Deno.mkdir(to.replace(/\/[^/]+$/, ""), { recursive: true });
         const move = options.move || options.mode === "move";
@@ -304,6 +382,7 @@ export function startCopy(
           // Same drive: an instant rename moved it in one step, no bytes streamed.
           job.methods.move++;
           job.copied += bytes;
+          job.filesDone += files;
           continue;
         }
         const partial = `${to}.partial`;
@@ -317,7 +396,8 @@ export function startCopy(
           job.methods.copy = 0;
         }
       }
-      await options.then?.({ ...job, methods: { ...job.methods } });
+      await options.then?.({ ...job, methods: { ...job.methods } }, (step) => void (job.step = step));
+      job.step = null;
       job.state = "done";
     } catch (error) {
       for (const { to } of todo) await Deno.remove(`${to}.partial`, { recursive: true }).catch(() => {});

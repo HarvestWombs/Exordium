@@ -312,7 +312,7 @@ export function SetupPage(
     ? tr("Creating symbolic links…")
     : transferMode === "hardlink"
     ? tr("Creating hardlinks…")
-    : tr("Linking game files (copying only when links are unavailable)…");
+    : tr("Linking game files…");
 
   return (
     <main className="setup-page">

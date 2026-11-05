@@ -250,8 +250,10 @@ interface Found {
 }
 
 /**
- * Every file under `root`, depth first, in a stable order. Links and junctions are reported and
- * never followed: a junction inside a mod folder can point anywhere, including back up the tree.
+ * Every file under `root`, depth first, in a stable order. A link to a file counts as that file: a
+ * mod imported by linking is a tree of file symlinks into the original folder. A link or junction to
+ * a folder is reported and never followed, since it can point anywhere, including back up the tree;
+ * so is a link whose target is gone.
  */
 async function* walk(root: string, prefix = "", skip?: (path: string) => boolean): AsyncGenerator<Found> {
   const entries: Deno.DirEntry[] = [];
@@ -259,19 +261,22 @@ async function* walk(root: string, prefix = "", skip?: (path: string) => boolean
   entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   // A folder's files are stat'ed together rather than one by one: a mod's data tree runs to
   // thousands of files, and one at a time that alone took most of a second.
-  const infos = new Map<string, Deno.FileInfo>();
-  const files = entries.filter((entry) => entry.isFile && !entry.isSymlink);
+  const infos = new Map<string, Deno.FileInfo | null>();
+  const files = entries.filter((entry) => entry.isFile || entry.isSymlink);
   for (let i = 0; i < files.length; i += STAT_BATCH) {
     await Promise.all(
       files.slice(i, i + STAT_BATCH).map(async (entry) => {
-        infos.set(entry.name, await Deno.stat(`${root}/${prefix ? `${prefix}/` : ""}${entry.name}`));
+        const full = `${root}/${prefix ? `${prefix}/` : ""}${entry.name}`;
+        infos.set(entry.name, await Deno.stat(full).catch((error) => entry.isSymlink ? null : Promise.reject(error)));
       }),
     );
   }
   for (const entry of entries) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isSymlink) {
-      yield { path, size: 0, mtime: null, link: true };
+      const info = infos.get(entry.name);
+      if (info?.isFile) yield { path, size: info.size, mtime: info.mtime?.getTime() ?? null, link: false };
+      else yield { path, size: 0, mtime: null, link: true };
     } else if (entry.isDirectory) {
       if (!skip?.(path)) yield* walk(root, path, skip);
     } else if (entry.isFile) {

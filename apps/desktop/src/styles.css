@@ -3843,6 +3843,19 @@ fieldset legend {
   color: var(--text-strong);
 }
 
+.import-choice.on {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.import-choice span.good-text {
+  color: var(--good);
+}
+
+.import-choice span.warn-text {
+  color: var(--warn);
+}
+
 .import-choice span {
   font-size: 12px;
   color: var(--text-dim);
@@ -4085,6 +4098,7 @@ fieldset legend {
 
 .manifest-import-nav {
   display: flex;
+  align-items: center;
   min-width: 0;
   overflow-x: auto;
   padding: 0 10px;
@@ -4092,7 +4106,7 @@ fieldset legend {
   background: var(--sidebar);
 }
 
-.manifest-import-nav button {
+.manifest-import-nav > button {
   position: relative;
   height: 42px;
   flex: 0 0 auto;
@@ -4104,7 +4118,7 @@ fieldset legend {
   font-weight: 700;
 }
 
-.manifest-import-nav button::after {
+.manifest-import-nav > button::after {
   content: "";
   position: absolute;
   right: 10px;
@@ -4114,13 +4128,21 @@ fieldset legend {
   background: transparent;
 }
 
-.manifest-import-nav button:hover,
-.manifest-import-nav button.on {
+.manifest-import-nav > button:hover,
+.manifest-import-nav > button.on {
   color: var(--text-strong);
 }
 
-.manifest-import-nav button.on::after {
+.manifest-import-nav > button.on::after {
   background: var(--accent);
+}
+
+/* The converter's Close and Import, at the top right of the card. */
+.manifest-import-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 16px;
 }
 
 .manifest-import-page {
@@ -5685,6 +5707,11 @@ fieldset legend {
 }
 
 /* Under the version line, as wide as a line of text rather than the card. */
+.update-progress > span.indeterminate {
+  width: 30%;
+  animation: slide 1.2s ease-in-out infinite alternate;
+}
+
 .update-row .update-progress {
   max-width: 320px;
   margin: 8px 0 2px;

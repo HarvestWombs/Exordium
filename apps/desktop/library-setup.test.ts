@@ -98,6 +98,8 @@ Deno.test("automatic game setup links when possible and always leaves readable f
     const done = await until(startCopy("game", "Automatic game", [{ from, to }], { mode: "auto" }).id);
     assertEquals(done.state, "done");
     assertEquals(done.methods.symlink + done.methods.hardlink + done.methods.copy, 1);
+    // A linking job counts files: linking a large file takes no longer than a small one.
+    assertEquals([done.mode, done.files, done.filesDone], ["auto", 1, 1]);
     assertEquals(await Deno.readTextFile(to), "archive");
     assertEquals((await scanNamed(`${dir}/library/game`, ["d2data.mpq"], { hash: false })).length, 1);
   } finally {

@@ -110,7 +110,7 @@ import {
   runActivity,
 } from "./discord.ts";
 import { DOC_TYPES, findDocs, modLinks, webUrl } from "./docs.ts";
-import { copyTree, installArchive } from "./install.ts";
+import { canExtract, copyTree, unpackArchive, zipUnpackedSize } from "./install.ts";
 import { exordiumManifestFromD2SE, normalizeManifest } from "./mod-manifest.ts";
 import { checkRealm, realmAddress } from "./realm.ts";
 import { runHidden } from "./native.ts";
@@ -128,7 +128,9 @@ import {
   libraryFolder,
   recordLibraryTransfer,
   startCopy,
+  startTask,
   type TransferMode,
+  type UnpackedMod,
 } from "./library-setup.ts";
 import { APP_VERSION, sweepUpdate, UPDATE_REPO, UpdateError, Updater } from "./updater.ts";
 import { isLive, processAlive, type SessionRecord, Sessions } from "./sessions.ts";
@@ -147,6 +149,8 @@ import {
   startWindowDrag,
   startWindowResize,
   toggleMaximizeWindow,
+  type WindowPlacement,
+  windowPlacement,
   windowState,
 } from "./window.ts";
 
@@ -291,7 +295,43 @@ setTimeout(() => {
   void sessions.watch(() => void refreshSessions().then(() => notify("status")));
 }, 0);
 // Only finds a window under `deno desktop`; a plain `deno run` has none and this quietly does nothing.
-void setUpWindow();
+// The window comes back where it was last time; see rememberPlacement.
+/** Where the window was when Exordium last closed: `window.json` beside the app's own files. */
+const placementFile = `${exordiumRoot}/window.json`;
+let lastPlacement = "";
+
+void setUpWindow(savedPlacement());
+setInterval(rememberPlacement, 3_000);
+
+function savedPlacement(): WindowPlacement | null {
+  try {
+    const value = JSON.parse(Deno.readTextFileSync(placementFile)) as Partial<WindowPlacement>;
+    const numbers = [value.left, value.top, value.right, value.bottom];
+    if (!numbers.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+    const [left, top, right, bottom] = numbers as number[];
+    return { left: left!, top: top!, right: right!, bottom: bottom!, maximized: value.maximized === true };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saves the window's placement when it changed. Checked every few seconds rather than on each move,
+ * because Windows moves it in ways the page never hears of (Snap, Win+arrows, the taskbar's close),
+ * and once more when the page's close button is pressed.
+ */
+function rememberPlacement(): void {
+  const placement = windowPlacement();
+  if (!placement) return;
+  const text = JSON.stringify(placement);
+  if (text === lastPlacement) return;
+  try {
+    Deno.writeTextFileSync(placementFile, text + "\n");
+    lastPlacement = text;
+  } catch {
+    // Not saved this time; the next check tries again.
+  }
+}
 
 /** The page's own title bar. `ready` answers whether there is a desktop window at all; see window.ts. */
 async function windowRoute(url: URL): Promise<Response> {
@@ -305,6 +345,7 @@ async function windowRoute(url: URL): Promise<Response> {
     case "maximize":
       return Response.json(toggleMaximizeWindow());
     case "close":
+      rememberPlacement();
       return Response.json({ ok: closeWindow() });
     case "focus":
       return Response.json({ ok: focusWindow() });
@@ -857,13 +898,26 @@ async function d2seConverterPreview(request: Request): Promise<Response> {
 async function d2seConverterWrite(request: Request): Promise<Response> {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
   const body = await request.json().catch(() => null) as
-    | { root?: unknown; folder?: unknown; path?: unknown; text?: unknown; overwrite?: unknown; move?: unknown }
+    | {
+      root?: unknown;
+      folder?: unknown;
+      path?: unknown;
+      text?: unknown;
+      overwrite?: unknown;
+      move?: unknown;
+      mode?: unknown;
+    }
     | null;
   const root = typeof body?.root === "string" ? body.root.trim() : "";
   const folder = typeof body?.folder === "string" ? body.folder.trim() : "";
   const path = typeof body?.path === "string" ? body.path.trim() : "";
   const text = typeof body?.text === "string" ? body.text : "";
-  const move = body?.move === true;
+  // link: each file linked to the original (symlink, else hardlink, else copied); copy; move.
+  const mode = body?.mode === "link" || body?.mode === "move" || body?.mode === "copy"
+    ? body.mode
+    : body?.move === true
+    ? "move"
+    : "copy";
   if (!root || (!folder && !path) || !text.trim()) {
     return Response.json({ error: "Missing root, folder, or JSON." }, {
       status: 400,
@@ -878,17 +932,24 @@ async function d2seConverterWrite(request: Request): Promise<Response> {
   if (!isRecord(parsed)) return Response.json({ error: "The manifest must be a JSON object." }, { status: 400 });
   const source = path ? await folderMod(path) : await installMod(folder);
   if (source instanceof Response) return source;
+  // A mod unpacked from an archive is only ever moved: its staging copy is Exordium's own.
+  const fromArchive = source.dir.toLowerCase().startsWith(`${archiveStaging.toLowerCase()}/`);
+  const transfer = fromArchive ? "move" : mode;
   const dest = `${libraryRoot}/${LIBRARY_FOLDERS.mods}/${source.folder}`;
   if (await Deno.stat(dest).then(() => true, () => false)) {
     return Response.json({ error: `${source.folder} is already in Exordium's library.` }, { status: 409 });
   }
-  // The whole folder is copied (or moved, if asked), then its exordium.mod.json written into the
-  // library's copy. A copy leaves the install untouched; a move removes the folder from the install.
+  // The whole folder is linked, copied or moved, then its exordium.mod.json written into the
+  // library's folder (a real file, even when the rest are links, so the original is not touched). A
+  // link or copy leaves the original where it is; a move removes it from there.
   const job = startCopy("mod", source.folder, [{ from: source.dir, to: dest }], {
-    move,
+    move: transfer === "move",
+    mode: transfer === "link" ? "auto" : "copy",
     queue: true,
-    then: async () => {
+    then: async (_, step) => {
+      if (fromArchive) await tidyArchiveStaging(source.dir);
       await Deno.writeTextFile(`${dest}/${EXORDIUM_MOD_FILE}`, JSON.stringify(parsed, null, 2) + "\n");
+      step({ kind: "hashes" });
       await warmLaunchHashes(libraryRoot, { mods: [source.folder] });
     },
   });
@@ -1052,14 +1113,16 @@ async function setupRoute(request: Request): Promise<Response> {
       {
         skipExisting: true,
         mode,
-        then: async (finished) => {
+        then: async (finished, step) => {
           await recordLibraryTransfer(libraryRoot, mode, finished.methods);
           const installCore = await rootCoreName(install).catch(() => null);
           if (installCore) {
+            step({ kind: "core", core: installCore });
             await placeInstallCore(libraryRoot, install, installCore).catch((error) =>
               appLog("warn", `core ${installCore} was not copied: ${(error as Error).message}`)
             );
           }
+          step({ kind: "hashes" });
           await warmLaunchHashes(libraryRoot);
           await writeState((s) => void (s.root = libraryRoot));
         },
@@ -3773,7 +3836,8 @@ async function symlinkStatus(): Promise<{ ok: boolean; admin: boolean; error: st
 async function isAdmin(): Promise<boolean> {
   if (Deno.build.os !== "windows") return false;
   const text = await runPowerShellHidden(
-    "[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()" +
+    // The parentheses matter: without them `.IsInRole` binds before the cast, to the WindowsIdentity.
+    "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent())" +
       ".IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) | Set-Content -LiteralPath $OutFile",
   );
   return /^true$/i.test(text?.trim() ?? "");
@@ -3794,32 +3858,58 @@ async function restartAdmin(request: Request): Promise<Response> {
   return Response.json({ ok: ok !== null });
 }
 
+/**
+ * Where Library → Import → From an archive unpacks, for the converter to review: beside the library
+ * and on its drive, so moving a mod in is a rename, but outside it, which the converter refuses.
+ * Emptied at each start, since a review does not outlive the app.
+ */
+const archiveStaging = `${exordiumRoot.replace(/\\/g, "/")}/staging/archives`;
+
+/**
+ * POST `{ archive }`: starts unpacking a mod archive, as a job (`/api/setup` follows it). Once it is
+ * done, the job's `found` lists the mods it holds, for the converter to open on, as Import folder
+ * does: their exordium.mod.json is reviewed there, and Import moves them into the library.
+ */
 async function installLocalArchive(request: Request): Promise<Response> {
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  const body = await request.json().catch(() => null) as
-    | { archive?: unknown; root?: unknown; title?: unknown; importMetadata?: unknown }
-    | null;
+  const body = await request.json().catch(() => null) as { archive?: unknown } | null;
   const archive = typeof body?.archive === "string" ? body.archive.trim().replace(/\\/g, "/") : "";
-  const root = typeof body?.root === "string" ? body.root.trim().replace(/[\\/]+$/, "") : "";
-  const title = typeof body?.title === "string" && body.title.trim()
-    ? body.title.trim()
-    : archive.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") ?? "Mod";
+  const title = archive.split("/").pop()?.replace(/\.[^.]+$/, "") || "Mod";
   if (!archive) return Response.json({ error: "Missing archive." }, { status: 400 });
   const archiveInfo = await Deno.stat(archive).catch(() => null);
   if (!archiveInfo?.isFile) return Response.json({ error: `${winPath(archive)} is not a file.` }, { status: 404 });
-  const modsDir = `${root.replace(/\\/g, "/")}/${LIBRARY_FOLDERS.mods}`;
-  if (!root || !(await Deno.stat(modsDir).catch(() => null))?.isDirectory) {
-    return Response.json({ error: `No MODS folder in ${winPath(root) || "the install"}.` }, { status: 400 });
+  if (!canExtract(archive)) {
+    return Response.json({ error: `${winPath(archive)} is not an archive Exordium can unpack.` }, { status: 400 });
   }
-  const result = await installArchive(archive, `${root.replace(/\\/g, "/")}/.exordium-staging/local`, modsDir, title, {
-    keepDir: `${downloadsFolder}/local/${crypto.randomUUID()}/unpacked`,
+  const workDir = `${archiveStaging}/${crypto.randomUUID().slice(0, 8)}`;
+  const job = startTask("archive", title, "unpack", async (job) => {
+    job.total = await zipUnpackedSize(archive);
+    const dirs = await unpackArchive(archive, workDir, title, (written) => void (job.copied = written));
+    job.found = await Promise.all(dirs.map(unpackedMod));
   });
-  const folders = result.installed.map((mod) => mod.name);
-  if (folders.length > 0) await warmLaunchHashes(root, { mods: folders });
-  const metadata = body?.importMetadata === true && folders.length > 0
-    ? await importD2SEMetadataForFolders(root, folders)
-    : null;
-  return Response.json({ result, metadata });
+  return Response.json({ job });
+}
+
+/** A mod folder an archive unpacked, named as its own manifest or D2SE_SETUP.ini names it. */
+async function unpackedMod(dir: string): Promise<UnpackedMod> {
+  const folder = dir.split("/").pop() ?? dir;
+  const native = await readExordiumMod(dir).catch(() => null);
+  const text = await Deno.readTextFile(`${dir}/D2SE_SETUP.ini`).catch(() => null);
+  const setup = native?.setup ?? (text === null ? null : readModSetup(parseIni(text)));
+  return { folder, path: dir, title: setup?.mod.title || setup?.mod.name || folder, core: setup?.mod.core ?? null };
+}
+
+/**
+ * Removes the folders a moved-in archive mod leaves behind in the staging, from its parent up to its
+ * archive's own folder, each only when empty: an archive holding several mods keeps the others.
+ */
+async function tidyArchiveStaging(dir: string): Promise<void> {
+  const prefix = `${archiveStaging.toLowerCase()}/`;
+  let folder = dir.replace(/\/[^/]+$/, "");
+  while (folder.toLowerCase().startsWith(prefix)) {
+    if (!(await Deno.remove(folder).then(() => true, () => false))) return;
+    folder = folder.replace(/\/[^/]+$/, "");
+  }
 }
 
 /**
@@ -4247,6 +4337,8 @@ async function startInstance(): Promise<void> {
   if (!other) {
     await Deno.mkdir(exordiumRoot, { recursive: true });
     await Deno.writeTextFile(instanceFile, JSON.stringify({ pid: Deno.pid, port: server.addr.port }));
+    // Archives unpacked for a review that ended with the last run: Exordium's own copies.
+    await Deno.remove(archiveStaging, { recursive: true }).catch(() => {});
   }
   if (body) await play(new Request("http://127.0.0.1/api/play", { method: "POST", body }));
 }

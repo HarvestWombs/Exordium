@@ -173,7 +173,14 @@ export interface Scan {
   cores: Title[];
   mods: Title[];
   /** Mods to import: the install's D2SE mods, or one folder chosen with Import folder (`path`). */
-  importableMods: { folder: string; title: string; core: string | null; path?: string }[];
+  importableMods: {
+    folder: string;
+    title: string;
+    core: string | null;
+    path?: string;
+    /** Unpacked from this archive (its file name): Import moves it in, with no choice to ask. */
+    archive?: string;
+  }[];
 }
 
 export interface Collection {
@@ -396,7 +403,8 @@ export interface InstallCheck {
 
 export interface CopyJob {
   id: string;
-  kind: "game" | "core" | "mod";
+  /** `archive`: a mod archive being unpacked for the converter to review. */
+  kind: "game" | "core" | "mod" | "archive";
   label: string;
   /** `queued`: waiting for the imports ahead of it. */
   state: "queued" | "copying" | "done" | "failed" | "cancelled";
@@ -404,6 +412,14 @@ export interface CopyJob {
   cancelling: boolean;
   copied: number;
   total: number;
+  /** How the files are placed; a linking job (auto, symlink, hardlink) counts files, not bytes. */
+  mode?: "auto" | "symlink" | "hardlink" | "copy" | "move" | "unpack";
+  files?: number;
+  filesDone?: number;
+  /** What it is doing once its files are in: copying a 1.14 core, or reading the files' hashes. */
+  step?: { kind: "core"; core: string } | { kind: "hashes" } | null;
+  /** What an unpacked archive holds, once it is unpacked. */
+  found?: { folder: string; path: string; title: string; core: string | null }[] | null;
   error: string | null;
 }
 

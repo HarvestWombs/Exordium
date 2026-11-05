@@ -3,18 +3,20 @@ import * as React from "react";
 
 /**
  * Library → Import: where a mod comes from. The D2SE install's mods and a folder are reviewed in the
- * converter, which writes their exordium.mod.json; an archive is unpacked straight into the library,
- * with a draft of it from its D2SE_SETUP.ini.
+ * converter, which writes their exordium.mod.json. So is an archive, once it is unpacked: that runs in
+ * the background, followed in the library like the other imports.
  */
 export function ImportDialog(
   { installMods, onInstall, onFolder, onArchive, onClose }: {
     installMods: number;
     onInstall: () => void;
     onFolder: () => void;
+    /** Opens the file picker and starts unpacking what was chosen. */
     onArchive: () => Promise<void>;
     onClose: () => void;
   },
 ) {
+  // The file picker is open.
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -64,10 +66,10 @@ export function ImportDialog(
             </span>
           </button>
           <button type="button" className="import-choice" disabled={busy} onClick={() => void archive()}>
-            <strong>{busy ? tr("Unpacking…") : tr("From an archive")}</strong>
+            <strong>{tr("From an archive")}</strong>
             <span>
               {tr(
-                "A .zip, .7z or .rar as it was downloaded. It is unpacked into the library and opens on its page. A .7z needs 7-Zip installed.",
+                "A .zip, .7z or .rar as it was downloaded. Once it is unpacked, it opens in the converter like the others.",
               )}
             </span>
           </button>

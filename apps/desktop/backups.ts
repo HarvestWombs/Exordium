@@ -92,7 +92,10 @@ async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Every file under `root` with its contents, links skipped; empty when the folder does not exist. */
+/**
+ * Every file under `root` with its contents; empty when the folder does not exist. A link to a file
+ * is read as that file (a mod imported by linking has symlinked saves); links to folders are skipped.
+ */
 async function readTree(root: string, prefix = ""): Promise<{ path: string; bytes: Uint8Array<ArrayBuffer> }[]> {
   const found: { path: string; bytes: Uint8Array<ArrayBuffer> }[] = [];
   let entries: Deno.DirEntry[];
@@ -105,7 +108,11 @@ async function readTree(root: string, prefix = ""): Promise<{ path: string; byte
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isSymlink) continue;
+    if (entry.isSymlink) {
+      const full = `${root}/${entry.name}`;
+      if ((await Deno.stat(full).catch(() => null))?.isFile) found.push({ path, bytes: await Deno.readFile(full) });
+      continue;
+    }
     if (entry.isDirectory) found.push(...await readTree(`${root}/${entry.name}`, path));
     else if (entry.isFile) found.push({ path, bytes: await Deno.readFile(`${root}/${entry.name}`) });
   }

@@ -482,7 +482,9 @@ async function place(
   for (const mode of modes) {
     if (skip.has(mode)) continue;
     try {
-      if (mode === "hardlink") await Deno.link(source, dest);
+      // A library file can itself be a symlink (a mod imported by linking); a hard link to it would
+      // be another symlink, so it links the file the symlink points at.
+      if (mode === "hardlink") await Deno.link(await Deno.realPath(source), dest);
       else if (mode === "symlink") await Deno.symlink(source, dest, { type: "file" });
       else await Deno.copyFile(source, dest);
       return mode;

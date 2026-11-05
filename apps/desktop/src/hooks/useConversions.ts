@@ -1,32 +1,45 @@
 import * as React from "react";
-import { setupPost } from "../components/progress.tsx";
+import { copyDetail, copyPercent, copyStepLabel, setupPost } from "../components/progress.tsx";
 import { tr } from "../lib/i18n.ts";
 import type { Incoming } from "../lib/incoming.ts";
 import { formatSize } from "../lib/util.ts";
 import type { CopyJob } from "../types.ts";
 
-/** A mod going into the library. `settled` once it has landed or failed. */
+/**
+ * A mod going into the library. `settled` once it has landed or failed. `unpack`: an archive being
+ * unpacked, which opens in the converter once it is (`onUnpacked`) rather than landing itself.
+ */
 export interface Conversion {
   /** The mod's identity in the converter: its folder, or its path for a folder chosen by hand. */
   key: string;
   title: string;
   core: string | null;
-  move: boolean;
+  mode: ImportMode | "unpack";
   job: CopyJob;
   settled: boolean;
 }
 
+/** How a mod goes into the library: its files linked, copied, or moved out of where they were. */
+export type ImportMode = "link" | "copy" | "move";
+
 const active = (job: CopyJob) => job.state === "queued" || job.state === "copying";
 
-export function copyPercent(job: CopyJob): number {
-  return job.total > 0 ? Math.min(100, Math.round((job.copied / job.total) * 100)) : 0;
-}
+export { copyPercent };
 
-function conversionStatus({ job, move }: Conversion): string {
+function conversionStatus({ job, mode }: Conversion): string {
   if (job.cancelling) return tr("Cancelling…");
   if (job.state === "queued") return tr("Queued");
+  const step = copyStepLabel(job);
+  if (step) return step;
   const percent = copyPercent(job);
-  return move ? tr("Moving · {percent}%", { percent }) : tr("Copying · {percent}%", { percent });
+  if (mode === "unpack") {
+    return job.total > 0
+      ? tr("Unpacking · {percent}%", { percent })
+      : tr("Unpacking · {size}", { size: formatSize(job.copied) });
+  }
+  if (mode === "move") return tr("Moving · {percent}%", { percent });
+  if (mode === "link") return tr("Linking · {percent}%", { percent });
+  return tr("Copying · {percent}%", { percent });
 }
 
 /**
@@ -35,19 +48,21 @@ function conversionStatus({ job, move }: Conversion): string {
  * and says so; its card stays until the mod's own has replaced it.
  */
 export function useConversions(
-  { root, load, say, reportError, onSettled }: {
+  { root, load, say, reportError, onSettled, onUnpacked }: {
     root: string | null;
     load: (root: string) => Promise<boolean>;
     say: (message: string) => void;
     reportError: (err: unknown) => void;
     /** It has landed, as this title, or ended without one. */
     onSettled: (key: string, titleKey: string | null) => void;
+    /** An archive is unpacked (its title, and the mods it holds), for the converter to open on. */
+    onUnpacked: (archive: string, found: NonNullable<CopyJob["found"]>) => void;
   },
 ) {
   const [conversions, setConversions] = React.useState<Record<string, Conversion>>({});
   // The timer outlives renders; it reads the latest of these without restarting.
-  const latest = React.useRef({ conversions, root, load, say, reportError, onSettled });
-  latest.current = { conversions, root, load, say, reportError, onSettled };
+  const latest = React.useRef({ conversions, root, load, say, reportError, onSettled, onUnpacked });
+  latest.current = { conversions, root, load, say, reportError, onSettled, onUnpacked };
 
   const add = React.useCallback((conversion: Conversion) => {
     setConversions((all) => ({ ...all, [conversion.key]: conversion }));
@@ -67,11 +82,25 @@ export function useConversions(
       .then((body: { jobs?: CopyJob[] } | null) => {
         if (stopped) return;
         for (const job of body?.jobs ?? []) {
-          if (job.kind !== "mod" || !active(job)) continue;
+          if ((job.kind !== "mod" && job.kind !== "archive") || !active(job)) continue;
+          const key = job.kind === "archive" ? `archive:${job.id}` : job.label;
           setConversions((all) =>
-            all[job.label] ? all : {
+            all[key] ? all : {
               ...all,
-              [job.label]: { key: job.label, title: job.label, core: null, move: false, job, settled: false },
+              [key]: {
+                key,
+                title: job.label,
+                core: null,
+                mode: job.kind === "archive"
+                  ? "unpack"
+                  : job.mode === "move"
+                  ? "move"
+                  : job.mode === "copy" || !job.mode
+                  ? "copy"
+                  : "link",
+                job,
+                settled: false,
+              },
             }
           );
         }
@@ -86,11 +115,21 @@ export function useConversions(
     setConversions((all) => all[key] ? { ...all, [key]: { ...all[key]!, settled: true } } : all);
   };
 
-  /** A cancelled import leaves no trace, so the mod can be imported again. */
-  const dropped = (entry: Conversion) => {
+  const forget = (entry: Conversion) => {
     latest.current.onSettled(entry.key, null);
     setConversions((all) => Object.fromEntries(Object.entries(all).filter(([key]) => key !== entry.key)));
+  };
+
+  /** A cancelled import leaves no trace, so the mod can be imported again. */
+  const dropped = (entry: Conversion) => {
+    forget(entry);
     latest.current.say(tr("Import of {title} cancelled.", { title: entry.title }));
+  };
+
+  /** An unpacked archive's work here is done: the converter takes its mods from here. */
+  const unpacked = (entry: Conversion, job: CopyJob) => {
+    forget(entry);
+    latest.current.onUnpacked(entry.title, job.found ?? []);
   };
 
   async function cancel(entry: Conversion) {
@@ -107,8 +146,10 @@ export function useConversions(
     latest.current.onSettled(entry.key, `mod:${job.label}`);
     settle(entry.key);
     say(
-      entry.move
+      entry.mode === "move"
         ? tr("Moved {label} into Exordium's library.", { label: job.label })
+        : entry.mode === "link"
+        ? tr("Linked {label} into Exordium's library.", { label: job.label })
         : tr("Imported {label} into Exordium's library.", { label: job.label }),
     );
   }
@@ -126,11 +167,18 @@ export function useConversions(
         const job = (body as { job?: CopyJob }).job;
         if (stopped || !job) continue;
         setConversions((all) => ({ ...all, [entry.key]: { ...entry, ...all[entry.key], job } }));
-        if (job.state === "done") void landed(entry, job);
+        if (job.state === "done") {
+          if (entry.mode === "unpack") unpacked(entry, job);
+          else void landed(entry, job);
+        }
         if (job.state === "cancelled") dropped(entry);
         if (job.state === "failed") {
-          latest.current.onSettled(entry.key, null);
-          settle(entry.key);
+          // A failed archive leaves nothing for the converter to list.
+          if (entry.mode === "unpack") forget(entry);
+          else {
+            latest.current.onSettled(entry.key, null);
+            settle(entry.key);
+          }
           latest.current.reportError(
             new Error(
               tr("{label} was not imported: {error}.", {
@@ -156,13 +204,15 @@ export function useConversions(
       kind: "import",
       key: entry.key,
       title: entry.title,
-      subtitle: tr("Mod · {core}", { core: entry.core ?? "?" }),
+      subtitle: entry.mode === "unpack" ? tr("Mod archive") : tr("Mod · {core}", { core: entry.core ?? "?" }),
       status: conversionStatus(entry),
-      percent: entry.job.state === "queued" ? null : copyPercent(entry.job),
-      detail: entry.job.total > 0
-        ? tr("{done} of {total}", { done: formatSize(entry.job.copied), total: formatSize(entry.job.total) })
-        : null,
-      cancellable: !entry.job.cancelling,
+      // An archive that does not say how big it unpacks has no measure: its status counts bytes.
+      percent: entry.job.state === "queued" || (entry.mode === "unpack" && entry.job.total === 0)
+        ? null
+        : copyPercent(entry.job),
+      detail: copyStepLabel(entry.job) ? null : copyDetail(entry.job),
+      // Unpacking runs to its end: 7-Zip is not stopped part way.
+      cancellable: !entry.job.cancelling && entry.mode !== "unpack",
       cancel: () => cancel(entry),
     }));
 

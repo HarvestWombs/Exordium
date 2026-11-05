@@ -74,11 +74,13 @@ function Lines({ label, hint, value, disabled, onChange }: {
 }
 
 /** The complete native manifest form used before a D2SE mod enters the library. */
-export function ManifestImportForm({ manifest, folder, disabled, onChange }: {
+export function ManifestImportForm({ manifest, folder, disabled, onChange, actions }: {
   manifest: ModManifest;
   folder: string;
   disabled: boolean;
   onChange: (manifest: ModManifest) => void;
+  /** Buttons at the right end of the tab bar: the converter's Close and Import. */
+  actions?: React.ReactNode;
 }) {
   const [page, setPage] = React.useState<Page>("about");
   const set = (next: Partial<ModManifest>) => onChange({ ...manifest, ...next });
@@ -117,6 +119,7 @@ export function ManifestImportForm({ manifest, folder, disabled, onChange }: {
             {label}
           </button>
         ))}
+        {actions && <div className="manifest-import-actions">{actions}</div>}
       </nav>
 
       <div className="manifest-import-page stack">

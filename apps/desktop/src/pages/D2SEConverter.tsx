@@ -2,7 +2,8 @@ import { tr } from "../lib/i18n.ts";
 import * as React from "react";
 import { ManifestImportForm } from "../components/ManifestImportForm.tsx";
 import { CopyProgress } from "../components/progress.tsx";
-import { type Conversion, copyPercent } from "../hooks/useConversions.ts";
+import { type Conversion, copyPercent, type ImportMode } from "../hooks/useConversions.ts";
+import { ImportModeDialog } from "./ImportModeDialog.tsx";
 import { formatSize } from "../lib/util.ts";
 import type { ConfirmRequest, CopyJob, ModManifest, Scan } from "../types.ts";
 
@@ -60,8 +61,13 @@ export function D2SEConverter(
   const [busy, setBusy] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [filter, setFilter] = React.useState("");
-  // Off by default: a copy leaves the install intact. Move removes the folder from the install.
-  const [move, setMove] = React.useState(false);
+  // Import asks how the mod goes in (ImportModeDialog): linked, copied or moved.
+  const [asking, setAsking] = React.useState(false);
+  // The list can change under the page (the install's mods, then a folder chosen by hand): whatever it
+  // holds, one of them is selected, the first when the selected one is gone.
+  React.useEffect(() => {
+    if (!mods.some((mod) => mod.folder === folder) && mods[0]) setFolder(mods[0].folder);
+  }, [mods, folder]);
   const shownMods = React.useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return needle ? mods.filter((mod) => `${mod.title} ${mod.folder}`.toLowerCase().includes(needle)) : mods;
@@ -162,7 +168,7 @@ export function D2SEConverter(
   }
 
   /** Queues this mod's copy and moves straight on to the next mod that is not queued yet. */
-  async function save() {
+  async function save(mode: ImportMode) {
     if (!current) return;
     setBusy(true);
     setProblem(null);
@@ -170,7 +176,7 @@ export function D2SEConverter(
       const response = await fetch("/api/d2se-converter/write", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ root, folder, ...(path ? { path } : {}), text, overwrite: exists, move }),
+        body: JSON.stringify({ root, folder, ...(path ? { path } : {}), text, overwrite: exists, mode }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? tr("Could not import the mod."));
@@ -178,7 +184,7 @@ export function D2SEConverter(
         key: modKey(current),
         title: String(shown?.title || current.title),
         core: String(shown?.core || current.core || "") || null,
-        move,
+        mode,
         job: body.job as CopyJob,
         settled: false,
       };
@@ -252,34 +258,25 @@ export function D2SEConverter(
               {mine
                 ? mine.job.state === "failed"
                   ? tr("This import failed: {error}.", { error: mine.job.error ?? tr("the copy stopped") })
-                  : mine.move
+                  : mine.mode === "move"
                   ? tr("Queued for import (moving). Its exordium.mod.json is written once the copy ends.")
+                  : mine.mode === "link"
+                  ? tr("Queued for import (linking). Its exordium.mod.json is written once the links are in.")
                   : tr("Queued for import. Its exordium.mod.json is written once the copy ends.")
+                : from && current?.archive
+                ? tr("Unpacked from {archive} ({size}). Import moves it into the library.", {
+                  archive: current.archive,
+                  size: size ? formatSize(size) : tr("measuring…"),
+                })
                 : from
-                ? move
-                  ? tr(
-                    "Moves {from} ({size}) into the library and writes this exordium.mod.json there. It is removed from your Diablo II install.",
-                    { from, size: size ? formatSize(size) : tr("measuring…") },
-                  )
-                  : tr(
-                    "Copies {from} ({size}) into the library and writes this exordium.mod.json there. Your install is not changed.",
-                    { from, size: size ? formatSize(size) : tr("measuring…") },
-                  )
+                ? tr("{from} ({size}). Import asks whether to link, copy or move it into the library.", {
+                  from,
+                  size: size ? formatSize(size) : tr("measuring…"),
+                })
                 : tr("Choose a mod to import.")}
               {!mine && exists ? tr(" It is already in the library.") : ""}
               {!mine && dirty ? tr(" Edited.") : ""}
             </p>
-            <label className="confirm-check">
-              <input
-                type="checkbox"
-                checked={move}
-                disabled={locked}
-                onChange={(event) => setMove(event.currentTarget.checked)}
-              />
-              {tr("Move instead of copy — removes {folder} from your Diablo II install to save space", {
-                folder: folder || tr("the mod"),
-              })}
-            </label>
           </div>
           <div className="converter-workspace">
             {shown && (
@@ -288,6 +285,22 @@ export function D2SEConverter(
                 folder={current?.folder ?? ""}
                 disabled={locked || !manifest}
                 onChange={replaceManifest}
+                actions={
+                  <>
+                    <button type="button" className="ghost compact" disabled={busy} onClick={close}>
+                      {running.length ? tr("Close (copies continue)") : tr("Close")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost primary compact"
+                      disabled={locked || !manifest || exists}
+                      // An unpacked archive is Exordium's own copy: it is moved in, with nothing to ask.
+                      onClick={() => current?.archive ? void save("move") : setAsking(true)}
+                    >
+                      {busy ? tr("Working…") : mine ? badge(mine.job) : tr("Import")}
+                    </button>
+                  </>
+                }
               />
             )}
             <section className="option-section converter-json">
@@ -314,40 +327,45 @@ export function D2SEConverter(
           {problem && <p className="bad-text small">{problem}</p>}
         </section>
       </div>
-      <footer>
-        <div className="converter-copy">
-          {copying && (
-            <CopyProgress
-              job={copying.job}
-              label={`${
-                copying.move
-                  ? tr("Moving {label}", { label: copying.job.label })
-                  : tr("Copying {label}", { label: copying.job.label })
-              }${waitingCount ? tr(" ({waitingCount} more queued)", { waitingCount }) : ""}`}
-            />
-          )}
-          {!copying && waitingCount > 0 && (
-            <p className="muted small">{tr("{waitingCount} queued…", { waitingCount })}</p>
-          )}
-          {failed.length > 0 && (
-            <p className="bad-text small">
-              {tr("Not imported:")}{" "}
-              {failed.map((entry) => `${entry.job.label} (${entry.job.error ?? tr("failed")})`).join("; ")}
-            </p>
-          )}
-        </div>
-        <button type="button" className="ghost" disabled={busy} onClick={close}>
-          {running.length ? tr("Close (copies continue)") : tr("Close")}
-        </button>
-        <button
-          type="button"
-          className="ghost primary"
-          disabled={locked || !manifest || exists}
-          onClick={() => void save()}
-        >
-          {busy ? tr("Working…") : mine ? badge(mine.job) : tr("Import")}
-        </button>
-      </footer>
+      {(copying || waitingCount > 0 || failed.length > 0) && (
+        <footer>
+          <div className="converter-copy">
+            {copying && (
+              <CopyProgress
+                job={copying.job}
+                label={`${
+                  copying.mode === "move"
+                    ? tr("Moving {label}", { label: copying.job.label })
+                    : copying.mode === "link"
+                    ? tr("Linking {label}", { label: copying.job.label })
+                    : tr("Copying {label}", { label: copying.job.label })
+                }${waitingCount ? tr(" ({waitingCount} more queued)", { waitingCount }) : ""}`}
+              />
+            )}
+            {!copying && waitingCount > 0 && (
+              <p className="muted small">{tr("{waitingCount} queued…", { waitingCount })}</p>
+            )}
+            {failed.length > 0 && (
+              <p className="bad-text small">
+                {tr("Not imported:")}{" "}
+                {failed.map((entry) => `${entry.job.label} (${entry.job.error ?? tr("failed")})`).join("; ")}
+              </p>
+            )}
+          </div>
+        </footer>
+      )}
+      {asking && current && (
+        <ImportModeDialog
+          title={String(shown?.title || current.title)}
+          size={size}
+          fromInstall={!current.path}
+          onCancel={() => setAsking(false)}
+          onImport={(mode) => {
+            setAsking(false);
+            void save(mode);
+          }}
+        />
+      )}
     </div>
   );
 }
