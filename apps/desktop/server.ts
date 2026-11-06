@@ -111,6 +111,7 @@ import {
   DISCORD_CLIENT_ID,
   DiscordPresence,
   IDLE_ACTIVITY,
+  parseActivityJson,
   runActivity,
 } from "./discord.ts";
 import { DOC_TYPES, findDocs, modLinks, webUrl } from "./docs.ts";
@@ -1350,6 +1351,8 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
   let mod: ModImport | null = null;
   let setup: ModSetup;
   let saves: string;
+  // The mod's first two links, the buttons of its Discord presence.
+  let links: { label: string; url: string }[] = [];
   if (target.kind === "mod") {
     mod = imported.mods[0] ?? null;
     if (!mod) throw new HttpError(404, `No mod folder named "${target.folder}".`);
@@ -1361,6 +1364,7 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
       throw new HttpError(422, `No D2SE_SETUP.ini or ${EXORDIUM_MOD_FILE}: cannot build a launchable box.`);
     }
     setup = titleSetup;
+    links = modLinks(setup.mod, native?.links).slice(0, 2).map(({ label, url }) => ({ label, url }));
     const problems = [
       ...(native || !mod.setup
         ? modProblems(setup, mod.scan, imported.layout.cores, core?.scan ?? null)
@@ -1419,6 +1423,7 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     setup,
     plan,
     loader,
+    links,
     id,
     boxes: await Boxes.open(exordiumRoot),
     spec: {
@@ -1468,7 +1473,7 @@ async function realiseD2SEBox(
   };
   progress?.("checking");
   let lastHashProgress = 0;
-  const { imported, state, appSettings, core, setup, plan, loader, id, boxes, spec } = await boxSpecFor(
+  const { imported, state, appSettings, core, setup, plan, loader, links, id, boxes, spec } = await boxSpecFor(
     root,
     target,
     (read, total) => {
@@ -1525,7 +1530,7 @@ async function realiseD2SEBox(
   const iconFile = await modArt(imported.layout.root, target, "icon");
   const icon = iconFile ? gamePath(iconFile) : null;
   const presence = gamePresenceAllowed(state, appSettings)
-    ? activityJson(runActivity({ kind: target.kind, name: title, core: core?.version ?? loader.gameVersion ?? null }))
+    ? activityJson(runActivity({ kind: target.kind, name: title, version: setup.mod.version, links }))
     : null;
   progress?.("loader");
   const files = await installNativeLoader(
@@ -1943,9 +1948,9 @@ async function updatePresence(): Promise<void> {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
     if (!newest) want = showIdle ? IDLE_ACTIVITY : null;
     else if (newest.presence && showGames) {
-      want = { ...JSON.parse(newest.presence) as Activity, startedAt: Date.parse(newest.startedAt) };
+      want = { ...parseActivityJson(newest.presence), startedAt: Date.parse(newest.startedAt) };
       const character = await playingCharacter(newest, state);
-      if (character) want.state = characterLine(character);
+      if (character) want.details = characterLine(character);
     }
   }
   await discordPresence.set(want).catch(() => {});

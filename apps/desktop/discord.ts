@@ -21,36 +21,82 @@
 // "Diablo II" in the developer portal to keep the presence label. (2026-10-06)
 export const DISCORD_CLIENT_ID = "1557139755425071234";
 
+export interface ActivityButton {
+  label: string;
+  url: string;
+}
+
 export interface Activity {
+  /**
+   * What "Playing …" names, in place of the application's own name. Discord honours it over IPC
+   * (measured 2026-11-06: "Playing Diablo 09" on the profile and in member lists). Unset, the
+   * application's name shows.
+   */
+  name?: string;
   details?: string;
   state?: string;
+  /**
+   * Up to two link buttons (measured over IPC, 2026-11-06). Discord shows them only to other people,
+   * never on the player's own profile. `state_url` (clickable state text) also works, and markdown in
+   * the text does not.
+   */
+  buttons?: ActivityButton[];
   /** When the run started (ms since 1970); Discord counts the elapsed time from it. */
   startedAt?: number;
 }
 
-/** What a run shows: the title on top, what it is below. */
-export function runActivity(title: { kind: "mod" | "core"; name: string; core: string | null }): Activity {
-  if (title.kind === "core") return { details: title.name, state: `Vanilla · ${title.core ?? "?"}` };
-  return { details: title.name, state: title.core ? `Mod · ${title.core}` : "Mod" };
+/**
+ * What a run shows (the owner's layout, 2026-11-06): "Playing <mod> - <version>", the character once
+ * known (characterLine, set as `details` by the server), the elapsed time, and the mod's first two
+ * links as buttons (Homepage, Forum, Discord…). The core is not shown: players do not care which
+ * patch a mod runs on. A core alone is "Diablo II".
+ */
+export function runActivity(title: {
+  kind: "mod" | "core";
+  name: string;
+  version?: string | null;
+  links?: ActivityButton[];
+}): Activity {
+  const out: Activity = { name: title.kind === "core" ? "Diablo II" : modName(title.name, title.version ?? null) };
+  const buttons = cleanButtons(title.links);
+  if (buttons.length) out.buttons = buttons;
+  return out;
+}
+
+/** Discord's button limits: two at most, a label of 1 to 32 characters, an http(s) address up to 512. */
+function cleanButtons(buttons: ActivityButton[] | undefined): ActivityButton[] {
+  return (buttons ?? [])
+    .map((button) => ({ label: button.label.trim().slice(0, 32), url: button.url.trim() }))
+    .filter((button) => button.label && /^https?:\/\//i.test(button.url) && button.url.length <= 512)
+    .slice(0, 2);
+}
+
+/** `MortalBorne - 1.0.0`; no version when there is none, it is all zeros, or the title already ends with it. */
+function modName(name: string, version: string | null): string {
+  const v = version?.trim().replace(/^v/i, "");
+  if (!v || /^[0.]+$/.test(v) || name.toLowerCase().includes(v.toLowerCase())) return name;
+  return `${name} - ${v}`;
 }
 
 /**
  * The second line once the character being played is known (see playingCharacter in server.ts):
- * class and level, as the save had them last; no name, which is the player's own.
+ * class, level and softcore or hardcore, as the save had them last; no name, which is the player's own.
  */
 export function characterLine(character: { className: string; level: number; hardcore: boolean }): string {
-  return `Lv ${character.level} ${character.className}${character.hardcore ? " · Hardcore" : ""}`;
+  return `Lv ${character.level} ${character.className} ${character.hardcore ? "Hardcore" : "Softcore"}`;
 }
 
 export const IDLE_ACTIVITY: Activity = { details: "Choosing a mod", state: "in Exordium" };
 
 /** Discord's limits: 2 to 128 characters per text field. */
-function clean(activity: Activity): Activity {
-  const out: Activity = {};
-  for (const key of ["details", "state"] as const) {
+function clean(activity: Activity): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ["name", "details", "state"] as const) {
     const text = activity[key]?.trim();
     if (text) out[key] = text.length < 2 ? `${text} ` : text.slice(0, 128);
   }
+  const buttons = cleanButtons(activity.buttons);
+  if (buttons.length) out.buttons = buttons;
   return out;
 }
 
@@ -63,6 +109,7 @@ export const PRESENCE_ART = "exordiummain";
 
 export function activityJson(activity: Activity): string {
   const out: Record<string, unknown> = {
+    type: 0,
     ...clean(activity),
     assets: { large_image: PRESENCE_ART, large_text: "Exordium" },
   };
@@ -70,6 +117,24 @@ export function activityJson(activity: Activity): string {
     out.timestamps = { start: Math.floor(activity.startedAt / 1000) };
   }
   return JSON.stringify(out);
+}
+
+/** An activity back from activityJson's wire form (a box's stored presence); unknown fields dropped. */
+export function parseActivityJson(json: string): Activity {
+  const wire = JSON.parse(json) as Record<string, unknown>;
+  const text = (key: string) => typeof wire[key] === "string" ? wire[key] as string : undefined;
+  const out: Activity = {};
+  for (const key of ["name", "details", "state"] as const) {
+    const value = text(key);
+    if (value) out[key] = value;
+  }
+  const buttons = cleanButtons(
+    Array.isArray(wire.buttons)
+      ? wire.buttons.filter((b): b is ActivityButton => typeof b?.label === "string" && typeof b?.url === "string")
+      : [],
+  );
+  if (buttons.length) out.buttons = buttons;
+  return out;
 }
 
 const RESYNC_MS = 60_000;

@@ -66,20 +66,26 @@ export type TakeResult =
   | { taken: BackupInfo }
   | { skipped: "empty" | "unchanged" };
 
-/** A `.d2s` header (the first 0x34 bytes), or null when it is not one. */
+/**
+ * A `.d2s` header (the first 0x34 bytes), or null when it is not one. Saves before 1.09 (format 71 for
+ * 1.00–1.06, 87 and 89 for 1.07–1.08) keep the name at 0x08, the flags at 0x18 and class and level at
+ * 0x22 and 0x24, with no save time; 1.09 (92) and later (96) moved them (measured on D2SE's 1.00 and
+ * 1.07 saves, 2026-11-06).
+ */
 export function readCharacter(header: Uint8Array): Character | null {
   if (header.length < 0x34) return null;
   const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
   if (view.getUint32(0, true) !== 0xaa55aa55) return null;
-  const nameBytes = header.subarray(0x14, 0x24);
+  const old = view.getUint32(4, true) < 92;
+  const nameBytes = old ? header.subarray(0x08, 0x18) : header.subarray(0x14, 0x24);
   const end = nameBytes.indexOf(0);
-  const flags = header[0x24]!;
-  const classId = header[0x28]!;
-  const savedAt = view.getUint32(0x30, true);
+  const flags = header[old ? 0x18 : 0x24]!;
+  const classId = header[old ? 0x22 : 0x28]!;
+  const savedAt = old ? 0 : view.getUint32(0x30, true);
   return {
     name: new TextDecoder("windows-1252").decode(nameBytes.subarray(0, end < 0 ? 16 : end)),
     className: CLASSES[classId] ?? `Class ${classId}`,
-    level: header[0x2b]!,
+    level: header[old ? 0x24 : 0x2b]!,
     hardcore: (flags & 0x04) !== 0,
     dead: (flags & 0x08) !== 0,
     expansion: (flags & 0x20) !== 0,

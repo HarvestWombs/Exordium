@@ -5,6 +5,7 @@ function d2s(name: string, level: number, classId = 3): Uint8Array {
   const bytes = new Uint8Array(0x40);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, 0xaa55aa55, true);
+  view.setUint32(4, 96, true);
   bytes.set(new TextEncoder().encode(name), 0x14);
   bytes[0x24] = 0x20;
   bytes[0x28] = classId;
@@ -31,6 +32,31 @@ Deno.test("reads a character from a .d2s header", () => {
     savedAt: null,
   });
   assertEquals(readCharacter(new Uint8Array(0x40)), null);
+});
+
+Deno.test("reads a pre-1.09 character from its older header layout", () => {
+  // The first 0x30 bytes of D2SE's 1.00 and 1.07 saves.
+  const hex = (text: string) => Uint8Array.from(text.match(/../g)!.map((b) => parseInt(b, 16)));
+  const v100 = hex(
+    "55aa55aa" + "47000000" + "64667361" + "00000000" + "00000000" + "00000000" + "00000000" + "dd001000" +
+      "82000200" + "0100ffff" + "ffffff2b" + "ffffffff",
+  );
+  const v107 = hex(
+    "55aa55aa" + "57000000" + "48617276" + "65737400" + "00000000" + "00000000" + "20000000" + "3f011000" +
+      "82000100" + "0200ff01" + "01010125" + "ffff0202",
+  );
+  const pad = (bytes: Uint8Array) => Uint8Array.from({ length: 0x34 }, (_, i) => bytes[i] ?? 0xff);
+  assertEquals(readCharacter(pad(v100)), {
+    name: "dfsa",
+    className: "Necromancer",
+    level: 1,
+    hardcore: false,
+    dead: false,
+    expansion: false,
+    savedAt: null,
+  });
+  const harvest = readCharacter(pad(v107))!;
+  assertEquals([harvest.name, harvest.className, harvest.level, harvest.expansion], ["Harvest", "Sorceress", 2, true]);
 });
 
 Deno.test("takes nothing from an empty save folder", async () => {
