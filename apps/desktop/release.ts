@@ -117,6 +117,20 @@ for (const name of APP_FILES) {
     Deno.exit(1);
   }
 }
+// The package must be this version's build. 0.2.5 went out holding 0.2.4's program because packaging
+// was skipped after the bump: installed copies applied it, still ran 0.2.4, and offered 0.2.5 again
+// forever. The bundled deno.json carries the version, so a stale Exordium.dll lacks this one.
+{
+  const bundle = new TextDecoder("latin1").decode(await Deno.readFile(`${app}/Exordium.dll`));
+  const built = [...bundle.matchAll(/"version":\s*"(\d+\.\d+\.\d+[^"]*)"/g)].map((m) => m[1]);
+  if (!built.includes(APP_VERSION)) {
+    const found = [...new Set(built)].join(", ") || "none";
+    console.error(
+      `${app}/Exordium.dll is not a ${APP_VERSION} build (it has ${found}): run "deno task desktop" first.`,
+    );
+    Deno.exit(1);
+  }
+}
 for (const folder of APP_FOLDERS) {
   if (await Deno.stat(`${app}/${folder}`).then((s) => s.isDirectory, () => false)) {
     paths.push(...await filesIn(app, folder));

@@ -12,13 +12,18 @@
  * Exordium is portable: its state (exordium.json, boxes, backups, logs...) lives beside the exe. An
  * update replaces only the files the list names, so nothing else in the folder is touched.
  *
+ * Only files that changed are written. The zip is read in memory, and a file whose installed copy
+ * already matches the new list is never unpacked or swapped. Every exe written to disk is judged
+ * afresh by Defender's real-time scan, and rewriting the 21 unchanged loader copies on each update
+ * got some of them quarantined (2026-11-05), which failed the update.
+ *
  * Applying swaps each file in place. Windows lets a running exe or a loaded DLL be renamed, so the old
  * one is renamed aside (`*.exordium-old`), the new one moved into its place, and Exordium restarts;
  * the next start deletes what was set aside (sweep). A failed swap puts every file back.
  */
 
 import desktop from "./deno.json" with { type: "json" };
-import { extract } from "./install.ts";
+import { zipMembers } from "./zip.ts";
 
 export const APP_VERSION: string = desktop.version;
 
@@ -436,23 +441,31 @@ export class Updater {
         throw new UpdateError("The download does not match GitHub's checksum; nothing was installed.");
       }
 
-      await Deno.remove(staging, { recursive: true }).catch(() => {});
-      await Deno.mkdir(staging, { recursive: true });
-      const archive = `${staging}/${update.asset.name}`;
-      await Deno.writeFile(archive, bytes);
-      const files = `${staging}/files`;
-      await extract(archive, files);
-      await Deno.remove(archive);
-      const list = await this.#signedList(files);
+      const members = zipMembers(bytes);
+      const listBytes = await members.get(FILE_LIST)?.read();
+      const signatureBytes = await members.get(SIGNATURE_FILE)?.read();
+      const list = await this.#verifiedList(
+        listBytes ?? null,
+        signatureBytes ? new TextDecoder().decode(signatureBytes) : null,
+      );
       if (list.version !== update.version) {
         throw new UpdateError(`The zip is for ${list.version}, not ${update.version}.`);
       }
+
+      await Deno.remove(staging, { recursive: true }).catch(() => {});
+      const files = `${staging}/files`;
+      await Deno.mkdir(files, { recursive: true });
       for (const file of list.files) {
-        const data = await Deno.readFile(`${files}/${file.path}`).catch(() => null);
+        if (await this.#installed(file)) continue;
+        const data = await members.get(file.path)?.read();
         if (!data || data.length !== file.size || await sha256Hex(data) !== file.sha256) {
           throw new UpdateError(`${file.path} in the update does not match its file list.`);
         }
+        await Deno.mkdir(`${files}/${file.path}`.replace(/\/[^/]+$/, ""), { recursive: true });
+        await Deno.writeFile(`${files}/${file.path}`, data);
       }
+      await Deno.writeFile(`${files}/${FILE_LIST}`, listBytes!);
+      await Deno.writeFile(`${files}/${SIGNATURE_FILE}`, signatureBytes!);
       this.#state = { ...this.#state, phase: "ready" };
     } catch (error) {
       await Deno.remove(staging, { recursive: true }).catch(() => {});
@@ -480,9 +493,15 @@ export class Updater {
     try {
       for (const file of list.files) {
         const dest = `${this.appDir}/${file.path}`;
+        const staged = `${staging}/${file.path}`;
+        // Not unpacked because the installed copy matched; it must still match, or the update is incomplete.
+        if (!(await exists(staged))) {
+          if (await this.#installed(file)) continue;
+          throw new UpdateError(`${file.path} changed after the update was downloaded.`);
+        }
         await Deno.mkdir(dest.replace(/\/[^/]+$/, ""), { recursive: true });
         const aside = await this.#setAside(dest);
-        await Deno.rename(`${staging}/${file.path}`, dest);
+        await Deno.rename(staged, dest);
         done.push({ dest, aside });
       }
       // Files the old version had and the new one does not: set aside too, removed by the sweep.
@@ -511,13 +530,27 @@ export class Updater {
     return this.#state.update!.version;
   }
 
-  /** The unpacked update's file list, once its signature has been checked. */
+  /** The staged update's file list, once its signature has been checked. */
   async #signedList(folder: string): Promise<FileList> {
+    return await this.#verifiedList(
+      await Deno.readFile(`${folder}/${FILE_LIST}`).catch(() => null),
+      await Deno.readTextFile(`${folder}/${SIGNATURE_FILE}`).catch(() => null),
+    );
+  }
+
+  /** Whether the installed copy of `file` is already the one the new list names, read from disk. */
+  async #installed(file: FileList["files"][number]): Promise<boolean> {
+    const path = `${this.appDir}/${file.path}`;
+    const info = await Deno.stat(path).catch(() => null);
+    if (!info?.isFile || info.size !== file.size) return false;
+    const data = await Deno.readFile(path).catch(() => null);
+    return data !== null && await sha256Hex(data) === file.sha256;
+  }
+
+  async #verifiedList(bytes: Uint8Array<ArrayBuffer> | null, signature: string | null): Promise<FileList> {
     if (this.#keys.length === 0) {
       throw new UpdateError("This build has no release key, so it cannot check an update's signature.");
     }
-    const bytes = await Deno.readFile(`${folder}/${FILE_LIST}`).catch(() => null);
-    const signature = await Deno.readTextFile(`${folder}/${SIGNATURE_FILE}`).catch(() => null);
     if (!bytes || !signature) throw new UpdateError("The update is not signed; nothing was installed.");
     if (!(await verifySignature(bytes, signature, this.#keys))) {
       throw new UpdateError("The update's signature is not HarvestLabs'; nothing was installed.");

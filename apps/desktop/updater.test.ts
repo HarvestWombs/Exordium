@@ -175,6 +175,78 @@ Deno.test("an update downloads, is checked, swaps the app's files and leaves eve
   }
 });
 
+Deno.test("an update writes only the files that changed; the loader copies are never rewritten", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const app = `${dir}/app`;
+  const loader = "native/game/1.10f/Game.exe";
+  const loaderText = "the same loader, release after release ".repeat(200);
+  await Deno.mkdir(`${app}/native/game/1.10f`, { recursive: true });
+  await Deno.writeTextFile(`${app}/Exordium.exe`, "old exe");
+  await Deno.writeTextFile(`${app}/${loader}`, loaderText);
+  await Deno.writeTextFile(`${app}/native/edited.dll`, "edited by hand");
+  const loaderTime = (await Deno.stat(`${app}/${loader}`)).mtime;
+
+  const zip = await zipOf(dir, {
+    "Exordium.exe": "new exe ".repeat(500),
+    [loader]: loaderText,
+    "native/edited.dll": "as released",
+  }, "0.2.0");
+  const server = fakeGitHub(zip, await sha256Hex(zip as Uint8Array<ArrayBuffer>), "0.2.0");
+  try {
+    const updater = new Updater({
+      appDir: app,
+      repo: "me/app",
+      api: `http://127.0.0.1:${server.addr.port}`,
+      publicKeys: keys,
+    });
+    updater.setCurrent("0.1.0");
+    await updater.check(false);
+    const ready = await updater.download();
+    assertEquals(ready.error, null);
+    const staged = `${app}/.exordium-update/files`;
+    assert(!(await Deno.stat(`${staged}/${loader}`).then(() => true, () => false)), "the loader was unpacked");
+    assertEquals(await Deno.readTextFile(`${staged}/native/edited.dll`), "as released");
+
+    assertEquals(await updater.apply(), "0.2.0");
+    assertEquals(await Deno.readTextFile(`${app}/Exordium.exe`), "new exe ".repeat(500));
+    assertEquals(await Deno.readTextFile(`${app}/native/edited.dll`), "as released");
+    assertEquals(await Deno.readTextFile(`${app}/${loader}`), loaderText);
+    assertEquals((await Deno.stat(`${app}/${loader}`)).mtime, loaderTime);
+    assert(!(await Deno.stat(`${app}/${loader}.exordium-old`).then(() => true, () => false)));
+    assertEquals((JSON.parse(await Deno.readTextFile(`${app}/${FILE_LIST}`)) as FileList).version, "0.2.0");
+  } finally {
+    await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a file left out of the staging that changed before applying stops the update", async () => {
+  const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
+  const app = `${dir}/app`;
+  await Deno.mkdir(app, { recursive: true });
+  await Deno.writeTextFile(`${app}/Exordium.exe`, "old exe");
+  await Deno.writeTextFile(`${app}/same.dll`, "same");
+  const zip = await zipOf(dir, { "Exordium.exe": "new exe", "same.dll": "same" }, "0.2.0");
+  const server = fakeGitHub(zip, await sha256Hex(zip as Uint8Array<ArrayBuffer>), "0.2.0");
+  try {
+    const updater = new Updater({
+      appDir: app,
+      repo: "me/app",
+      api: `http://127.0.0.1:${server.addr.port}`,
+      publicKeys: keys,
+    });
+    updater.setCurrent("0.1.0");
+    await updater.check(false);
+    assertEquals((await updater.download()).phase, "ready");
+    await Deno.writeTextFile(`${app}/same.dll`, "changed meanwhile");
+    await assertRejects(() => updater.apply(), UpdateError, "same.dll changed");
+    assertEquals(await Deno.readTextFile(`${app}/Exordium.exe`), "old exe");
+  } finally {
+    await server.shutdown();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("a download that does not match GitHub's checksum is never applied", async () => {
   const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
   const app = `${dir}/app`;
