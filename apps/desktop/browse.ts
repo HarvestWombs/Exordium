@@ -11,6 +11,8 @@
  */
 
 import { installArchive, type InstallResult } from "./install.ts";
+import { inspectMod, type ModInspection, modRoot, type ModTexts } from "./mod-inspect.ts";
+import { APP_VERSION } from "./updater.ts";
 
 export const ARCHIVE_QUERY = 'subject:"Diablo 2 mod"';
 export const MODDB_URL = "https://www.moddb.com/games/diablo-2-lod/mods";
@@ -23,6 +25,31 @@ const ARCHIVE_TTL_MS = 12 * 60 * 60 * 1000;
 const MODDB_TTL_MS = 12 * 60 * 60 * 1000;
 const MODDB_MAX_PAGES = 25;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+// ---- Being a good archive.org client ---------------------------------------------------------------
+
+/** Who is asking: archive.org asks automated clients to say so. */
+const USER_AGENT = `Exordium/${APP_VERSION} (Diablo II mod launcher)`;
+
+/** No request to archive.org before this time: set when it answers 429 or 503 (too busy). */
+let archivePausedUntil = 0;
+
+/**
+ * Every request to archive.org: it says who is asking, and when archive.org answers 429 (too many
+ * requests) or 503 (overloaded), every request waits for its Retry-After, or a minute, before the next.
+ */
+async function archiveFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const wait = archivePausedUntil - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  const headers = new Headers(init.headers);
+  headers.set("user-agent", USER_AGENT);
+  const response = await fetch(url, { ...init, headers });
+  if (response.status === 429 || response.status === 503) {
+    const after = Number(response.headers.get("retry-after"));
+    archivePausedUntil = Date.now() + (Number.isFinite(after) && after > 0 ? after * 1000 : 60_000);
+  }
+  return response;
+}
 const DOWNLOAD_FILE = /\.(zip|rar|7z|tar|tgz|gz|bz2|xz)$/i;
 const EXECUTABLE_FILE = /\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|jar)$/i;
 
@@ -35,9 +62,20 @@ export interface KeywordGroup {
 }
 
 /**
+ * An English pattern that also matches Russian word stems: a readme in Russian should tag the same.
+ * JavaScript's \b only knows Latin letters, so the stems start where no letter comes before them.
+ */
+function words(english: RegExp, russian: string): RegExp {
+  return new RegExp(`${english.source}|(?<!\\p{L})(?:${russian})`, "iu");
+}
+
+/** Never matches: a keyword only an archive's contents add (inspectionKeywords), never its words. */
+const CONTENTS_ONLY = /(?!)/;
+
+/**
  * Common Diablo II modding terms, matched against an entry's title, description and tags. archive.org
  * items rarely tag more than "Diablo 2 mod", so the text is what there is. Plain dictionary matching:
- * an entry shows a keyword only when its own words say so.
+ * an entry shows a keyword only when its own words say so, in English or Russian.
  */
 export const KEYWORD_GROUPS: KeywordGroup[] = [
   {
@@ -63,20 +101,57 @@ export const KEYWORD_GROUPS: KeywordGroup[] = [
       {
         id: "overhaul",
         label: "Overhaul",
-        pattern: /\b(overhaul|total conversion|complete (mod|rework)|rebalanc\w*)\b/i,
+        pattern: words(
+          /\b(overhaul|total conversion|complete (mod|rework)|rebalanc\w*)\b/i,
+          "ребаланс|баланс|переработ|глобальн",
+        ),
       },
-      { id: "items", label: "Items", pattern: /\b(items?|uniques?|runewords?|set items?|affix\w*|loot)\b/i },
-      { id: "skills", label: "Skills & classes", pattern: /\b(skills?|skill trees?|new class\w*|classes)\b/i },
-      { id: "monsters", label: "Monsters", pattern: /\b(monsters?|bosses|boss|enemies)\b/i },
-      { id: "maps", label: "Maps & areas", pattern: /\b(maps?|areas?|levels?|dungeons?|zones?|acts?\s*[1-6vi]*)\b/i },
+      {
+        id: "items",
+        label: "Items",
+        pattern: words(
+          /\b(items?|uniques?|runewords?|set items?|affix\w*|loot)\b/i,
+          "предмет|уникальн|рунн|руны|рунам|экипиров|амулет|талисман|кольц",
+        ),
+      },
+      {
+        id: "skills",
+        label: "Skills & classes",
+        pattern: words(/\b(skills?|skill trees?|new class\w*|classes)\b/i, "навык|умени|способност|скилл|класс"),
+      },
+      {
+        id: "monsters",
+        label: "Monsters",
+        pattern: words(/\b(monsters?|bosses|boss|enemies)\b/i, "монстр|босс|враг|чудовищ"),
+      },
+      {
+        id: "maps",
+        label: "Maps & areas",
+        pattern: words(/\b(maps?|areas?|levels?|dungeons?|zones?|acts?\s*[1-6vi]*)\b/i, "локаци|подземел|карты|карта"),
+      },
       {
         id: "graphics",
         label: "Graphics",
-        pattern: /\b(graphics?|textures?|sprites?|hd|high resolution|resolution|d2gl|glide|widescreen)\b/i,
+        pattern: words(
+          /\b(graphics?|textures?|sprites?|hd|high resolution|resolution|d2gl|glide|widescreen)\b/i,
+          "графи|текстур|спрайт|разрешени",
+        ),
       },
-      { id: "sound", label: "Sound & music", pattern: /\b(sounds?|music|audio|voice)\b/i },
-      { id: "utility", label: "Tools & utilities", pattern: /\b(tool|utility|editor|loader|launcher|plugin)\b/i },
-      { id: "fix", label: "Fixes", pattern: /\b(fix(es|ed)?|bug\s*fix\w*|patch(es)?)\b/i },
+      {
+        id: "sound",
+        label: "Sound & music",
+        pattern: words(/\b(sounds?|music|audio|voice)\b/i, "звук|музык|озвуч"),
+      },
+      {
+        id: "utility",
+        label: "Tools & utilities",
+        pattern: words(/\b(tool|utility|editor|loader|launcher|plugin)\b/i, "утилит|редактор|загрузчик|лаунчер|плагин"),
+      },
+      {
+        id: "fix",
+        label: "Fixes",
+        pattern: words(/\b(fix(es|ed)?|bug\s*fix\w*|patch(es)?)\b/i, "исправлен|фикс|баг"),
+      },
     ],
   },
   {
@@ -89,12 +164,49 @@ export const KEYWORD_GROUPS: KeywordGroup[] = [
       {
         id: "multiplayer",
         label: "Multiplayer",
-        pattern: /\b(multi\s*-?player|battle\.?net|pvpgn|realm|tcp\/?ip|lan|co-?op)\b/i,
+        pattern: words(
+          /\b(multi\s*-?player|battle\.?net|pvpgn|realm|tcp\/?ip|lan|co-?op)\b/i,
+          "мультиплеер|по сети|сетев|кооператив",
+        ),
       },
-      { id: "single", label: "Single player", pattern: /\bsingle\s*-?player\b/i },
-      { id: "hardcore", label: "Hardcore", pattern: /\bhardcore\b/i },
-      { id: "stash", label: "Shared stash", pattern: /\b(shared stash|stash)\b/i },
+      { id: "single", label: "Single player", pattern: words(/\bsingle\s*-?player\b/i, "одиночн") },
+      { id: "hardcore", label: "Hardcore", pattern: words(/\bhardcore\b/i, "хардкор") },
+      {
+        id: "stash",
+        label: "Shared stash",
+        pattern: words(/\b(shared stash|stash)\b/i, "общий сундук|общий тайник|общего сундука"),
+      },
       { id: "median", label: "Median XL", pattern: /\bmedian\b/i },
+    ],
+  },
+  {
+    id: "contents",
+    label: "CONTAINS",
+    // Only an archive's contents add these (inspectionKeywords), and only for what is not a mod.
+    keywords: [
+      { id: "contents-data", label: "Loose data files", pattern: CONTENTS_ONLY },
+      { id: "contents-game", label: "Game folders", pattern: CONTENTS_ONLY },
+      { id: "contents-saves", label: "Character saves", pattern: CONTENTS_ONLY },
+      { id: "contents-tool", label: "Tools", pattern: CONTENTS_ONLY },
+      { id: "contents-docs", label: "Documentation", pattern: CONTENTS_ONLY },
+    ],
+  },
+  {
+    id: "language",
+    label: "LANGUAGE",
+    // Only an archive's contents add these (inspectionKeywords): a mod's language folder, or the
+    // script its readme is written in. English, the default, gets no tag.
+    keywords: [
+      { id: "lang-rus", label: "Russian", pattern: CONTENTS_ONLY },
+      { id: "lang-pol", label: "Polish", pattern: CONTENTS_ONLY },
+      { id: "lang-deu", label: "German", pattern: CONTENTS_ONLY },
+      { id: "lang-fra", label: "French", pattern: CONTENTS_ONLY },
+      { id: "lang-esp", label: "Spanish", pattern: CONTENTS_ONLY },
+      { id: "lang-ita", label: "Italian", pattern: CONTENTS_ONLY },
+      { id: "lang-por", label: "Portuguese", pattern: CONTENTS_ONLY },
+      { id: "lang-kor", label: "Korean", pattern: CONTENTS_ONLY },
+      { id: "lang-chi", label: "Chinese", pattern: CONTENTS_ONLY },
+      { id: "lang-jpn", label: "Japanese", pattern: CONTENTS_ONLY },
     ],
   },
 ];
@@ -115,6 +227,18 @@ export function keywordsFor(text: string): string[] {
  * and the Microsoft Translator widget text that several uploads pasted in along with their
  * description ("TRANSLATE with x English Arabic …") cut off.
  */
+/** The named entities mod readmes use besides the basic five: their symbols and dashes. */
+const NAMED_ENTITIES: Record<string, string> = {
+  reg: "®",
+  trade: "™",
+  copy: "©",
+  hellip: "…",
+  mdash: "—",
+  ndash: "–",
+  laquo: "«",
+  raquo: "»",
+};
+
 export function cleanDescription(html: unknown): string {
   const raw = Array.isArray(html) ? html.join("\n") : typeof html === "string" ? html : "";
   const text = raw
@@ -128,7 +252,11 @@ export function cleanDescription(html: unknown): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)));
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(
+      /&(reg|trade|copy|hellip|mdash|ndash|laquo|raquo);/gi,
+      (_, name: string) => NAMED_ENTITIES[name.toLowerCase()]!,
+    );
   const tidy = text.replace(/[ \t\u00a0]+/g, " ").replace(/\s*\n\s*/g, "\n");
   const cut = tidy.search(/TRANSLATE\s+with\s+x\b/i);
   return (cut >= 0 ? tidy.slice(0, cut) : tidy).trim();
@@ -202,7 +330,14 @@ export function archiveItemFromDoc(doc: ArchiveDoc): BrowseItem | null {
   };
 }
 
-/** The whole archive.org list, from a cache under `cacheDir` that is refreshed after 12 hours. */
+/** A list refresh already under way, so one opening of Browse never starts two. */
+let listRefresh: Promise<{ items: BrowseItem[]; fetchedAt: string }> | null = null;
+
+/**
+ * The whole archive.org list, from a cache under `cacheDir`. Once there is one, it is what Browse gets
+ * at once; past 12 hours old it is fetched again behind it, for the next look. Only asking with
+ * `refresh` (the page's Refresh) waits for archive.org.
+ */
 export async function archiveList(
   cacheDir: string,
   refresh = false,
@@ -211,15 +346,24 @@ export async function archiveList(
   if (!refresh) {
     try {
       const cached = JSON.parse(await Deno.readTextFile(file)) as { items: BrowseItem[]; fetchedAt: string };
-      if (Date.now() - Date.parse(cached.fetchedAt) < ARCHIVE_TTL_MS) return cached;
+      if (Date.now() - Date.parse(cached.fetchedAt) >= ARCHIVE_TTL_MS && !listRefresh) {
+        listRefresh = fetchArchiveList(file).finally(() => (listRefresh = null));
+        listRefresh.catch(() => {});
+      }
+      return cached;
     } catch {
       // Missing or unreadable: fetch.
     }
   }
+  return await (listRefresh ?? fetchArchiveList(file));
+}
+
+async function fetchArchiveList(file: string): Promise<{ items: BrowseItem[]; fetchedAt: string }> {
+  const cacheDir = file.slice(0, file.lastIndexOf("/"));
   const fields = ["identifier", "title", "description", "subject", "creator", "publicdate", "downloads", "item_size"];
   const query = new URLSearchParams({ q: ARCHIVE_QUERY, rows: "1000", page: "1", output: "json" });
   for (const field of fields) query.append("fl[]", field);
-  const response = await fetch(`https://archive.org/advancedsearch.php?${query}`);
+  const response = await archiveFetch(`https://archive.org/advancedsearch.php?${query}`);
   if (!response.ok) throw new Error(`archive.org search answered ${response.status}`);
   const body = await response.json() as { response?: { docs?: ArchiveDoc[] } };
   const items = (body.response?.docs ?? []).map(archiveItemFromDoc).filter((item): item is BrowseItem => item !== null);
@@ -727,13 +871,15 @@ export interface ItemDetails {
   keywords: string[];
   /** The main archive's unpacked size, from its listing; 0 when unknown. */
   unpackedSize: number;
+  /** What the archive says about the mod: its core, launch options, language, loaders… */
+  inspection: ModInspection | null;
 }
 
 const ARCHIVE_FILE = /\.(zip|rar|7z|mpq)$/i;
 const LISTABLE = /\.(zip|rar|7z)$/i;
 const IMAGE_FILE = /\.(png|jpe?g|gif|bmp|webp)$/i;
 /** Bumped when what is stored per item changes, so old cached details are read again. */
-const DETAILS_VERSION = 2;
+const DETAILS_VERSION = 9;
 const details = new Map<string, ItemDetails>();
 
 function downloadUrl(id: string, name: string): string {
@@ -747,16 +893,23 @@ function imageUrl(id: string, name: string): string {
 
 /**
  * archive.org's listing of the files inside an archive: its "view contents" page, one row per file
- * with its size. Works for zip, 7z and rar; serving a single file from inside works for zip only
+ * with its size. Works for zip, 7z and rar; serving a single file from inside works for zip and rar
  * (a file inside a 7z comes back empty).
  */
-export function parseArchiveListing(html: string): ArchiveMember[] {
+export function parseArchiveListing(html: string, archive?: string): ArchiveMember[] {
   const members: ArchiveMember[] = [];
-  const row =
-    /<a href="\/\/archive\.org\/download\/[^"]+?\.(?:zip|rar|7z)\/([^"]+)">[^<]*<\/a><td>[^<]*<td>[^<]*<td id="size">(\d+)/gi;
+  const row = /<a href="\/\/archive\.org\/download\/([^"]+)">[^<]*<\/a><td>[^<]*<td>[^<]*<td id="size">(\d+)/gi;
+  // A link is <item id>/<archive>/<member>. The archive's own name marks where the member starts: an
+  // item id can end in ".7z" itself ("...-sigma-2.3.2.7z"), so the first archive extension is not it.
+  const marker = archive ? `/${archive.replace(/\\/g, "/")}/` : null;
   for (const match of html.matchAll(row)) {
     try {
-      members.push({ path: decodeURIComponent(match[1]!), size: Number(match[2]) });
+      const href = decodeURIComponent(match[1]!);
+      const at = marker ? href.indexOf(marker) : -1;
+      const path = at >= 0
+        ? href.slice(at + marker!.length)
+        : /^[^/]+\/(?:.+?\.(?:zip|rar|7z))\/(.+)$/i.exec(href)?.[1];
+      if (path) members.push({ path, size: Number(match[2]) });
     } catch {
       // A name that does not decode is skipped.
     }
@@ -776,18 +929,39 @@ export function contentKeywords(members: readonly ArchiveMember[]): string[] {
   return found;
 }
 
-function decodeText(bytes: Uint8Array): string {
+/**
+ * A text file's bytes as text, whatever it was saved in. UTF-8 and UTF-16 say so (a BOM, or bytes
+ * that are only valid as UTF-8); otherwise an old Windows or DOS code page. Russian readmes are mostly
+ * Windows-1251, some DOS 866: the one whose Cyrillic letters run together in words wins, and Western
+ * text, whose few high bytes are lone accents inside Latin words, stays Windows-1252.
+ */
+export function decodeText(bytes: Uint8Array): string {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder("utf-8").decode(bytes);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return new TextDecoder("windows-1252").decode(bytes);
+    // Not UTF-8: a code page, chosen below.
   }
+  const cyrillicRuns = (text: string) => text.match(/[А-яЁё]{2,}/g)?.join("").length ?? 0;
+  const highBytes = bytes.reduce((count, byte) => count + (byte >= 0x80 ? 1 : 0), 0);
+  let best = { text: "", score: 0 };
+  for (const label of ["windows-1251", "ibm866"]) {
+    const text = new TextDecoder(label).decode(bytes);
+    const score = cyrillicRuns(text);
+    if (score > best.score) best = { text, score };
+  }
+  // Mostly Cyrillic words among the high bytes, or it was Western text all along.
+  return best.score > highBytes * 0.6 ? best.text : new TextDecoder("windows-1252").decode(bytes);
 }
 
-/** A small text file from inside a zip on archive.org; null when it cannot be read. */
+/** A small text file from inside a zip or a rar on archive.org; null when it cannot be read. */
 async function memberText(id: string, archive: string, member: string, limit = 24 * 1024): Promise<string | null> {
   try {
-    const response = await fetch(`${downloadUrl(id, archive)}/${member.split("/").map(encodeURIComponent).join("/")}`);
+    const response = await archiveFetch(
+      `${downloadUrl(id, archive)}/${member.split("/").map(encodeURIComponent).join("/")}`,
+    );
     if (!response.ok || !response.body) return null;
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -822,68 +996,256 @@ function iniValues(text: string): Map<string, string> {
   return values;
 }
 
-const README = /(^|\/)(read\s*-?_?me|mod\s*info|modinfo|info|description|about)[^/]*\.(txt|nfo|md)$/i;
+/** A readme's name, in English or Russian: the description and the installation notes. */
+const README =
+  /(read\s*-?_?me|mod\s*info|modinfo|info|description|about|install|прочти|прочитай|описани|установк|инструкц|информац)/iu;
+/** A changelog's name: the next best thing to a readme. */
+const CHANGELOG = /(change\s*log|changes|history|whats?\s*new|изменени|история|список)/iu;
+const TEXT_FILE = /\.(txt|nfo|md)$/i;
+
+/**
+ * The archive's readme: the one its D2SE setup names, else a text file outside data/ and near the
+ * top, a readme by name first, then a changelog, then any; the larger of equals, since a few lines
+ * rarely describe a mod.
+ */
+export function pickReadme(members: readonly ArchiveMember[], named: string | null, title = ""): ArchiveMember | null {
+  return readmeCandidates(members, named, title)[0] ?? null;
+}
+
+/**
+ * A log the game or a wrapper wrote (debuglog240213.txt, BnetLog.txt, d2dx_log.txt, D2Debug.txt, a
+ * crash dump): never a readme. A changelog is not one: "log" must start the name or follow a
+ * separator or one of the words that make it a log.
+ */
+const LOG_FILE = /(^|[_\-\s.]|debug|bnet|error|crash|d2|realm|game)log[\w\-]*\.(txt|log)$|debug|crash|dump/i;
+
+/** The readme candidates, likeliest first (pickReadme): the next is tried when one turns out a log. */
+export function readmeCandidates(
+  members: readonly ArchiveMember[],
+  named: string | null,
+  title = "",
+): ArchiveMember[] {
+  const own = named ? members.find((member) => member.path.toLowerCase() === named.toLowerCase()) : undefined;
+  const root = modRoot(members.map((member) => member.path));
+  const words = titleWords(title);
+  // Where a mod keeps its own words: its folder, the archive's top, or a docs folder in either.
+  const placed = (path: string) => {
+    const lower = path.toLowerCase();
+    const dir = lower.slice(0, lower.lastIndexOf("/") + 1);
+    if (dir === root || dir === "") return true;
+    const parent = dir.slice(0, dir.slice(0, -1).lastIndexOf("/") + 1);
+    const folder = dir.slice(parent.length, -1);
+    return (parent === root || parent === "") && DOCS_FOLDER.test(folder);
+  };
+  const candidates = members.filter((member) =>
+    member !== own && TEXT_FILE.test(member.path) && member.size > 0 && member.size < 512 * 1024 &&
+    placed(member.path) && !LOG_FILE.test(member.path.split("/").pop()!) &&
+    // Below the mod's own folder only: many mods name theirs for what they ship ("… v1.80 D2GL QoL").
+    !PLUGIN.test(member.path.slice(member.path.toLowerCase().startsWith(root) ? root.length : 0))
+  );
+  const rank = (member: ArchiveMember) => {
+    const name = member.path.split("/").pop()!;
+    // Its own name in the file's name ("Zy-El readme.txt") outranks a generic readme.
+    const named = words.some((word) => name.toLowerCase().includes(word)) ? 3 : 0;
+    return named + (README.test(name) ? 3 : CHANGELOG.test(name) ? 2 : 1);
+  };
+  const sorted = candidates.sort((a, b) =>
+    rank(b) - rank(a) || a.path.split("/").length - b.path.split("/").length || b.size - a.size
+  );
+  return own ? [own, ...sorted] : sorted;
+}
+
+/** A folder a mod keeps its documents in. */
+const DOCS_FOLDER = /^(docs?|documentation|readme|manuals?|guides?|help|info|документац\w*|инструкц\w*)$/iu;
+
+/**
+ * Plugins, wrappers and tools mods ship beside themselves: a file or folder named for one holds that
+ * plugin's readme, not the mod's ("PlugY/PlugY_The_Survival_Kit_-_Readme.txt", "D2GL/readme.txt").
+ */
+const PLUGIN =
+  /(plugy|d2mod|d2gl|d2dx|glide|sven|d2hd|multires|sgd2freeres|d2expres|reshade|ddraw|dgvoodoo|dxwrapper|d2hackmap|maphack|d2loader|basemod|d2se|(^|[^a-z])bh([^a-z]|$))/i;
+
+/** A title's distinctive words, lowercased: those of four letters or more that are not D2 boilerplate. */
+function titleWords(title: string): string[] {
+  const generic = new Set(["d2se", "diablo", "mod", "mods", "edition", "final", "version", "with", "full", "lord"]);
+  return (title.toLowerCase().match(/\p{L}[\p{L}\d'-]{3,}/gu) ?? []).filter((word) => !generic.has(word));
+}
+
+/**
+ * Text that opens as a plugin's own readme: its first lines name a plugin and not the mod. Cross-checked
+ * against the title, so a mod's readme that mentions PlugY further down, or a mod named after one, stays.
+ */
+export function aboutPlugin(text: string, title: string): boolean {
+  const head = text.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 5).join(" ").toLowerCase();
+  const words = titleWords(title);
+  return PLUGIN.test(head) && !words.some((word) => head.includes(word));
+}
+
+/**
+ * Text whose lines mostly carry a time of day near their start (18:34:05): a log, whatever its name
+ * says. A dated changelog has dates, rarely times, so it still reads as a readme.
+ */
+export function looksLikeLog(text: string): boolean {
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line && !/^[-=*_#]+$/.test(line))
+    .slice(0, 20);
+  const stamped = lines.filter((line) => /\b\d{1,2}:\d{2}:\d{2}\b/.test(line.slice(0, 32)));
+  return lines.length >= 4 && stamped.length / lines.length > 0.4;
+}
+
+/**
+ * Text that is mostly a data table (tab-separated columns, like a plugin's statsinterface.txt) or
+ * settings (key=value lines): a file the mod reads, not one written for the player.
+ */
+export function looksLikeData(text: string): boolean {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 30);
+  const data = lines.filter((line) => (line.match(/\t/g)?.length ?? 0) >= 3 || /^[\w.\[\]]+\s*=/.test(line));
+  return lines.length >= 4 && data.length / lines.length > 0.5;
+}
+
+/** Text with sentences in it (lines of five words or more): what anything written for a person has. */
+export function hasProse(text: string): boolean {
+  const sentences = text.split("\n").filter((line) => (line.match(/\p{L}{2,}/gu)?.length ?? 0) >= 5);
+  return sentences.length >= 2;
+}
+
+/** Single files can be read from inside these on archive.org; from inside a 7z they come back empty. */
+const READABLE = /\.(zip|rar)$/i;
+
+/** An archive's file list from archive.org; null when it cannot be read. */
+async function listing(id: string, name: string): Promise<ArchiveMember[] | null> {
+  try {
+    const response = await archiveFetch(`${downloadUrl(id, name)}/`);
+    return response.ok ? parseArchiveListing(await response.text(), name) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The shortest path matching `pattern`: the mod's own copy, not a backup deeper down. */
+function shallowest(members: readonly ArchiveMember[], pattern: RegExp): ArchiveMember | undefined {
+  return members.filter((member) => pattern.test(member.path)).sort((a, b) => a.path.length - b.path.length)[0];
+}
 
 /**
  * Reads what the mod inside an item's main archive says about itself: from the listing, what it
- * contains; for a zip, its D2SE_SETUP.ini (description, homepage, forum, core) and its readme.
+ * contains; for a zip or a rar, its exordium.mod.json, its D2SE_SETUP.ini (description, homepage,
+ * forum, core, readme) and its readme. inspectMod (mod-inspect.ts) turns all that into findings.
  */
-async function enrich(id: string, archive: ItemFile): Promise<Partial<ItemDetails>> {
+async function enrich(
+  id: string,
+  archive: ItemFile,
+  uploaderDescription: string,
+  siblings: readonly ItemFile[],
+  title: string,
+): Promise<Partial<ItemDetails>> {
   if (!LISTABLE.test(archive.name)) return {};
-  let members: ArchiveMember[] = [];
-  try {
-    const response = await fetch(`${downloadUrl(id, archive.name)}/`);
-    if (response.ok) members = parseArchiveListing(await response.text());
-  } catch {
-    return {};
-  }
+  const members = await listing(id, archive.name);
+  if (members === null) return {};
   const result: Partial<ItemDetails> = {
     keywords: contentKeywords(members),
     unpackedSize: members.reduce((sum, member) => sum + member.size, 0),
     links: [],
   };
-  if (!/\.zip$/i.test(archive.name)) return result;
-
-  const setupMember = members
-    .filter((member) => /(^|\/)d2se_setup\.ini$/i.test(member.path))
-    .sort((a, b) => a.path.length - b.path.length)[0];
-  const modDir = setupMember ? setupMember.path.slice(0, setupMember.path.lastIndexOf("/") + 1) : "";
+  const texts: ModTexts = { description: uploaderDescription };
   let setupDescription: string | null = null;
+  let manifestDescription: string | null = null;
   let readmePath: string | null = null;
-  if (setupMember) {
-    const text = await memberText(id, archive.name, setupMember.path);
-    if (text) {
-      const ini = iniValues(text);
-      for (const [key, label] of [["modhp", "Homepage"], ["modboard", "Forum"]] as const) {
-        const url = ini.get(key);
-        if (url && /^https?:\/\//i.test(url)) result.links!.push({ label, url });
+  let readmeMember: ArchiveMember | null = null;
+  // Where the mod's own words are read from: this archive when archive.org serves files from inside
+  // it, else a zip or rar of the same mod in the item (one holding its D2SE setup or manifest, not an
+  // add-on pack), since a 7z's files cannot be read without downloading most of it.
+  let source: { archive: ItemFile; members: ArchiveMember[] } | null = READABLE.test(archive.name)
+    ? { archive, members }
+    : null;
+  // At most two: an item of many zips with no setup in any would otherwise list every one.
+  const readable = siblings.filter((file) => READABLE.test(file.name)).sort((x, y) => y.size - x.size).slice(0, 2);
+  for (const other of readable) {
+    if (source) break;
+    const inside = await listing(id, other.name);
+    if (inside?.some((member) => /(^|\/)(d2se_setup\.ini|exordium\.mod\.json)$/i.test(member.path))) {
+      source = { archive: other, members: inside };
+    }
+  }
+  const where = source && source.archive !== archive ? source.archive.name : "the archive";
+  if (source) {
+    const from = source.archive.name;
+    const inside = source.members;
+    const manifestMember = shallowest(inside, /(^|\/)exordium\.mod\.json$/i);
+    if (manifestMember) {
+      try {
+        const parsed = JSON.parse(await memberText(id, from, manifestMember.path) ?? "");
+        if (parsed && typeof parsed === "object") {
+          texts.manifest = parsed;
+          if (typeof parsed.description === "string" && parsed.description.trim()) {
+            manifestDescription = parsed.description.trim();
+          }
+        }
+      } catch {
+        // Not JSON: the listing and the readme still say plenty.
       }
-      const description = ini.get("moddescription");
-      if (description && !/^https?:\/\//i.test(description)) setupDescription = description;
-      const readme = ini.get("modreadme");
-      if (readme && !/^https?:\/\//i.test(readme)) readmePath = `${modDir}${readme.replace(/\\/g, "/")}`;
-      const core = ini.get("d2core");
-      if (core) result.keywords!.push(...keywordsFor(core));
+    }
+    const setupMember = shallowest(inside, /(^|\/)d2se_setup\.ini$/i);
+    if (setupMember) {
+      const modDir = setupMember.path.slice(0, setupMember.path.lastIndexOf("/") + 1);
+      const text = await memberText(id, from, setupMember.path);
+      if (text) {
+        const ini = iniValues(text);
+        texts.setup = ini;
+        for (const [key, label] of [["modhp", "Homepage"], ["modboard", "Forum"]] as const) {
+          const url = ini.get(key);
+          if (url && /^https?:\/\//i.test(url)) result.links!.push({ label, url });
+        }
+        const description = ini.get("moddescription");
+        // Some setups put a file there ("Knowledge Base\faq_for_bfe_1_60.xlsm"): a path describes nothing.
+        const isPath = /^\S*[\\/]\S*$/.test(description ?? "") || /\.[a-z0-9]{2,4}$/i.test(description ?? "");
+        if (description && !/^https?:\/\//i.test(description) && !isPath) setupDescription = description;
+        const readme = ini.get("modreadme");
+        if (readme && !/^https?:\/\//i.test(readme)) readmePath = `${modDir}${readme.replace(/\\/g, "/")}`;
+      }
+    }
+    // The likeliest readme that reads as one: a text that turns out to be a log or data is skipped.
+    for (const candidate of readmeCandidates(inside, readmePath, title).slice(0, 3)) {
+      const text = await memberText(id, from, candidate.path);
+      // A D2SE setup can name an HTML readme: its words, not its markup.
+      const readme = text && /\.html?$/i.test(candidate.path) ? cleanDescription(text) || null : text;
+      if (!readme || looksLikeLog(readme) || looksLikeData(readme) || !hasProse(readme)) continue;
+      // The one D2SE_SETUP.ini names is the mod's by its word; any other must not open as a plugin's.
+      if (candidate.path !== readmePath && aboutPlugin(readme, title)) continue;
+      readmeMember = candidate;
+      texts.readme = readme;
+      break;
     }
   }
-  const readmeMember = members.find((member) => readmePath && member.path.toLowerCase() === readmePath.toLowerCase()) ??
-    members
-      .filter((member) => README.test(member.path) && member.size < 512 * 1024)
-      .sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0];
-  if (readmeMember) {
-    const text = await memberText(id, archive.name, readmeMember.path);
-    if (text) {
-      result.description = text;
-      result.descriptionSource = `${readmeMember.path.split("/").pop()} inside the archive`;
-      result.keywords!.push(...keywordsFor(text));
-      return result;
-    }
+
+  const inspection = inspectMod(members, texts);
+  result.inspection = inspection;
+  result.keywords!.push(...inspectionKeywords(inspection));
+  for (const link of inspection.links) {
+    if (!result.links!.some((known) => known.url.toLowerCase() === link.url.toLowerCase())) result.links!.push(link);
   }
-  if (setupDescription) {
-    result.description = setupDescription;
-    result.descriptionSource = "D2SE_SETUP.ini inside the archive";
+  if (texts.readme && readmeMember) {
+    result.description = texts.readme;
+    result.descriptionSource = `${readmeMember.path.split("/").pop()} inside ${where}`;
+    result.keywords!.push(...keywordsFor(texts.readme));
+  } else if (setupDescription ?? manifestDescription) {
+    result.description = (setupDescription ?? manifestDescription)!;
+    result.descriptionSource = `${setupDescription ? "D2SE_SETUP.ini" : "exordium.mod.json"} inside ${where}`;
   }
   return result;
+}
+
+/** The tags an inspection adds: each game version it covers, its language, its loaders. */
+function inspectionKeywords(inspection: ModInspection): string[] {
+  const found: string[] = [];
+  for (const version of inspection.core?.versions ?? []) found.push(...keywordsFor(version));
+  if (inspection.language && inspection.language.code !== "eng") found.push(`lang-${inspection.language.code}`);
+  // Nearly everything is a mod: only what is not one gets a CONTAINS tag, to find or skip it.
+  if (inspection.contents !== "mod" && inspection.contents !== "unknown") found.push(`contents-${inspection.contents}`);
+  for (const loader of inspection.loaders) if (["plugy", "d2se", "d2mod"].includes(loader)) found.push(loader);
+  if (inspection.loaders.some((loader) => ["d2gl", "glide", "d2multires", "d2hd", "sgd2freeres"].includes(loader))) {
+    found.push("graphics");
+  }
+  return found;
 }
 
 /**
@@ -892,23 +1254,76 @@ async function enrich(id: string, archive: ItemFile): Promise<Partial<ItemDetail
  */
 export async function archiveItem(id: string, cacheDir: string): Promise<ItemDetails> {
   if (!ID.test(id)) throw new Error("Bad item id");
+  const known = await cachedItem(id, cacheDir);
+  if (known && detailVersions.get(id) === DETAILS_VERSION) return known;
+  // Read by an older Exordium: shown as it is now, read again behind it.
+  if (known) {
+    void refreshItem(id, cacheDir).catch(() => {});
+    return known;
+  }
+  return await refreshItem(id, cacheDir);
+}
+
+/** Items being read from archive.org right now: a card and the background read share one fetch. */
+const reading = new Map<string, Promise<ItemDetails>>();
+
+function refreshItem(id: string, cacheDir: string): Promise<ItemDetails> {
+  const running = reading.get(id);
+  if (running) return running;
+  const read = readItem(id, cacheDir).finally(() => reading.delete(id));
+  reading.set(id, read);
+  return read;
+}
+
+/** The DETAILS_VERSION each cached item was read with: an older one is shown, then read again. */
+const detailVersions = new Map<string, number>();
+
+/**
+ * An item's details if they have ever been read (memory, then disk), whatever version read them;
+ * null otherwise. Never fetches.
+ */
+async function cachedItem(id: string, cacheDir: string): Promise<ItemDetails | null> {
+  if (!ID.test(id)) return null;
   const known = details.get(id);
   if (known) return known;
-  const cacheFile = `${cacheDir}/items/${id}.json`;
   try {
-    const cached = JSON.parse(await Deno.readTextFile(cacheFile)) as ItemDetails & { version?: number };
-    if (cached.version === DETAILS_VERSION) {
-      details.set(id, cached);
-      return cached;
-    }
+    const cached = JSON.parse(await Deno.readTextFile(`${cacheDir}/items/${id}.json`)) as ItemDetails & {
+      version?: number;
+    };
+    // Older shapes lack newer fields; the card copes with their absence.
+    cached.inspection ??= null;
+    details.set(id, cached);
+    detailVersions.set(id, cached.version ?? 0);
+    return cached;
   } catch {
-    // Not cached yet.
+    return null;
   }
+}
 
-  const response = await fetch(`https://archive.org/metadata/${id}`);
+/**
+ * Every listed item's cached details, for the list to carry: Browse opens with every card complete
+ * instead of each fetching its own. Read from disk once, then from memory.
+ */
+export async function cachedDetails(ids: readonly string[], cacheDir: string): Promise<Record<string, ItemDetails>> {
+  const found: Record<string, ItemDetails> = {};
+  for (let i = 0; i < ids.length; i += 32) {
+    await Promise.all(
+      ids.slice(i, i + 32).map(async (id) => {
+        const item = await cachedItem(id, cacheDir);
+        if (item) found[id] = item;
+      }),
+    );
+  }
+  return found;
+}
+
+async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
+  const cacheFile = `${cacheDir}/items/${id}.json`;
+
+  const response = await archiveFetch(`https://archive.org/metadata/${id}`);
   if (!response.ok) throw new Error(`archive.org metadata answered ${response.status}`);
   const body = await response.json() as {
-    metadata?: { description?: unknown };
+    metadata?: { description?: unknown; title?: unknown };
     files?: { name: string; size?: string; source?: string }[];
   };
   const files = body.files ?? [];
@@ -919,7 +1334,10 @@ export async function archiveItem(id: string, cacheDir: string): Promise<ItemDet
     .map((file) => ({ name: file.name, size: Number(file.size ?? 0) }));
   const uploaderDescription = cleanDescription(body.metadata?.description);
   const main = [...archives].filter((a) => LISTABLE.test(a.name)).sort((a, b) => b.size - a.size)[0];
-  const extra = main ? await enrich(id, main) : {};
+  const title = firstString(body.metadata?.title) ?? id;
+  const extra = main
+    ? await enrich(id, main, uploaderDescription, archives.filter((file) => file !== main), title)
+    : {};
   const result: ItemDetails = {
     id,
     // "Diablo 2 mod" alone is the upload form's subject, not a description.
@@ -936,11 +1354,56 @@ export async function archiveItem(id: string, cacheDir: string): Promise<ItemDet
     links: extra.links ?? [],
     keywords: [...new Set(extra.keywords ?? [])],
     unpackedSize: extra.unpackedSize ?? 0,
+    inspection: extra.inspection ?? null,
   };
   details.set(id, result);
+  detailVersions.set(id, DETAILS_VERSION);
   await Deno.mkdir(`${cacheDir}/items`, { recursive: true });
   await Deno.writeTextFile(cacheFile, JSON.stringify({ ...result, version: DETAILS_VERSION }));
   return result;
+}
+
+/** How far the background read of every item (warmDetails) has got. */
+export const detailsProgress = { done: 0, total: 0 };
+let warming = false;
+
+/**
+ * Reads every listed item's details in the background, two at a time with a pause between, so Browse's filters count
+ * what each archive holds (its core, language, loaders), not only the cards scrolled past. Each item
+ * is read once and kept on disk; one that fails is tried again on the next start.
+ */
+export function warmDetails(ids: readonly string[], cacheDir: string): void {
+  if (warming) return;
+  warming = true;
+  void (async () => {
+    try {
+      await cachedDetails(ids, cacheDir);
+      // Missing, or read by an older version: what is cached stays on show until its read lands.
+      const todo = ids.filter((id) => detailVersions.get(id) !== DETAILS_VERSION);
+      detailsProgress.total = ids.length;
+      detailsProgress.done = ids.length - todo.length;
+      let next = 0;
+      const worker = async () => {
+        while (next < todo.length) {
+          const id = todo[next++]!;
+          await archiveItem(id, cacheDir).catch(() => {});
+          detailsProgress.done++;
+          // A breath between items: this is a background read, nobody is waiting on it.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      };
+      await Promise.all([worker(), worker()]);
+    } finally {
+      warming = false;
+    }
+  })();
+}
+
+/** The tags each listed item's archive adds, for every item read so far. Never fetches. */
+export async function detailKeywords(ids: readonly string[], cacheDir: string): Promise<Record<string, string[]>> {
+  const found: Record<string, string[]> = {};
+  for (const [id, item] of Object.entries(await cachedDetails(ids, cacheDir))) found[id] = item.keywords;
+  return found;
 }
 
 /**
@@ -967,7 +1430,7 @@ export async function browseImage(cacheDir: string, id: string, file: string): P
   } catch {
     // Not cached yet.
   }
-  const response = await fetch(downloadUrl(id, file));
+  const response = await archiveFetch(downloadUrl(id, file));
   if (!response.ok) return new Response("Not found", { status: 404 });
   const bytes = new Uint8Array(await response.arrayBuffer());
   await Deno.mkdir(local.slice(0, local.lastIndexOf("/")), { recursive: true });
@@ -1348,7 +1811,7 @@ export async function startJob(
     aborts.set(job, abort);
     try {
       await Deno.mkdir(dir, { recursive: true });
-      const response = await fetch(downloadUrl(id, file), { signal: abort.signal });
+      const response = await archiveFetch(downloadUrl(id, file), { signal: abort.signal });
       if (!response.ok || !response.body) throw new Error(`archive.org answered ${response.status}`);
       job.total = Number(response.headers.get("content-length")) || job.total;
       const out = await Deno.open(partial, { write: true, create: true, truncate: true });

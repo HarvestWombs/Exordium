@@ -53,6 +53,11 @@ body,
   margin: 0;
 }
 
+/* No pinch zoom on a touchscreen: the browser's zoom is not the app's (usePageHousekeeping). */
+html {
+  touch-action: pan-x pan-y;
+}
+
 body {
   background: var(--ground);
   color: var(--text);
@@ -2903,6 +2908,14 @@ fieldset legend {
   margin: 0;
   color: var(--text);
   font-weight: 600;
+}
+
+/* Where a finding came from: the readme, the D2SE setup, or "inferred" from the files. */
+.fact-basis {
+  margin-left: 6px;
+  color: var(--text-mute);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .mod-shots {

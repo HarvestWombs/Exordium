@@ -63,7 +63,10 @@ import {
   archiveItem,
   archiveList,
   browseImage,
+  cachedDetails,
   cancelJob,
+  detailKeywords,
+  detailsProgress,
   downloadedFile,
   installDownloaded,
   type InstallTarget,
@@ -77,6 +80,7 @@ import {
   startJob,
   startUrlJob,
   throughput,
+  warmDetails,
 } from "./browse.ts";
 import { appLog, type Heartbeat, heartbeat, startAppLog } from "./applog.ts";
 import {
@@ -3619,6 +3623,11 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
     switch (url.pathname) {
       case "/api/browse": {
         const archive = await archiveList(browseCache, url.searchParams.get("refresh") === "1");
+        const ids = archive.items.map((item) => item.id);
+        // Every card ready at once: each item's cached details ride along, their tags merged into the
+        // item's, and what is not read yet (or was read by an older version) is read in the background.
+        const details = await cachedDetails(ids, browseCache);
+        warmDetails(ids, browseCache);
         return Response.json({
           sources: [
             { id: "archive", name: "Internet Archive", count: archive.items.length, fetchedAt: archive.fetchedAt },
@@ -3629,11 +3638,24 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
             label: group.label,
             keywords: group.keywords.map((keyword) => ({ id: keyword.id, label: keyword.label })),
           })),
-          items: archive.items,
+          items: archive.items.map((item) =>
+            details[item.id]
+              ? { ...item, keywords: [...new Set([...item.keywords, ...details[item.id]!.keywords])] }
+              : item
+          ),
+          details,
         });
       }
       case "/api/browse/item":
         return Response.json(await archiveItem(url.searchParams.get("id") ?? "", browseCache));
+      case "/api/browse/keywords": {
+        // Read from the cache only: the tags every item read so far adds, and how far the read is.
+        const archive = await archiveList(browseCache);
+        return Response.json({
+          keywords: await detailKeywords(archive.items.map((item) => item.id), browseCache),
+          ...detailsProgress,
+        });
+      }
       case "/api/browse/image":
         return await browseImage(browseCache, url.searchParams.get("id") ?? "", url.searchParams.get("file") ?? "");
       case "/api/browse/downloads":

@@ -74,6 +74,21 @@ export interface Details {
   links: { label: string; url: string }[];
   keywords: string[];
   unpackedSize: number;
+  /** What the archive says about the mod (mod-inspect.ts), each finding with where it came from. */
+  inspection: Inspection | null;
+}
+
+/** Where a finding came from, strongest first. */
+export type InspectionBasis = "manifest" | "setup" | "readme" | "description" | "files";
+
+export interface Inspection {
+  core: { label: string; versions: string[]; basis: InspectionBasis } | null;
+  launch: { direct: boolean; txt: boolean; basis: InspectionBasis } | null;
+  language: { code: string; name: string; basis: InspectionBasis } | null;
+  loaders: string[];
+  contents: "mod" | "data" | "game" | "saves" | "tool" | "docs" | "unknown";
+  author: string | null;
+  links: { label: string; url: string }[];
 }
 
 export interface InstallResult {

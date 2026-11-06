@@ -18,7 +18,18 @@ import {
   titleKey,
 } from "./browse-util.ts";
 import type { Incoming } from "../../lib/incoming.ts";
-import type { ArchiveSort, BrowseView, Group, Item, Job, ModDbItem, ModDbKind, Source, Throughput } from "./types.ts";
+import type {
+  ArchiveSort,
+  BrowseView,
+  Details,
+  Group,
+  Item,
+  Job,
+  ModDbItem,
+  ModDbKind,
+  Source,
+  Throughput,
+} from "./types.ts";
 
 /**
  * The mod browser: every source's entries in one list, filtered by common keywords, laid out like a
@@ -60,7 +71,10 @@ export function Browse(
     onExpectDraft: (key: string) => void;
   },
 ) {
-  const [data, setData] = React.useState<{ sources: Source[]; groups: Group[]; items: Item[] } | null>(null);
+  // `details`: every item already read, so each card is complete the moment Browse opens.
+  const [data, setData] = React.useState<
+    { sources: Source[]; groups: Group[]; items: Item[]; details?: Record<string, Details> } | null
+  >(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [archiveSort, setArchiveSort] = React.useState<ArchiveSort>("all");
@@ -125,6 +139,32 @@ export function Browse(
       setLoading(false);
     }
   }, []);
+
+  // Every archive's own tags (its core, language, loaders), read by the server in the background:
+  // fetched once the list is in, then every few seconds until the server has read them all.
+  const [reading, setReading] = React.useState<{ done: number; total: number } | null>(null);
+  React.useEffect(() => {
+    if (!data) return;
+    let stopped = false;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/browse/keywords");
+        if (!response.ok || stopped) return;
+        const body = await response.json() as { keywords: Record<string, string[]>; done: number; total: number };
+        setExtraKeywords((known) => ({ ...known, ...body.keywords }));
+        setReading({ done: body.done, total: body.total });
+        if (body.done < body.total) timer = setTimeout(poll, 4000);
+      } catch {
+        // The cards still bring their own tags as they come into view.
+      }
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [data]);
 
   const refreshJobs = React.useCallback(async () => {
     const response = await fetch("/api/browse/downloads");
@@ -218,13 +258,18 @@ export function Browse(
     return kinds;
   }, [modDb]);
 
-  const toggle = (keyword: string) =>
+  // The list that scrolls (Internet Archive's or ModDB's, one at a time): a filter change starts it
+  // at the top, where the new matches begin.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const toggle = (keyword: string) => {
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(keyword)) next.delete(keyword);
       else next.add(keyword);
       return next;
     });
+    listRef.current?.scrollTo({ top: 0 });
+  };
 
   const labels = new Map(data?.groups.flatMap((group) => group.keywords.map((k) => [k.id, k.label] as const)) ?? []);
   const openPlace = (body: unknown) => void post("/api/browse/open", body).catch(() => {});
@@ -372,7 +417,8 @@ export function Browse(
                   ? tr("Reading ModDB…")
                   : ""
                 : data
-                ? plural(matches.length, "{count} match", "{count} matches")
+                ? plural(matches.length, "{count} match", "{count} matches") +
+                  (reading && reading.done < reading.total ? tr(" · reading archives {done} of {total}", reading) : "")
                 : loading
                 ? tr("Reading sources…")
                 : ""}
@@ -522,14 +568,20 @@ export function Browse(
 
         {view === "cores" && <Cores root={root} onStarted={onCoreStarted} />}
         {view === "moddb" && (
-          <div className="browse-list">
+          <div ref={listRef} className="browse-list">
             {modDb && (
               <p className="muted small pad">
                 {tr(
                   "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
                 )}
-                {modDb.fetchedAt &&
-                  tr(" ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
+                <br />
+                {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
+                {modDb.fetchedAt && (
+                  <>
+                    <br />
+                    {tr("ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
+                  </>
+                )}
               </p>
             )}
             {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}
@@ -580,14 +632,20 @@ export function Browse(
             />
           )
           : (
-            <div className="browse-list">
+            <div ref={listRef} className="browse-list">
               {data && (
                 <p className="muted small pad">
                   {tr(
                     "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
                   )}
-                  {archiveFetchedAt &&
-                    tr(" Internet Archive read {date}.", { date: formatDateTime(archiveFetchedAt) })}
+                  <br />
+                  {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
+                  {archiveFetchedAt && (
+                    <>
+                      <br />
+                      {tr("Internet Archive read {date}.", { date: formatDateTime(archiveFetchedAt) })}
+                    </>
+                  )}
                 </p>
               )}
               {error && <div className="banner-error" role="alert">{error}</div>}
@@ -597,6 +655,7 @@ export function Browse(
                 <ModCard
                   key={`${item.source}:${item.id}`}
                   item={item}
+                  cached={data?.details?.[item.id] ?? null}
                   labels={labels}
                   keywords={keywordsOf(item)}
                   installed={isInstalled(item)}

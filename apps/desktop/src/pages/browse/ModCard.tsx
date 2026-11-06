@@ -2,6 +2,7 @@ import { formatDate, formatNumber, tr } from "../../lib/i18n.ts";
 import * as React from "react";
 import { useTranslation } from "../../hooks/useTranslation.tsx";
 import { FileType } from "./FileType.tsx";
+import { InspectionFacts } from "./InspectionFacts.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import { useCoverHeight } from "./useCoverHeight.ts";
@@ -11,6 +12,7 @@ import type { Details, Item, Job } from "./types.ts";
 export function ModCard(
   {
     item,
+    cached,
     labels,
     keywords,
     installed,
@@ -25,6 +27,8 @@ export function ModCard(
     onKeyword,
   }: {
     item: Item;
+    /** The item's details from the list, when they were read before: the card needs no fetch. */
+    cached: Details | null;
     labels: Map<string, string>;
     keywords: string[];
     installed: boolean;
@@ -40,9 +44,11 @@ export function ModCard(
   },
 ) {
   const ref = React.useRef<HTMLElement>(null);
-  const [details, setDetails] = React.useState<Details | null>(null);
+  const [details, setDetails] = React.useState<Details | null>(cached);
   const [detailsError, setDetailsError] = React.useState<string | null>(null);
-  const [file, setFile] = React.useState<string>("");
+  const [file, setFile] = React.useState<string>(
+    () => [...(cached?.archives ?? [])].sort((a, b) => b.size - a.size)[0]?.name ?? "",
+  );
   const [loadedCover, setLoadedCover] = React.useState<string | null>(null);
 
   // Details (screenshots, files, the archive's own readme) are asked for once the card is near the
@@ -166,6 +172,7 @@ export function ModCard(
           <dd>{item.creator ?? "—"}</dd>
           <dt>{tr("DOWNLOADS")}</dt>
           <dd>{formatNumber(item.downloads)}</dd>
+          {details?.inspection && <InspectionFacts inspection={details.inspection} />}
         </dl>
       </div>
 
