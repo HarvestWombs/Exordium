@@ -7,7 +7,7 @@ export interface ReadyUpdate {
   current: string;
   onRestart: () => void;
   onLater: () => void;
-  /** Opens Settings > Updates, where the patch notes are. */
+  /** Opens Help > Updates, where the patch notes are. */
   onNotes: () => void;
 }
 

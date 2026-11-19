@@ -303,6 +303,8 @@ export interface AppPreferences {
     hideUnsupported: boolean;
     /** The Latest uploads row on the library home. */
     showLatestUploads: boolean;
+    /** Include installed titles with an available update in Latest uploads. */
+    showModUpdates: boolean;
     /** The Recent section in the sidebar and on the library home. */
     showRecent: boolean;
     /** The toast offering to import the install's D2SE mods. */

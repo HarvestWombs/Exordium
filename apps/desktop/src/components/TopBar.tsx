@@ -97,13 +97,13 @@ export function TopBar(
     </div>
   );
   const libraryTop = item("library", tr("LIBRARY"), () => onLibrary("home"));
-  const browseTop = item("browse", tr("BROWSE"), () => onBrowse("archive"), {
+  const browseTop = item("browse", tr("BROWSE"), () => onBrowse("catalog"), {
     disabled: !libraryReady,
     title: libraryReady ? undefined : tr("Finish setting up Exordium first"),
   });
   const settingsTop = item("settings", tr("SETTINGS"), () => onSettings("library"));
   const helpTop = item("help", tr("HELP"), () => onHelp("start"));
-  const helpSection = helpPage === "faq" || helpPage === "about"
+  const helpSection = helpPage === "faq" || helpPage === "about" || helpPage === "updates"
     ? helpPage
     : helpPage.startsWith("authors")
     ? "authors"
@@ -136,8 +136,7 @@ export function TopBar(
           : libraryTop}
         {libraryReady
           ? menu("browse", browseTop, [
-            [tr("Archive"), view === "browse" && browsePage === "archive", () => onBrowse("archive")],
-            ["ModDB", view === "browse" && browsePage === "moddb", () => onBrowse("moddb")],
+            [tr("Browser"), view === "browse" && browsePage === "catalog", () => onBrowse("catalog")],
             [tr("Cores"), view === "browse" && browsePage === "cores", () => onBrowse("cores")],
           ])
           : browseTop}
@@ -153,6 +152,7 @@ export function TopBar(
         {menu("help", helpTop, [
           [tr("General"), view === "help" && helpSection === "general", () => onHelp("start")],
           [tr("For Authors"), view === "help" && helpSection === "authors", () => onHelp("authors")],
+          [tr("Updates"), view === "help" && helpSection === "updates", () => onHelp("updates")],
           ["FAQ", view === "help" && helpSection === "faq", () => onHelp("faq")],
           [tr("About"), view === "help" && helpSection === "about", () => onHelp("about")],
         ])}

@@ -10,7 +10,6 @@ import {
   ToggleRow,
 } from "../../components/settings-rows.tsx";
 import type { AppSettingsState, SettingsSection, Status, WineRunner } from "../../types.ts";
-import { UpdatesPanel } from "../Updates.tsx";
 import { BackupSettingsPage } from "./BackupSettings.tsx";
 import { DiscordSettings } from "./DiscordSettings.tsx";
 
@@ -318,25 +317,35 @@ export function SettingsSectionView(
   if (section === "updates") {
     return (
       <>
-        <SettingsHead title={tr("Updates")} text={tr("New versions of Exordium, from its GitHub releases.")} />
-        <UpdatesPanel status={status} />
-        <SettingsGroup title={tr("Policy")}>
+        <SettingsHead title={tr("Mod updates")} text={tr("How updates for installed mods appear and behave.")} />
+        <SettingsGroup title={tr("Library")}>
           <ToggleRow
-            label={tr("Check automatically")}
+            label={tr("Show available mod updates")}
             hint={tr(
-              "Look for a new Exordium when it opens and every 15 minutes while it runs, and download it in the background. Nothing changes until you restart to update.",
+              "Put installed mods with a newer version at the front of Latest uploads. This does not hide new mods from Browse.",
             )}
-            checked={s.updates.checkOnStartup}
+            checked={s.library.showModUpdates}
             disabled={busy}
-            onChange={(value) => onPatch({ updates: { checkOnStartup: value } })}
+            onChange={(value) => onPatch({ library: { showModUpdates: value } })}
           />
-          <ToggleRow
-            label={tr("Include pre-releases")}
-            hint={tr("Also offer test builds before they are released.")}
-            checked={s.updates.includePrereleases}
-            disabled={busy}
-            onChange={(value) => onPatch({ updates: { includePrereleases: value } })}
-          />
+        </SettingsGroup>
+        <SettingsGroup title={tr("Per-mod settings")}>
+          <div className="settings-row">
+            <span className="settings-label">
+              {tr("Automatic updates and background downloads")}
+              <small className="settings-hint">
+                {tr("Set these independently for each mod in its Properties → Updates page.")}
+              </small>
+            </span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-label">
+              {tr("Endpoint and release channel")}
+              <small className="settings-hint">
+                {tr("Each mod supplies its own update feed and chooses Stable, Testing, or Local files only.")}
+              </small>
+            </span>
+          </div>
         </SettingsGroup>
       </>
     );

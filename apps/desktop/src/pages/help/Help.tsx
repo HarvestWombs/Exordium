@@ -3,10 +3,12 @@ import * as React from "react";
 import type { ReactNode } from "react";
 import { CloseIcon } from "../../components/icons.tsx";
 import { SettingsHead } from "../../components/settings-rows.tsx";
+import type { Status } from "../../types.ts";
+import { ExordiumUpdatesPage } from "../Updates.tsx";
 import { About } from "./About.tsx";
 import { FAQ, type FaqEntry, type HelpField, type HelpSection, TOPICS } from "./content.ts";
 
-export type HelpPageId = string; // a topic id, "faq" or "about"
+export type HelpPageId = string; // a topic id, "updates", "faq" or "about"
 
 /** Words of the query, lowercased; a hit must contain every one. */
 function words(query: string): string[] {
@@ -172,7 +174,7 @@ function Faq({ open, onOpen }: { open: number | null; onOpen: (i: number | null)
 
 /** Help: how Exordium's library and mods work, the FAQ, and About, with a search over all of it. */
 export function HelpPage(
-  { version, page, onPage }: { version: string | null; page: HelpPageId; onPage: (page: HelpPageId) => void },
+  { status, page, onPage }: { status: Status | null; page: HelpPageId; onPage: (page: HelpPageId) => void },
 ) {
   const [query, setQuery] = React.useState("");
   const [openFaq, setOpenFaq] = React.useState<number | null>(null);
@@ -249,6 +251,7 @@ export function HelpPage(
           </React.Fragment>
         ))}
         <span className="eyebrow">{tr("MORE")}</span>
+        {nav("updates", tr("Exordium updates"))}
         {nav("faq", "FAQ")}
         {nav("about", tr("About"))}
       </aside>
@@ -284,8 +287,10 @@ export function HelpPage(
           )
           : page === "faq"
           ? <Faq open={openFaq} onOpen={setOpenFaq} />
+          : page === "updates"
+          ? status ? <ExordiumUpdatesPage status={status} /> : <p className="muted">{tr("Reading update status…")}</p>
           : page === "about"
-          ? <About version={version} />
+          ? <About version={status?.version ?? null} />
           : topic && (
             <>
               <SettingsHead title={topic.title} text={topic.intro} />

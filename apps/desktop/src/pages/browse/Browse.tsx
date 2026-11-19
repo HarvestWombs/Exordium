@@ -1,6 +1,7 @@
 import { formatDateTime, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
-import { CloseIcon, RefreshIcon } from "../../components/icons.tsx";
+import { CloseIcon, FilterIcon, RefreshIcon, SearchIcon } from "../../components/icons.tsx";
+import type { Incoming } from "../../lib/incoming.ts";
 import { Cores } from "./Cores.tsx";
 import { Downloads } from "./Downloads.tsx";
 import { InstallModModal } from "./InstallModModal.tsx";
@@ -9,37 +10,23 @@ import { ModDbCard } from "./ModDbCard.tsx";
 import {
   ACTIVE,
   ARCHIVE_SORTS,
+  catalogEntries,
   installableModDbUrl,
-  MODDB_KINDS,
   modDbAddress,
   PAGE,
   post,
   titleFromUrl,
   titleKey,
 } from "./browse-util.ts";
-import type { Incoming } from "../../lib/incoming.ts";
-import type {
-  ArchiveSort,
-  BrowseView,
-  Details,
-  Group,
-  Item,
-  Job,
-  ModDbItem,
-  ModDbKind,
-  Source,
-  Throughput,
-} from "./types.ts";
+import type { ArchiveSort, BrowseView, Details, Group, Item, Job, ModDbItem, Source, Throughput } from "./types.ts";
 
 /**
- * The mod browser: every source's entries in one list, filtered by common keywords, laid out like a
- * store page. The server (browse.ts) does the fetching; this page only asks for what is on screen.
- * Installing is one step: download, unpack with progress, move into MODS, delete the archive.
+ * Archive and ModDB are providers for one catalog, not separate pages. Exact normalized-title
+ * matches share one card; each provider keeps its own download path and safety rules behind it.
  */
 export function Browse(
   {
     view,
-    onView,
     initialSearch,
     installed,
     root,
@@ -50,34 +37,27 @@ export function Browse(
     onDownloadStarted,
     onExpectDraft,
   }: {
-    /** The page showing, which the top bar's menus choose too. */
     view: BrowseView;
-    onView: (view: BrowseView) => void;
-    /** What the search box starts with: a Latest uploads card opens on its upload. */
     initialSearch?: string;
     installed: Set<string>;
-    /** The D2SE install mods are installed into (its MODS folder). */
     root: string | null;
-    /** Everything on its way in, for Downloads to list. */
     downloads: Incoming[];
     onCancelDownload: (item: Incoming) => void;
-    /** A mod was installed as MODS\<name>: rescan and show it. */
     onInstalled: (name: string) => void;
-    /** A core's install has started, for the library to follow. */
     onCoreStarted: () => void;
-    /** A download has started, for the library to follow. */
     onDownloadStarted: () => void;
-    /** Once this download is in, draft its exordium.mod.json. */
     onExpectDraft: (key: string) => void;
   },
 ) {
-  // `details`: every item already read, so each card is complete the moment Browse opens.
   const [data, setData] = React.useState<
     { sources: Source[]; groups: Group[]; items: Item[]; details?: Record<string, Details> } | null
   >(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [archiveSort, setArchiveSort] = React.useState<ArchiveSort>("all");
+  const [archiveError, setArchiveError] = React.useState<string | null>(null);
+  const [archiveLoading, setArchiveLoading] = React.useState(false);
+  const [modDb, setModDb] = React.useState<{ items: ModDbItem[]; fetchedAt: string | null } | null>(null);
+  const [modDbError, setModDbError] = React.useState<string | null>(null);
+  const [modDbLoading, setModDbLoading] = React.useState(false);
+  const [sort, setSort] = React.useState<ArchiveSort>("all");
   const [search, setSearch] = React.useState(initialSearch ?? "");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [hideInstalled, setHideInstalled] = React.useState(false);
@@ -86,6 +66,12 @@ export function Browse(
   const [rates, setRates] = React.useState<Throughput | null>(null);
   const [open, setOpen] = React.useState<Record<string, boolean>>({});
   const [extraKeywords, setExtraKeywords] = React.useState<Record<string, string[]>>({});
+  const [filterOpen, setFilterOpen] = React.useState(false);
+  const [linkAddress, setLinkAddress] = React.useState("");
+  const [urlJobs, setUrlJobs] = React.useState<Record<string, string>>({});
+  const filterMenu = React.useRef<HTMLDivElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const loadMoreRef = React.useRef<HTMLDivElement>(null);
   const [installRequest, setInstallRequest] = React.useState<
     {
       item: Item | null;
@@ -94,17 +80,24 @@ export function Browse(
       file: string;
       title: string;
       url?: string;
-      /** The ModDB card the download was started from, so it can show the job. */
       itemKey?: string;
     } | null
   >(null);
-  const [modDb, setModDb] = React.useState<{ items: ModDbItem[]; fetchedAt: string | null } | null>(null);
-  const [modDbLoading, setModDbLoading] = React.useState(false);
-  const [modDbError, setModDbError] = React.useState<string | null>(null);
-  const [modDbKind, setModDbKind] = React.useState<"all" | ModDbKind>("all");
-  const [linkAddress, setLinkAddress] = React.useState("");
-  /** ModDB card -> the id of the link download started from it. */
-  const [urlJobs, setUrlJobs] = React.useState<Record<string, string>>({});
+
+  const loadArchive = React.useCallback(async (refresh = false) => {
+    setArchiveLoading(true);
+    setArchiveError(null);
+    try {
+      const response = await fetch(`/api/browse${refresh ? "?refresh=1" : ""}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? tr("Could not reach the sources."));
+      setData(body);
+    } catch (error) {
+      setArchiveError((error as Error).message);
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, []);
 
   const loadModDb = React.useCallback(async (refresh = false) => {
     setModDbLoading(true);
@@ -114,34 +107,29 @@ export function Browse(
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? tr("Could not read ModDB."));
       setModDb({ items: body.items ?? [], fetchedAt: body.fetchedAt ?? null });
-    } catch (err) {
-      setModDbError((err as Error).message);
+    } catch (error) {
+      setModDbError((error as Error).message);
     } finally {
       setModDbLoading(false);
     }
   }, []);
 
-  React.useEffect(() => {
-    if (view === "moddb" && !modDb && !modDbLoading && !modDbError) void loadModDb();
-  }, [view, modDb, modDbLoading, modDbError, loadModDb]);
-
-  const load = React.useCallback(async (refresh = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/browse${refresh ? "?refresh=1" : ""}`);
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? tr("Could not reach the sources."));
-      setData(body);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
+  const refreshJobs = React.useCallback(async () => {
+    const response = await fetch("/api/browse/downloads");
+    if (!response.ok) return;
+    const body = await response.json();
+    setJobs(body.jobs);
+    setRates(body);
   }, []);
 
-  // Every archive's own tags (its core, language, loaders), read by the server in the background:
-  // fetched once the list is in, then every few seconds until the server has read them all.
+  React.useEffect(() => void refreshJobs(), [refreshJobs]);
+  React.useEffect(() => {
+    if (view !== "catalog") return;
+    if (!data && !archiveLoading && !archiveError) void loadArchive();
+    if (!modDb && !modDbLoading && !modDbError) void loadModDb();
+  }, [view, data, archiveLoading, archiveError, loadArchive, modDb, modDbLoading, modDbError, loadModDb]);
+
+  // Archive contents add core, language and loader tags after the lightweight list has appeared.
   const [reading, setReading] = React.useState<{ done: number; total: number } | null>(null);
   React.useEffect(() => {
     if (!data) return;
@@ -156,7 +144,7 @@ export function Browse(
         setReading({ done: body.done, total: body.total });
         if (body.done < body.total) timer = setTimeout(poll, 4000);
       } catch {
-        // The cards still bring their own tags as they come into view.
+        // Cards still add their own tags when they enter view.
       }
     };
     void poll();
@@ -166,20 +154,6 @@ export function Browse(
     };
   }, [data]);
 
-  const refreshJobs = React.useCallback(async () => {
-    const response = await fetch("/api/browse/downloads");
-    if (!response.ok) return;
-    const body = await response.json();
-    setJobs(body.jobs);
-    setRates(body);
-  }, []);
-
-  React.useEffect(() => {
-    void load();
-    void refreshJobs();
-  }, [load, refreshJobs]);
-
-  // Follow jobs while any runs, and the graph while the downloads page is open.
   const busy = jobs.some((job) => ACTIVE.includes(job.state));
   React.useEffect(() => {
     if (!busy && view !== "downloads") return;
@@ -187,80 +161,94 @@ export function Browse(
     return () => clearInterval(timer);
   }, [busy, view, refreshJobs]);
 
-  React.useEffect(() => setShown(PAGE), [view, archiveSort, modDbKind, search, selected, hideInstalled]);
+  React.useEffect(() => setShown(PAGE), [view, sort, search, selected, hideInstalled]);
+  React.useEffect(() => {
+    if (!filterOpen) return;
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event.type === "mousedown" && filterMenu.current?.contains(event.target as Node)) return;
+      setFilterOpen(false);
+    };
+    globalThis.addEventListener("mousedown", close);
+    globalThis.addEventListener("keydown", close);
+    globalThis.addEventListener("blur", close);
+    globalThis.addEventListener("resize", close);
+    return () => {
+      globalThis.removeEventListener("mousedown", close);
+      globalThis.removeEventListener("keydown", close);
+      globalThis.removeEventListener("blur", close);
+      globalThis.removeEventListener("resize", close);
+    };
+  }, [filterOpen]);
 
-  const isInstalled = React.useCallback((item: Item) => installed.has(titleKey(item.title)), [installed]);
   const keywordsOf = React.useCallback(
     (item: Item) => [...new Set([...item.keywords, ...(extraKeywords[item.id] ?? [])])],
     [extraKeywords],
   );
-
+  const catalog = React.useMemo(() => catalogEntries(data?.items ?? [], modDb?.items ?? []), [data, modDb]);
+  const entryKeywords = React.useCallback(
+    (entry: (typeof catalog)[number]) => [
+      ...new Set([
+        ...(entry.archive ? keywordsOf(entry.archive) : []),
+        ...entry.moddbVariants.flatMap((item) => item.keywords),
+      ]),
+    ],
+    [keywordsOf],
+  );
+  const entryInstalled = React.useCallback(
+    (entry: (typeof catalog)[number]) => installed.has(titleKey(entry.title)),
+    [installed],
+  );
   const matches = React.useMemo(() => {
-    if (!data) return [];
     const needle = search.trim().toLowerCase();
-    return data.items.filter((item) => {
-      if (needle && !`${item.title}\n${item.description}\n${item.creator ?? ""}`.toLowerCase().includes(needle)) {
-        return false;
-      }
-      if (hideInstalled && isInstalled(item)) return false;
-      const keywords = keywordsOf(item);
+    return catalog.filter((entry) => {
+      const words = [
+        entry.title,
+        entry.archive?.description,
+        entry.archive?.creator,
+        ...entry.moddbVariants.flatMap((item) => [item.title, item.description]),
+      ]
+        .filter(Boolean).join("\n").toLowerCase();
+      if (needle && !words.includes(needle)) return false;
+      if (hideInstalled && entryInstalled(entry)) return false;
+      const keywords = entryKeywords(entry);
       for (const keyword of selected) if (!keywords.includes(keyword)) return false;
       return true;
     });
-  }, [data, search, hideInstalled, isInstalled, selected, keywordsOf]);
-
+  }, [catalog, search, hideInstalled, entryInstalled, entryKeywords, selected]);
   const sorted = React.useMemo(() => {
-    const list = [...matches];
-    if (archiveSort === "popular") list.sort((a, b) => b.downloads - a.downloads);
-    else if (archiveSort === "recent") list.sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? ""));
-    else list.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-    return list;
-  }, [matches, archiveSort]);
-  const archiveFetchedAt = data?.sources.find((source) => source.id === "archive")?.fetchedAt ?? null;
-
-  // ModDB lists a mod's page and its download separately; "All" shows one, the download first.
-  const modDbMatches = React.useMemo(() => {
-    if (!modDb) return [];
-    const needle = search.trim().toLowerCase();
-    const rank: Record<ModDbKind, number> = { file: 0, addon: 1, mod: 2 };
-    const first = new Map<string, ModDbItem>();
-    if (modDbKind === "all") {
-      for (const item of modDb.items) {
-        const key = titleKey(item.title);
-        const kept = first.get(key);
-        if (!kept || rank[item.kind] < rank[kept.kind]) first.set(key, item);
-      }
-    }
-    return modDb.items.filter((item) => {
-      if (modDbKind === "all" ? first.get(titleKey(item.title)) !== item : item.kind !== modDbKind) return false;
-      if (needle && !`${item.title}\n${item.description}`.toLowerCase().includes(needle)) return false;
-      if (hideInstalled && installed.has(titleKey(item.title))) return false;
-      for (const keyword of selected) if (!item.keywords.includes(keyword)) return false;
-      return true;
-    });
-  }, [modDb, modDbKind, search, hideInstalled, installed, selected]);
-
-  // How many of the current matches each keyword would keep: the numbers beside the filters.
+    const entries = [...matches];
+    if (sort === "popular") {
+      entries.sort((a, b) => (b.archive?.downloads ?? 0) - (a.archive?.downloads ?? 0));
+    } else if (sort === "recent") {
+      const newest = (entry: (typeof entries)[number]) =>
+        [entry.archive?.addedAt, ...entry.moddbVariants.map((item) => item.addedAt)].filter(Boolean).sort().at(-1) ??
+          "";
+      entries.sort((a, b) => newest(b).localeCompare(newest(a)));
+    } else entries.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+    return entries;
+  }, [matches, sort]);
   const counts = React.useMemo(() => {
     const result = new Map<string, number>();
-    const lists: string[][] = view === "moddb"
-      ? modDbMatches.map((item) => item.keywords)
-      : matches.map((item) => keywordsOf(item));
-    for (const keywords of lists) {
+    for (const keywords of matches.map(entryKeywords)) {
       for (const keyword of keywords) result.set(keyword, (result.get(keyword) ?? 0) + 1);
     }
     return result;
-  }, [view, matches, modDbMatches, keywordsOf]);
-  const modDbCounts = React.useMemo(() => {
-    const kinds = new Map<"all" | ModDbKind, number>([["file", 0], ["addon", 0], ["mod", 0]]);
-    for (const item of modDb?.items ?? []) kinds.set(item.kind, (kinds.get(item.kind) ?? 0) + 1);
-    kinds.set("all", new Set(modDb?.items.map((item) => titleKey(item.title)) ?? []).size);
-    return kinds;
-  }, [modDb]);
+  }, [matches, entryKeywords]);
+  React.useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    const root = listRef.current;
+    if (!sentinel || !root || shown >= sorted.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setShown((count) => Math.min(count + PAGE, sorted.length));
+    }, { root, rootMargin: "0px 0px 600px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [shown, sorted.length]);
+  const labels = new Map(data?.groups.flatMap((group) => group.keywords.map((k) => [k.id, k.label] as const)) ?? []);
+  const archiveFetchedAt = data?.sources.find((source) => source.id === "archive")?.fetchedAt ?? null;
 
-  // The list that scrolls (Internet Archive's or ModDB's, one at a time): a filter change starts it
-  // at the top, where the new matches begin.
-  const listRef = React.useRef<HTMLDivElement>(null);
   const toggle = (keyword: string) => {
     setSelected((current) => {
       const next = new Set(current);
@@ -270,9 +258,9 @@ export function Browse(
     });
     listRef.current?.scrollTo({ top: 0 });
   };
-
-  const labels = new Map(data?.groups.flatMap((group) => group.keywords.map((k) => [k.id, k.label] as const)) ?? []);
   const openPlace = (body: unknown) => void post("/api/browse/open", body).catch(() => {});
+  const linkUrl = modDbAddress(linkAddress);
+  const linkOk = linkUrl ? installableModDbUrl(linkUrl) : false;
 
   async function install(request: NonNullable<typeof installRequest>, installRoot: string, importMetadata: boolean) {
     const response = await post(request.mode === "downloaded" ? "/api/browse/install" : "/api/browse/download", {
@@ -295,8 +283,9 @@ export function Browse(
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? tr("It did not start."));
-    const itemKey = request.itemKey;
-    if (itemKey && typeof body.id === "string") setUrlJobs((current) => ({ ...current, [itemKey]: body.id }));
+    if (request.itemKey && typeof body.id === "string") {
+      setUrlJobs((current) => ({ ...current, [request.itemKey!]: body.id }));
+    }
     if (importMetadata) onExpectDraft(`${body.id ?? request.id}/${body.file ?? request.file}`);
     onDownloadStarted();
     await refreshJobs();
@@ -318,369 +307,292 @@ export function Browse(
     });
   }
 
-  /** A download's picture, from the listing it was started from. */
-  const coverOf = (job: Job) =>
-    data?.items.find((item) => item.id === job.id)?.cover ??
-      modDb?.items.find((item) => urlJobs[`moddb:${item.kind}:${item.id}`] === job.id)?.cover ??
-      null;
-
-  const linkUrl = modDbAddress(linkAddress);
-  const linkOk = linkUrl ? installableModDbUrl(linkUrl) : false;
-
   async function startInstall(
     request: NonNullable<typeof installRequest>,
     installRoot: string,
     importMetadata: boolean,
   ) {
     localStorage.setItem("exordium.installRoot", installRoot);
-    await install(request, installRoot, importMetadata);
+    await (request.mode === "url"
+      ? installUrl(request, installRoot, importMetadata)
+      : install(request, installRoot, importMetadata));
     setInstallRequest(null);
   }
 
-  async function installQueuedUrl(installRoot: string, importMetadata: boolean) {
-    if (!installRequest) return;
-    localStorage.setItem("exordium.installRoot", installRoot);
-    await installUrl(installRequest, installRoot, importMetadata);
-    setInstallRequest(null);
+  const coverOf = (job: Job) =>
+    data?.items.find((item) => item.id === job.id)?.cover ??
+      modDb?.items.find((item) => urlJobs[`moddb:${item.kind}:${item.id}`] === job.id)?.cover ??
+      null;
+
+  if (view === "cores") {
+    return (
+      <div className="browse browse-standalone-page">
+        <section className="browse-main browse-centered-page">
+          <Cores root={root} onStarted={onCoreStarted} />
+        </section>
+      </div>
+    );
+  }
+  if (view === "downloads") {
+    return (
+      <div className="browse browse-standalone-page">
+        <section className="browse-main browse-centered-page">
+          <Downloads
+            downloads={downloads}
+            coverOf={coverOf}
+            onCancel={onCancelDownload}
+            jobs={jobs}
+            rates={rates}
+            root={root}
+            onInstall={(job) => queueInstall(null, job.id, job.file, job.title, job.state === "downloaded")}
+            onInstalled={onInstalled}
+            onOpen={openPlace}
+          />
+        </section>
+      </div>
+    );
   }
 
+  const refreshing = archiveLoading || modDbLoading;
   return (
-    <div className="browse">
+    <div className="browse browse-catalog">
       {installRequest && (
         <InstallModModal
           request={installRequest}
           defaultRoot={root ?? ""}
           onClose={() => setInstallRequest(null)}
-          onInstall={(installRoot, importMetadata) =>
-            installRequest.mode === "url"
-              ? installQueuedUrl(installRoot, importMetadata)
-              : startInstall(installRequest, installRoot, importMetadata)}
+          onInstall={(installRoot, importMetadata) => startInstall(installRequest, installRoot, importMetadata)}
         />
       )}
-      <aside className="browse-filters" hidden={view === "downloads"}>
-        <section className="source-switch">
-          <h2 className="filters-title">{tr("SOURCES")}</h2>
-          <button
-            type="button"
-            className={view === "archive" ? "source-card on" : "source-card"}
-            onClick={() => onView("archive")}
-          >
-            <span>Internet Archive</span>
-            <small>
-              {data
-                ? tr("{count} indexed mods", { count: data.items.length })
-                : loading
-                ? tr("Reading…")
-                : tr("Archive catalog")}
-            </small>
-          </button>
-          <button
-            type="button"
-            className={view === "moddb" ? "source-card on" : "source-card"}
-            onClick={() => onView("moddb")}
-          >
-            <span>ModDB</span>
-            <small>{tr("Files, addons, and mods")}</small>
-          </button>
-          <button
-            type="button"
-            className={view === "cores" ? "source-card on" : "source-card"}
-            onClick={() => onView("cores")}
-          >
-            <span>{tr("Cores")}</span>
-            <small>{tr("Install game versions")}</small>
-          </button>
-        </section>
-
-        {(view === "archive" || view === "moddb") && (
-          <>
-            <h2 className="filters-title filters-title-secondary">{tr("FILTERS")}</h2>
-            {selected.size > 0 && (
-              <div className="active-filters">
-                {[...selected].map((keyword) => (
-                  <button
-                    type="button"
-                    key={keyword}
-                    className="active-filter"
-                    onClick={() => toggle(keyword)}
-                  >
-                    × {labels.get(keyword) ?? keyword}
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="muted small">
-              {view === "moddb"
-                ? modDb
-                  ? plural(modDbMatches.length, "{count} match", "{count} matches")
-                  : modDbLoading
-                  ? tr("Reading ModDB…")
-                  : ""
-                : data
-                ? plural(matches.length, "{count} match", "{count} matches") +
-                  (reading && reading.done < reading.total ? tr(" · reading archives {done} of {total}", reading) : "")
-                : loading
-                ? tr("Reading sources…")
-                : ""}
-            </p>
-
-            {data?.groups.map((group) => (
-              <section key={group.id} className="filter-group">
-                <h3>{group.label}</h3>
-                {group.keywords.map((keyword) => {
-                  const n = counts.get(keyword.id) ?? 0;
-                  const on = selected.has(keyword.id);
-                  if (!on && n === 0) return null;
-                  return (
+      <section className="browse-main browse-catalog-shell">
+        <nav className="browse-tabs browse-catalog-toolbar">
+          <div className="browse-sort-tabs">
+            {ARCHIVE_SORTS.map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                className={sort === entry.id ? "browse-tab on" : "browse-tab"}
+                onClick={() => setSort(entry.id)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <div className="browse-filter-holder" ref={filterMenu}>
+            <button
+              type="button"
+              className={filterOpen || selected.size > 0 || hideInstalled
+                ? "browse-filter-button on"
+                : "browse-filter-button"}
+              aria-label={tr("Filters")}
+              data-tooltip={tr("Filters")}
+              aria-expanded={filterOpen}
+              aria-controls="browse-filter-menu"
+              onClick={() => setFilterOpen((open) => !open)}
+            >
+              <FilterIcon />
+              <span>{tr("FILTERS")}</span>
+              {(selected.size > 0 || hideInstalled) && <small>{selected.size + Number(hideInstalled)}</small>}
+            </button>
+            {filterOpen && (
+              <div id="browse-filter-menu" className="browse-filter-menu">
+                <div className="browse-filter-menu-head">
+                  <strong>{tr("Filters")}</strong>
+                  {(selected.size > 0 || hideInstalled) && (
                     <button
                       type="button"
-                      key={keyword.id}
-                      className={on ? "filter-row on" : "filter-row"}
-                      onClick={() => toggle(keyword.id)}
+                      className="small-button"
+                      onClick={() => {
+                        setSelected(new Set());
+                        setHideInstalled(false);
+                      }}
                     >
-                      <span>{keyword.label}</span>
-                      <span className="count">{n}</span>
+                      {tr("Clear")}
                     </button>
-                  );
-                })}
-              </section>
-            ))}
-
-            <section className="filter-group">
-              <h3>{tr("PREFERENCES")}</h3>
-              <button
-                type="button"
-                className={hideInstalled ? "filter-row on" : "filter-row"}
-                onClick={() => setHideInstalled((v) => !v)}
-              >
-                <span>{tr("Hide installed mods")}</span>
-              </button>
-              {view === "moddb" && (
-                <button
-                  type="button"
-                  className="filter-row"
-                  onClick={() => openPlace({ what: "moddb" })}
-                >
-                  <span>{tr("Open ModDB ↗")}</span>
-                </button>
-              )}
-            </section>
-
-            {view === "moddb" && (
-              <section className="filter-group">
-                <h3>{tr("FROM A LINK")}</h3>
-                <form
-                  className="link-install"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (!linkUrl || !linkOk) return;
-                    queueUrlInstall(linkUrl, titleFromUrl(linkUrl));
-                    setLinkAddress("");
-                  }}
-                >
-                  <input
-                    value={linkAddress}
-                    onChange={(event) => setLinkAddress(event.currentTarget.value)}
-                    placeholder={tr("ModDB page or archive link")}
-                    aria-label={tr("Download address")}
-                  />
-                  <button
-                    type="submit"
-                    className="ghost primary action-install compact"
-                    disabled={!linkOk || !root}
+                  )}
+                </div>
+                <p className="muted small">{plural(matches.length, "{count} match", "{count} matches")}</p>
+                {data?.groups.map((group) => (
+                  <section key={group.id} className="filter-group">
+                    <h3>{group.label}</h3>
+                    {group.keywords.map((keyword) => {
+                      const count = counts.get(keyword.id) ?? 0;
+                      const on = selected.has(keyword.id);
+                      if (!on && count === 0) return null;
+                      return (
+                        <label key={keyword.id} className="browse-filter-check">
+                          <input type="checkbox" checked={on} onChange={() => toggle(keyword.id)} />
+                          <span>{keyword.label}</span>
+                          <small>{count}</small>
+                        </label>
+                      );
+                    })}
+                  </section>
+                ))}
+                <section className="filter-group">
+                  <h3>{tr("PREFERENCES")}</h3>
+                  <label className="browse-filter-check">
+                    <input
+                      type="checkbox"
+                      checked={hideInstalled}
+                      onChange={(event) => setHideInstalled(event.currentTarget.checked)}
+                    />
+                    <span>{tr("Hide installed mods")}</span>
+                  </label>
+                </section>
+                <section className="filter-group">
+                  <h3>{tr("FROM A LINK")}</h3>
+                  <form
+                    className="link-install"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!linkUrl || !linkOk) return;
+                      queueUrlInstall(linkUrl, titleFromUrl(linkUrl));
+                      setLinkAddress("");
+                      setFilterOpen(false);
+                    }}
                   >
-                    {tr("Install")}
-                  </button>
-                </form>
-                {linkAddress.trim() && !linkOk && (
-                  <p className="warn-text small">
-                    {tr("Use a ModDB mod, addon or download page, or a link to an archive.")}
-                  </p>
-                )}
-              </section>
-            )}
-          </>
-        )}
-      </aside>
-
-      <section className="browse-main">
-        <nav className="browse-tabs">
-          {view === "archive" && ARCHIVE_SORTS.map((t) => (
-            <button
-              type="button"
-              key={t.id}
-              className={archiveSort === t.id ? "browse-tab on" : "browse-tab"}
-              onClick={() => setArchiveSort(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-          {view === "moddb" && MODDB_KINDS.map((t) => (
-            <button
-              type="button"
-              key={t.id}
-              className={modDbKind === t.id ? "browse-tab on" : "browse-tab"}
-              onClick={() => setModDbKind(t.id)}
-            >
-              {t.label.toUpperCase()}
-              {modDb && <span className="tab-count">{modDbCounts.get(t.id) ?? 0}</span>}
-            </button>
-          ))}
-          {view === "cores" && <span className="browse-context">{tr("CORES")}</span>}
-          {view === "downloads" && <span className="browse-context">{tr("DOWNLOADS")}</span>}
-          {(view === "archive" || view === "moddb") && (
-            <div className="browse-search-tools">
-              <div className="search browse-search">
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.currentTarget.value)}
-                  placeholder={tr("Search by name…")}
-                  aria-label={tr("Search mods")}
-                />
-                {search && (
-                  <button
-                    type="button"
-                    className="search-clear-button"
-                    aria-label={tr("Clear")}
-                    data-tooltip={tr("Clear")}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => setSearch("")}
-                  >
-                    <CloseIcon />
-                  </button>
-                )}
+                    <input
+                      value={linkAddress}
+                      onChange={(event) => setLinkAddress(event.currentTarget.value)}
+                      placeholder={tr("ModDB page or archive link")}
+                      aria-label={tr("Download address")}
+                    />
+                    <button type="submit" className="ghost primary action-install compact" disabled={!linkOk || !root}>
+                      {tr("Install")}
+                    </button>
+                  </form>
+                  {linkAddress.trim() && !linkOk && (
+                    <p className="warn-text small">
+                      {tr("Use a ModDB mod, addon or download page, or a link to an archive.")}
+                    </p>
+                  )}
+                </section>
               </div>
-              <button
-                type="button"
-                className={`browse-refresh ${(view === "moddb" ? modDbLoading : loading) ? "loading" : ""}`}
-                disabled={view === "moddb" ? modDbLoading : loading}
-                data-tooltip={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
-                aria-label={view === "moddb" ? tr("Refresh ModDB") : tr("Refresh Internet Archive")}
-                onClick={() => void (view === "moddb" ? loadModDb(true) : load(true))}
-              >
-                <RefreshIcon />
-              </button>
-            </div>
-          )}
-          {(view === "cores" || view === "downloads") && <div className="grow" />}
-        </nav>
-
-        {view === "cores" && <Cores root={root} onStarted={onCoreStarted} />}
-        {view === "moddb" && (
-          <div ref={listRef} className="browse-list">
-            {modDb && (
-              <p className="muted small pad">
-                {tr(
-                  "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
-                )}
-                <br />
-                {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
-                {modDb.fetchedAt && (
-                  <>
-                    <br />
-                    {tr("ModDB read {date}.", { date: formatDateTime(modDb.fetchedAt) })}
-                  </>
-                )}
-              </p>
             )}
-            {modDbError && <div className="banner-error" role="alert">{modDbError}</div>}
-            {!modDb && !modDbError && <p className="muted pad">{tr("Reading ModDB…")}</p>}
-            {modDb && modDbMatches.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}
-            {modDbMatches.slice(0, shown).map((item) => {
-              const key = `moddb:${item.kind}:${item.id}`;
-              return (
-                <ModDbCard
-                  key={key}
-                  item={item}
-                  labels={labels}
-                  installed={installed.has(titleKey(item.title))}
-                  expanded={open[key] ?? false}
-                  onExpand={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}
-                  jobs={jobs.filter((job) => job.source === "url" && job.id === urlJobs[key])}
-                  root={root}
-                  onInstall={(url) => queueUrlInstall(url, item.title, key)}
-                  onInstalled={onInstalled}
-                  onOpen={(what, job) => openPlace({ what, id: job.id, file: job.file })}
-                  onKeyword={toggle}
-                />
-              );
-            })}
-            {modDbMatches.length > shown && (
+          </div>
+          <div className="search browse-search">
+            <SearchIcon />
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder={tr("Search by name…")}
+              aria-label={tr("Search mods")}
+            />
+            {search && (
               <button
                 type="button"
-                className="ghost more"
-                onClick={() => setShown((n) => n + PAGE)}
+                className="search-clear-button"
+                aria-label={tr("Clear")}
+                data-tooltip={tr("Clear")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setSearch("")}
               >
-                {tr("Show more ({count} left)", { count: modDbMatches.length - shown })}
+                <CloseIcon />
               </button>
             )}
           </div>
-        )}
-        {view === "cores" || view === "moddb" ? null : view === "downloads"
-          ? (
-            <Downloads
-              downloads={downloads}
-              coverOf={coverOf}
-              onCancel={onCancelDownload}
-              jobs={jobs}
-              rates={rates}
-              root={root}
-              onInstall={(job) => queueInstall(null, job.id, job.file, job.title, job.state === "downloaded")}
-              onInstalled={onInstalled}
-              onOpen={openPlace}
-            />
-          )
-          : (
-            <div ref={listRef} className="browse-list">
-              {data && (
-                <p className="muted small pad">
-                  {tr(
-                    "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
-                  )}
-                  <br />
-                  {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
-                  {archiveFetchedAt && (
-                    <>
-                      <br />
-                      {tr("Internet Archive read {date}.", { date: formatDateTime(archiveFetchedAt) })}
-                    </>
-                  )}
-                </p>
+          <button
+            type="button"
+            className={`browse-refresh ${refreshing ? "loading" : ""}`}
+            disabled={refreshing}
+            data-tooltip={tr("Refresh sources")}
+            aria-label={tr("Refresh sources")}
+            onClick={() => void Promise.all([loadArchive(true), loadModDb(true)])}
+          >
+            <RefreshIcon />
+          </button>
+        </nav>
+
+        <div ref={listRef} className="browse-list browse-catalog-list">
+          {(selected.size > 0 || hideInstalled) && (
+            <div className="active-filters browse-active-filters">
+              {[...selected].map((keyword) => (
+                <button
+                  type="button"
+                  key={keyword}
+                  className="active-filter"
+                  onClick={() => toggle(keyword)}
+                >
+                  x {labels.get(keyword) ?? keyword}
+                </button>
+              ))}
+              {hideInstalled && (
+                <button type="button" className="active-filter" onClick={() => setHideInstalled(false)}>
+                  x {tr("Hide installed mods")}
+                </button>
               )}
-              {error && <div className="banner-error" role="alert">{error}</div>}
-              {!data && !error && <p className="muted pad">{tr("Reading sources…")}</p>}
-              {data && sorted.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}</p>}
-              {sorted.slice(0, shown).map((item) => (
+            </div>
+          )}
+          <p className="muted small browse-catalog-notice">
+            {tr(
+              "Installers (.exe) are never run for you: open their page and install them yourself if you trust them.",
+            )}
+            <br />
+            {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
+            {(archiveFetchedAt || modDb?.fetchedAt) && (
+              <>
+                <br />
+                {[
+                  archiveFetchedAt ? `Internet Archive: ${formatDateTime(archiveFetchedAt)}` : null,
+                  modDb?.fetchedAt ? `ModDB: ${formatDateTime(modDb.fetchedAt)}` : null,
+                ].filter(Boolean).join(" · ")}
+              </>
+            )}
+            {reading && reading.done < reading.total && tr(" · reading archives {done} of {total}", reading)}
+          </p>
+          {archiveError && <div className="banner-error" role="alert">Internet Archive: {archiveError}</div>}
+          {modDbError && <div className="banner-error" role="alert">ModDB: {modDbError}</div>}
+          {!data && !modDb && !archiveError && !modDbError && <p className="muted pad">{tr("Reading sources…")}</p>}
+          {(data || modDb) && sorted.length === 0 && <p className="muted pad">{tr("Nothing matches these filters.")}
+          </p>}
+          {sorted.slice(0, shown).map((entry) => {
+            if (entry.archive) {
+              const item = entry.archive;
+              return (
                 <ModCard
-                  key={`${item.source}:${item.id}`}
+                  key={entry.key}
                   item={item}
+                  modDb={entry.moddb}
                   cached={data?.details?.[item.id] ?? null}
                   labels={labels}
-                  keywords={keywordsOf(item)}
-                  installed={isInstalled(item)}
-                  expanded={open[item.id] ?? false}
-                  onExpand={() => setOpen((o) => ({ ...o, [item.id]: !o[item.id] }))}
+                  keywords={entryKeywords(entry)}
+                  installed={entryInstalled(entry)}
+                  expanded={open[entry.key] ?? false}
+                  onExpand={() => setOpen((current) => ({ ...current, [entry.key]: !current[entry.key] }))}
                   jobs={jobs.filter((job) => job.id === item.id)}
                   root={root}
-                  onDetails={(d) => setExtraKeywords((k) => (k[item.id] ? k : { ...k, [item.id]: d.keywords }))}
+                  onDetails={(details) =>
+                    setExtraKeywords((known) => known[item.id] ? known : { ...known, [item.id]: details.keywords })}
                   onInstall={(file, fromDisk) => queueInstall(item, item.id, file, item.title, fromDisk)}
                   onInstalled={onInstalled}
                   onOpen={(what, file) => openPlace({ what, id: item.id, file })}
                   onKeyword={toggle}
                 />
-              ))}
-              {sorted.length > shown && (
-                <button
-                  type="button"
-                  className="ghost more"
-                  onClick={() => setShown((n) => n + PAGE)}
-                >
-                  {tr("Show more ({count} left)", { count: sorted.length - shown })}
-                </button>
-              )}
-            </div>
-          )}
+              );
+            }
+            const item = entry.moddb!;
+            return (
+              <ModDbCard
+                key={entry.key}
+                item={item}
+                variants={entry.moddbVariants}
+                labels={labels}
+                installed={entryInstalled(entry)}
+                expanded={open[entry.key] ?? false}
+                onExpand={() => setOpen((current) => ({ ...current, [entry.key]: !current[entry.key] }))}
+                jobs={jobs.filter((job) => job.source === "url" && job.id === urlJobs[entry.key])}
+                root={root}
+                onInstall={(url) => queueUrlInstall(url, item.title, entry.key)}
+                onInstalled={onInstalled}
+                onOpen={(what, job) => openPlace({ what, id: job.id, file: job.file })}
+                onKeyword={toggle}
+              />
+            );
+          })}
+          {sorted.length > shown && <div ref={loadMoreRef} className="browse-load-sentinel" aria-hidden="true" />}
+        </div>
       </section>
     </div>
   );

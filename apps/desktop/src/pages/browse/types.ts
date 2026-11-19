@@ -46,6 +46,17 @@ export interface ModDbItem {
   keywords: string[];
 }
 
+/** One catalog result, possibly offered by both providers. */
+export interface CatalogEntry {
+  key: string;
+  title: string;
+  archive: Item | null;
+  /** The representative ModDB project/page shown by the card. */
+  moddb: ModDbItem | null;
+  /** Every listing row belonging to that ModDB project, including old releases and updates. */
+  moddbVariants: ModDbItem[];
+}
+
 export type ModDbKind = "file" | "addon" | "mod";
 
 /** One ModDB entry's own page, read when its card comes on screen (browse.ts modDbDetails). */
@@ -126,6 +137,6 @@ export interface Throughput {
   totalDisk: number;
 }
 
-export type BrowseView = "archive" | "moddb" | "cores" | "downloads";
+export type BrowseView = "catalog" | "cores" | "downloads";
 
 export type ArchiveSort = "all" | "popular" | "recent";

@@ -1678,6 +1678,8 @@ interface AppSettings {
     hideUnsupported: boolean;
     /** The Latest uploads row on the library home (it reads the browse sources). */
     showLatestUploads: boolean;
+    /** Include installed titles with an available update in the Latest uploads row. */
+    showModUpdates: boolean;
     /** The Recent section (the titles played last) in the sidebar and on the library home. */
     showRecent: boolean;
     /** The toast offering to import the install's D2SE mods. */
@@ -1762,6 +1764,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     autoScanOnStartup: true,
     hideUnsupported: false,
     showLatestUploads: true,
+    showModUpdates: true,
     showRecent: true,
     importReminder: true,
     extraFolders: [],
@@ -2686,6 +2689,7 @@ function mergeAppSettings(base: AppSettings, patch: unknown): AppSettings {
     autoScanOnStartup: "boolean",
     hideUnsupported: "boolean",
     showLatestUploads: "boolean",
+    showModUpdates: "boolean",
     showRecent: "boolean",
     importReminder: "boolean",
     extraFolders: "string[]",

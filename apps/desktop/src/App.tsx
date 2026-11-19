@@ -103,7 +103,7 @@ export function App() {
   // The D2SE reminder, closed with ×: back next time Exordium opens.
   const [reminderClosed, setReminderClosed] = React.useState(false);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
-  const [browsePage, setBrowsePage] = React.useState<BrowseView>("archive");
+  const [browsePage, setBrowsePage] = React.useState<BrowseView>("catalog");
   const [libraryPage, setLibraryPage] = React.useState<LibraryPage>("home");
   const [settingsSection, setSettingsSection] = React.useState<SettingsSection>("library");
   const [helpPage, setHelpPage] = React.useState<HelpPageId>("start");
@@ -528,7 +528,6 @@ export function App() {
       {view === "browse" && (
         <Browse
           view={browsePage}
-          onView={setBrowsePage}
           downloads={downloading}
           onCancelDownload={askCancel}
           initialSearch={browseSearch}
@@ -552,7 +551,7 @@ export function App() {
           onChanged={refreshStatus}
         />
       )}
-      {view === "help" && <HelpPage version={status?.version ?? null} page={helpPage} onPage={setHelpPage} />}
+      {view === "help" && <HelpPage status={status} page={helpPage} onPage={setHelpPage} />}
       {view === "library" && !root && status && (
         <SetupPage
           app={status.appSettings}
@@ -638,7 +637,9 @@ export function App() {
                     status?.appSettings.settings.library.showLatestUploads !== false
                   ? (
                     <LatestUploads
-                      updates={pendingUpdates(titles, hidden, root, artVersion)}
+                      updates={status?.appSettings.settings.library.showModUpdates !== false
+                        ? pendingUpdates(titles, hidden, root, artVersion)
+                        : []}
                       onOpen={(upload) => {
                         if (upload.source === "update") {
                           if (upload.titleKey) {
@@ -647,7 +648,7 @@ export function App() {
                           }
                           return;
                         }
-                        setBrowsePage(upload.source);
+                        setBrowsePage("catalog");
                         setBrowseSearch(upload.title);
                         setView("browse");
                       }}
@@ -725,7 +726,7 @@ export function App() {
             ...readyUpdate,
             onRestart: () => void applyUpdate().catch(reportError),
             onLater: () => setUpdateLater(readyUpdate.version),
-            onNotes: () => openSettings("updates"),
+            onNotes: () => openHelp("updates"),
           }
           : null}
         onDismiss={dismissToast}

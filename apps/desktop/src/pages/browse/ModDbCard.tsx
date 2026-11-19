@@ -22,8 +22,9 @@ import type { Job, ModDbDetails, ModDbItem, Shot } from "./types.ts";
  * it, its downloads, screenshots and, for a mod, its files to choose from.
  */
 export function ModDbCard(
-  { item, labels, installed, expanded, onExpand, jobs, root, onInstall, onInstalled, onOpen, onKeyword }: {
+  { item, variants, labels, installed, expanded, onExpand, jobs, root, onInstall, onInstalled, onOpen, onKeyword }: {
     item: ModDbItem;
+    variants?: ModDbItem[];
     labels: Map<string, string>;
     installed: boolean;
     expanded: boolean;
@@ -78,7 +79,30 @@ export function ModDbCard(
   const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
   const isMod = item.kind === "mod";
-  const chosen = isMod ? details?.files.find((f) => f.page === file) ?? null : null;
+  const availableFiles = React.useMemo(() => {
+    const detailsByPage = new Map((details?.files ?? []).map((entry) => [entry.page, entry]));
+    const files = new Map<string, ModDbDetails["files"][number]>();
+    const releases = (variants ?? []).filter((variant) => variant.kind === "file").sort((a, b) =>
+      (b.addedAt ?? "").localeCompare(a.addedAt ?? "")
+    );
+    for (const variant of releases) {
+      files.set(
+        variant.page,
+        detailsByPage.get(variant.page) ?? {
+          page: variant.page,
+          name: variant.title,
+          size: null,
+          category: null,
+        },
+      );
+    }
+    for (const entry of details?.files ?? []) if (!files.has(entry.page)) files.set(entry.page, entry);
+    return [...files.values()];
+  }, [details, variants]);
+  React.useEffect(() => {
+    if (isMod && !file && availableFiles[0]) setFile(availableFiles[0].page);
+  }, [isMod, file, availableFiles]);
+  const chosen = isMod ? availableFiles.find((f) => f.page === file) ?? null : null;
   const size = isMod ? chosen?.size ?? null : details?.size ?? null;
   const filename = isMod ? fileNames[file] ?? null : details?.filename ?? null;
   const installer = INSTALLER_FILE.test(filename ?? "");
@@ -155,7 +179,7 @@ export function ModDbCard(
             ? (
               <>
                 <dt>{tr("FILES")}</dt>
-                <dd>{details ? details.files.length : "—"}</dd>
+                <dd>{details ? availableFiles.length : "—"}</dd>
               </>
             )
             : (
@@ -180,13 +204,13 @@ export function ModDbCard(
             <span style={{ width: `${Math.round(progress * 100)}%` }} />
           </span>
         )}
-        {isMod && details && details.files.length > 1 && !running && (
+        {isMod && details && availableFiles.length > 1 && !running && (
           <select
             value={file}
             onChange={(e) => setFile(e.currentTarget.value)}
             aria-label={tr("File to install")}
           >
-            {details.files.map((f) => (
+            {availableFiles.map((f) => (
               <option key={f.page} value={f.page}>
                 {f.name}
                 {f.size ? ` (${formatBytes(f.size)})` : ""}
@@ -214,7 +238,7 @@ export function ModDbCard(
               type="button"
               className="download"
               disabled={!details || !root || running || job?.state === "installed" ||
-                (isMod && !chosen && details.files.length > 0)}
+                (isMod && !chosen && availableFiles.length > 0)}
               data-tooltip={root ? undefined : tr("Choose the Diablo II install first")}
               onClick={() => onInstall(target)}
             >

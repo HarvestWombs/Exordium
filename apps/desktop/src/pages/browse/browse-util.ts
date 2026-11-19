@@ -1,6 +1,6 @@
 import { formatDecimal, tr } from "../../lib/i18n.ts";
 import type * as React from "react";
-import type { ArchiveSort, Job, JobState, ModDbKind } from "./types.ts";
+import type { ArchiveSort, CatalogEntry, Item, Job, JobState, ModDbItem, ModDbKind } from "./types.ts";
 
 export const ARCHIVE_SORTS: { id: ArchiveSort; label: string }[] = [
   { id: "all", label: tr("ALL") },
@@ -24,6 +24,71 @@ export const DOWNLOAD_URL = /\.(zip|rar|7z|tar|tgz|gz|bz2|xz)(?:[?#].*)?$/i;
 /** Titles compared without case, spaces or punctuation: "The Black Soul" is "theblacksoul". */
 export function titleKey(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** A ModDB project is the stable `/mods/{slug}` portion shared by its profile and every release. */
+export function modDbProjectPage(item: ModDbItem): string | null {
+  try {
+    const url = new URL(item.page);
+    const match = /^\/mods\/([^/]+)(?:\/|$)/i.exec(url.pathname);
+    return match ? `${url.origin}/mods/${match[1]}`.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The unified catalog. Every ModDB release beneath one project URL becomes one project card; rows
+ * outside `/mods/{slug}` still collapse only on exact titles. The representative is the root mod
+ * page when available, because it supplies the file picker. Nothing is grouped by fuzzy title.
+ */
+export function catalogEntries(archive: readonly Item[], moddb: readonly ModDbItem[]): CatalogEntry[] {
+  const exactRank: Record<ModDbKind, number> = { file: 0, addon: 1, mod: 2 };
+  const groups = new Map<string, ModDbItem[]>();
+  for (const item of moddb) {
+    const project = modDbProjectPage(item);
+    const key = project ? `project:${project}` : `title:${titleKey(item.title)}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+
+  const modDbGroups = [...groups.entries()].map(([key, variants]) => {
+    const project = modDbProjectPage(variants[0]!);
+    const representative = project
+      ? variants.find((item) => item.kind === "mod" && modDbProjectPage(item) === item.page.toLowerCase()) ??
+        [...variants].sort((a, b) => (b.addedAt ?? "").localeCompare(a.addedAt ?? ""))[0]!
+      : [...variants].sort((a, b) => exactRank[a.kind] - exactRank[b.kind])[0]!;
+    return { key, representative, variants };
+  });
+
+  const entries: CatalogEntry[] = archive.map((item) => ({
+    key: `archive:${item.id}`,
+    title: item.title,
+    archive: item,
+    moddb: null,
+    moddbVariants: [],
+  }));
+  const firstArchive = new Map<string, CatalogEntry>();
+  for (const entry of entries) {
+    const key = titleKey(entry.title);
+    if (!firstArchive.has(key)) firstArchive.set(key, entry);
+  }
+  for (const group of modDbGroups) {
+    const item = group.representative;
+    const existing = group.variants.map((variant) => firstArchive.get(titleKey(variant.title))).find(Boolean);
+    if (existing) {
+      existing.moddb = item;
+      existing.moddbVariants = group.variants;
+    } else {
+      entries.push({
+        key: `moddb:${group.key}`,
+        title: item.title,
+        archive: null,
+        moddb: item,
+        moddbVariants: group.variants,
+      });
+    }
+  }
+  return entries;
 }
 
 export const baseName = (file: string) => file.split("/").pop() ?? file;

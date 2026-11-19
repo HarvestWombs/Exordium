@@ -1,7 +1,7 @@
 import { formatDate, formatDateTime, tr } from "../lib/i18n.ts";
 import * as React from "react";
 import { ReleaseNotesText } from "../components/ReleaseNotes.tsx";
-import { SettingsGroup } from "../components/settings-rows.tsx";
+import { SettingsGroup, SettingsHead, ToggleRow } from "../components/settings-rows.tsx";
 import { openLink } from "../lib/util.ts";
 import type { Status, UpdateView } from "../types.ts";
 
@@ -71,7 +71,7 @@ function PatchNotes(
   );
 }
 
-/** Settings > Updates: the running version, what GitHub has, and the one button that fits. */
+/** Help > Updates: the running version, what GitHub has, and the one button that fits. */
 export function UpdatesPanel({ status }: { status: Status }) {
   const [view, setView] = React.useState<UpdateView | null>(null);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -178,5 +178,72 @@ export function UpdatesPanel({ status }: { status: Status }) {
       <PatchNotes releases={view.releases ?? []} current={view.current} next={update?.version ?? null} />
       {problem && <p className="bad-text small">{problem}</p>}
     </SettingsGroup>
+  );
+}
+
+/** Exordium's own updater and policy live in Help, separate from mod update settings. */
+export function ExordiumUpdatesPage({ status }: { status: Status }) {
+  const [checkOnStartup, setCheckOnStartup] = React.useState(status.appSettings.settings.updates.checkOnStartup);
+  const [includePrereleases, setIncludePrereleases] = React.useState(
+    status.appSettings.settings.updates.includePrereleases,
+  );
+  const [busy, setBusy] = React.useState(false);
+  const [problem, setProblem] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setCheckOnStartup(status.appSettings.settings.updates.checkOnStartup);
+    setIncludePrereleases(status.appSettings.settings.updates.includePrereleases);
+  }, [status.appSettings.settings.updates]);
+
+  async function patch(patch: { checkOnStartup?: boolean; includePrereleases?: boolean }) {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/api/app-settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ updates: patch }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? tr("Could not save update settings."));
+      setCheckOnStartup(body.settings.updates.checkOnStartup);
+      setIncludePrereleases(body.settings.updates.includePrereleases);
+    } catch (error) {
+      setProblem((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <SettingsHead title={tr("Exordium updates")} text={tr("New versions of Exordium, from its GitHub releases.")} />
+      <UpdatesPanel status={status} />
+      <SettingsGroup title={tr("Policy")}>
+        <ToggleRow
+          label={tr("Check automatically")}
+          hint={tr(
+            "Look for a new Exordium when it opens and every 15 minutes while it runs, and download it in the background. Nothing changes until you restart to update.",
+          )}
+          checked={checkOnStartup}
+          disabled={busy}
+          onChange={(value) => {
+            setCheckOnStartup(value);
+            void patch({ checkOnStartup: value });
+          }}
+        />
+        <ToggleRow
+          label={tr("Include pre-releases")}
+          hint={tr("Also offer test builds before they are released.")}
+          checked={includePrereleases}
+          disabled={busy}
+          onChange={(value) => {
+            setIncludePrereleases(value);
+            void patch({ includePrereleases: value });
+          }}
+        />
+      </SettingsGroup>
+      {problem && <p className="bad-text small">{problem}</p>}
+    </>
   );
 }

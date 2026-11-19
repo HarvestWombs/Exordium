@@ -7,11 +7,12 @@ import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import { useCoverHeight } from "./useCoverHeight.ts";
 import { ACTIVE, baseName, formatBytes, jobLabel, jobProgress, openLink } from "./browse-util.ts";
-import type { Details, Item, Job } from "./types.ts";
+import type { Details, Item, Job, ModDbItem } from "./types.ts";
 
 export function ModCard(
   {
     item,
+    modDb,
     cached,
     labels,
     keywords,
@@ -27,6 +28,8 @@ export function ModCard(
     onKeyword,
   }: {
     item: Item;
+    /** The same title on ModDB, when the unified catalog confidently matched it. */
+    modDb?: ModDbItem | null;
     /** The item's details from the list, when they were read before: the card needs no fetch. */
     cached: Details | null;
     labels: Map<string, string>;
@@ -183,8 +186,9 @@ export function ModCard(
       />
 
       <div className="mod-bar">
-        <span className="source-badge">Internet Archive</span>
+        <span className="source-badge">{modDb ? "Internet Archive + ModDB" : "Internet Archive"}</span>
         <button type="button" className="small-button" onClick={() => onOpen("page")}>{tr("Page ↗")}</button>
+        {modDb && <button type="button" className="small-button" onClick={() => openLink(modDb.page)}>ModDB ↗</button>}
         <div className="grow" />
         {detailsError && <span className="bad-text small">{detailsError}</span>}
         <JobResult job={job} onInstalled={onInstalled} onOpen={(what) => onOpen(what, job?.file)} />

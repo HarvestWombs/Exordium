@@ -2750,6 +2750,233 @@ fieldset legend {
   gap: 14px;
 }
 
+/* One centered catalog on wide displays: providers are data sources, not separate places to browse. */
+.browse-catalog,
+.browse-standalone-page {
+  justify-content: center;
+  background: var(--ground);
+}
+
+.browse-catalog-shell {
+  width: min(1420px, calc(100% - 40px));
+  flex: 0 1 1420px;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.browse-centered-page {
+  width: min(1180px, calc(100% - 40px));
+  flex: 0 1 1180px;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.browse-catalog-toolbar {
+  min-height: 56px;
+  flex-shrink: 0;
+  padding: 10px 18px;
+}
+
+.browse-sort-tabs {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.browse-catalog-toolbar .browse-tab {
+  height: 100%;
+}
+
+.browse-filter-holder {
+  position: relative;
+  margin-left: auto;
+}
+
+.browse-filter-button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.browse-filter-button:hover,
+.browse-filter-button.on {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.browse-filter-button small {
+  min-width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10px;
+}
+
+.browse-filter-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 9px);
+  right: 0;
+  width: 340px;
+  max-height: min(650px, calc(100vh - 150px));
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--chrome);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.48);
+}
+
+.browse-filter-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.browse-filter-menu-head > strong {
+  font-family: var(--display);
+  font-size: 16px;
+}
+
+.browse-filter-menu > .muted {
+  margin: 4px 0 0;
+}
+
+.browse-filter-check {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.browse-filter-check:hover {
+  background: var(--raised);
+}
+
+.browse-filter-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.browse-filter-check small {
+  color: var(--text-mute);
+}
+
+.browse-catalog-toolbar .browse-search {
+  width: min(320px, 28vw);
+  flex: 0 1 320px;
+  margin-left: 0;
+}
+
+.browse-catalog-toolbar .browse-refresh {
+  margin-left: 0;
+}
+
+.browse-catalog-list {
+  padding: 14px 18px 32px;
+}
+
+.browse-load-sentinel {
+  height: 1px;
+  flex: 0 0 1px;
+}
+
+.browse-catalog-notice {
+  margin: 0 0 2px;
+}
+
+.browse-active-filters {
+  margin: 0;
+}
+
+@media (max-width: 1180px) {
+  .browse-catalog-shell,
+  .browse-centered-page {
+    width: calc(100% - 24px);
+  }
+
+  .browse-catalog-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .browse-sort-tabs {
+    flex: 1 1 auto;
+  }
+
+  .browse-catalog-toolbar .browse-search {
+    width: auto;
+    flex: 1 1 220px;
+  }
+
+  .mod-card {
+    grid-template-columns: 210px minmax(260px, 1fr) minmax(220px, 290px);
+  }
+}
+
+@media (max-width: 940px) {
+  .browse-catalog-shell,
+  .browse-centered-page {
+    width: 100%;
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .browse-catalog-toolbar {
+    padding-inline: 12px;
+    row-gap: 8px;
+  }
+
+  .browse-sort-tabs {
+    flex-basis: 100%;
+    height: 34px;
+  }
+
+  .browse-catalog-toolbar .browse-tab {
+    padding-inline: 9px;
+  }
+
+  .browse-filter-holder {
+    margin-left: 0;
+  }
+
+  .browse-filter-menu {
+    right: auto;
+    left: 0;
+  }
+
+  .browse-catalog-list {
+    padding-inline: 12px;
+  }
+
+  .mod-card {
+    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .mod-shots {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    padding: 10px 16px;
+  }
+}
+
 .path-field small {
   font-weight: 400;
   letter-spacing: 0;
