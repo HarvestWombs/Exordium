@@ -22,10 +22,11 @@ The startup exports are versioned. D2SE's `FUN_00401a40` resolves them from tabl
 
 ## In a box
 
-The box keeps Blizzard's original core `Game.exe`, but does not execute it before 1.14. Exordium starts the single
-immutable `native/game/Game.exe` by absolute path and gives it the box as its working directory. DLL and data lookup
-therefore uses the box, while `GetFileVersionInfo("game.exe")` reads the authentic core file and reports its authentic
-version. Nothing is stamped or mutated per core, and Defender sees the same Exordium executable for every title.
+The box keeps Blizzard's original core `Game.exe`, but does not execute it before 1.14. It also presents the single
+immutable `native/game/Game.exe` as a link named `ExordiumGame.exe`. Running that link from inside the box lets Windows
+resolve the loader's load-time `Storm.dll` import beside it, while `GetFileVersionInfo("game.exe")` reads the authentic
+core file and reports its authentic version. Nothing is stamped or mutated per core, and every title links the same
+Exordium executable.
 
 D2SE itself does not stamp `Game.exe`. The D2SE-specific D2GL fork identifies versions from the entry points of the
 loaded core DLLs, then falls back to the file version. Exordium's layout also supports stock D2GL's file-version path.

@@ -17,6 +17,7 @@ import {
   type Renderer,
   rootCoreName,
   scanFolder,
+  scanNamed,
   type ScannedFile,
   toLayer,
 } from "@exordium/d2se";
@@ -161,8 +162,10 @@ import {
 const isDev = Deno.env.get("EXORDIUM_DEV") === "1";
 const viteDevOrigin = `http://127.0.0.1:${Deno.env.get("VITE_DEV_PORT") ?? "5273"}`;
 const distDir = new URL("./dist/", import.meta.url);
-/** The name the loader has inside a box; see installNativeLoader. */
+/** Blizzard's authentic executable, retained in every box for core-version inspection. */
 const GAME_EXE = "Game.exe";
+/** The shared Exordium loader's link inside a pre-1.14 box, where its load-time DLLs live. */
+const LOADER_EXE = "ExordiumGame.exe";
 /** Old injector-sidecar names. Release boxes delete these if an earlier build left them behind. */
 const EXORDIUM_MOD_FILE = "exordium.mod.json";
 const EXPANSION_ARCHIVES = new Set(["d2exp.mpq", "d2xmusic.mpq", "d2xtalk.mpq", "d2xvideo.mpq"]);
@@ -1278,6 +1281,20 @@ function sharedLoaderExe(): string {
   return `${folder}/${GAME_EXE}`;
 }
 
+/** The shared loader as one box file, linked under a name that does not replace Blizzard's Game.exe. */
+async function sharedLoaderFile(cache: Map<string, KnownFile>): Promise<{ file: ResolvedFile; source: string }> {
+  const source = sharedLoaderExe();
+  const folder = source.slice(0, source.lastIndexOf("/"));
+  const [found] = await scanNamed(folder, [GAME_EXE], { hash: true, cache }).catch(() => []);
+  if (!found?.hash) {
+    throw new HttpError(500, `The shared game loader is missing at ${source}. Run \`deno task build:loader\`.`);
+  }
+  return {
+    file: { path: LOADER_EXE, hash: found.hash, size: found.size, layer: "loader", role: "core" },
+    source,
+  };
+}
+
 /** The library's plugy folder as a box layer: its files, scanned. */
 interface PlugYFolder {
   folder: string;
@@ -1379,6 +1396,19 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
   if (loader.problems.some((problem) => problem.level === "error")) {
     throw new HttpError(422, loader.problems.map((problem) => problem.message).join("\n"));
   }
+  // Storm.dll is a load-time import, resolved before the loader can run any path setup. Present the
+  // one shared loader inside the box so Windows finds the core's DLLs beside the process image.
+  let boxPlan = plan;
+  if (!loader.singleExe && !loader.nativeGameExe) {
+    const shared = await sharedLoaderFile(cache);
+    await saveHashCache(cache);
+    sources.set(sourceKey(shared.file.layer, shared.file.path), shared.source);
+    boxPlan = {
+      ...plan,
+      files: [...plan.files, shared.file]
+        .sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase())),
+    };
+  }
   const id = boxIdFor(imported.layout.root, target);
   return {
     imported,
@@ -1387,17 +1417,16 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     core,
     mod,
     setup,
-    plan,
+    plan: boxPlan,
     loader,
     links,
     id,
     boxes: await Boxes.open(exordiumRoot),
     spec: {
       id,
-      // Keep the core's authentic Game.exe in the box. The shared loader runs from Exordium's own
-      // folder with this box as its working directory, so version-resource lookups by filename see
-      // the core's real version without mutating or executing it.
-      plan,
+      // Keep the core's authentic Game.exe for version lookups and link the immutable shared loader
+      // beside the core DLLs under its own name. The loader is never stamped or copied per core.
+      plan: boxPlan,
       saves,
       folders: mod?.scan.data
         ? [{
@@ -4786,11 +4815,11 @@ async function installNativeLoader(
       2,
     ) + "\n",
   );
-  const launcher = loader.singleExe || loader.nativeGameExe ? GAME_EXE : sharedLoaderExe();
+  const launcher = loader.singleExe || loader.nativeGameExe ? GAME_EXE : LOADER_EXE;
   if (launcher !== GAME_EXE) {
-    const present = await Deno.stat(launcher).then((info) => info.isFile, () => false);
+    const present = await Deno.stat(`${folder}/${launcher}`).then((info) => info.isFile, () => false);
     if (!present) {
-      throw new HttpError(500, `The shared game loader is missing at ${launcher}. Run \`deno task build:loader\`.`);
+      throw new HttpError(500, `The shared game loader link is missing from ${folder}. Rebuild the box.`);
     }
   }
   return {
