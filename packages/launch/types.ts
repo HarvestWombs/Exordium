@@ -61,7 +61,7 @@ export interface LoaderPlan {
    * use, since 1.11 and 1.11b, or 1.13c and 1.13d, share a `gameVersion` but not their ordinals.
    */
   core: string | null;
-  /** The file version the box's `Game.exe` (the loader) is stamped with; null when not known. */
+  /** The file version of Blizzard's original `Game.exe` for this core; null when not known. */
   gameExeVersion: FileVersion | null;
   /** A 1.14 core: the box keeps Blizzard's own `Game.exe`; the loader cannot become this game. */
   singleExe: boolean;

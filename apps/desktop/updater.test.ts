@@ -175,12 +175,12 @@ Deno.test("an update downloads, is checked, swaps the app's files and leaves eve
   }
 });
 
-Deno.test("an update writes only the files that changed; the loader copies are never rewritten", async () => {
+Deno.test("an update writes only the files that changed; the shared loader is never rewritten", async () => {
   const dir = (await Deno.makeTempDir()).replace(/\\/g, "/");
   const app = `${dir}/app`;
-  const loader = "native/game/1.10f/Game.exe";
+  const loader = "native/game/Game.exe";
   const loaderText = "the same loader, release after release ".repeat(200);
-  await Deno.mkdir(`${app}/native/game/1.10f`, { recursive: true });
+  await Deno.mkdir(`${app}/native/game`, { recursive: true });
   await Deno.writeTextFile(`${app}/Exordium.exe`, "old exe");
   await Deno.writeTextFile(`${app}/${loader}`, loaderText);
   await Deno.writeTextFile(`${app}/native/edited.dll`, "edited by hand");

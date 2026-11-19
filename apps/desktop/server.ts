@@ -17,7 +17,6 @@ import {
   type Renderer,
   rootCoreName,
   scanFolder,
-  scanNamed,
   type ScannedFile,
   toLayer,
 } from "@exordium/d2se";
@@ -1270,32 +1269,13 @@ async function buildBox(request: Request): Promise<Response> {
   }
 }
 
-/** The loader's per-core Game.exe copies (stamp-game.ts): beside the packaged app, or the native build. */
-function stampedGamesFolder(): string {
+/** The one pre-1.14 game loader: beside the packaged app, or in the native development build. */
+function sharedLoaderExe(): string {
   const exe = Deno.execPath().replaceAll("\\", "/");
-  return /(^|\/)deno(\.exe)?$/i.test(exe)
+  const folder = /(^|\/)deno(\.exe)?$/i.test(exe)
     ? fileUrlPath(new URL("../../native/loader/build/game", import.meta.url))
     : `${exe.replace(/\/[^/]*$/, "")}/native/game`;
-}
-
-/** The box's Game.exe before 1.14: the loader copy stamped with the core's own Game.exe version. */
-async function stampedGameExe(
-  core: string | null,
-  cache: Map<string, KnownFile>,
-): Promise<{ file: ResolvedFile; source: string }> {
-  const name = core?.trim().toLowerCase() ?? "";
-  const folder = `${stampedGamesFolder()}/${name}`;
-  const [found] = name ? await scanNamed(folder, [GAME_EXE], { hash: true, cache }).catch(() => []) : [];
-  if (!found?.hash) {
-    throw new HttpError(
-      500,
-      `No loader Game.exe for core ${core ?? "?"} in ${folder}. Run \`deno task build:loader\`.`,
-    );
-  }
-  return {
-    file: { path: GAME_EXE, hash: found.hash, size: found.size, layer: "loader", role: "core" },
-    source: `${folder}/${found.source}`,
-  };
+  return `${folder}/${GAME_EXE}`;
 }
 
 /** The library's plugy folder as a box layer: its files, scanned. */
@@ -1400,20 +1380,6 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     throw new HttpError(422, loader.problems.map((problem) => problem.message).join("\n"));
   }
   const id = boxIdFor(imported.layout.root, target);
-  // Before 1.14 the box's Game.exe is the loader: the copy stamped for this core at build time,
-  // linked in like any other file in place of the core's (or a mod's) own Game.exe. It is added
-  // after the loader plan is made, which reads the game's own files.
-  let boxPlan = plan;
-  if (!loader.singleExe && !loader.nativeGameExe) {
-    const game = await stampedGameExe(setup.mod.core, cache);
-    await saveHashCache(cache);
-    sources.set(sourceKey(game.file.layer, game.file.path), game.source);
-    boxPlan = {
-      ...plan,
-      files: [...plan.files.filter((file) => file.path.toLowerCase() !== GAME_EXE.toLowerCase()), game.file]
-        .sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase())),
-    };
-  }
   return {
     imported,
     state,
@@ -1428,7 +1394,10 @@ async function boxSpecFor(root: string, target: BoxTarget, onHash?: (read: numbe
     boxes: await Boxes.open(exordiumRoot),
     spec: {
       id,
-      plan: boxPlan,
+      // Keep the core's authentic Game.exe in the box. The shared loader runs from Exordium's own
+      // folder with this box as its working directory, so version-resource lookups by filename see
+      // the core's real version without mutating or executing it.
+      plan,
       saves,
       folders: mod?.scan.data
         ? [{
@@ -1454,7 +1423,7 @@ async function verifyD2SEBox(root: string, target: BoxTarget) {
 /**
  * Builds (or reuses) a title's box and prepares copy `copy` of it. Copies share the box; each has its
  * own loader config, log and registry hive, since a running game keeps its hive open. While another
- * copy runs the box cannot be rebuilt (its files are in use) and Game.exe is not re-stamped.
+ * copy runs the box cannot be rebuilt because its files are in use.
  */
 async function realiseD2SEBox(
   root: string,
@@ -1875,7 +1844,7 @@ interface Running {
 
 /** The runs in progress, as last read from the session records (`refreshSessions`). */
 let sessionRunning: Running[] = [];
-/** Pre-1.14 runs started directly through the stamped Game.exe in this app session. */
+/** Runs followed directly by this app rather than by a native session record. */
 let legacyRunning: Running[] = [];
 /**
  * Runs whose game has exited but which are still being settled (registry read back, box checked,
@@ -3215,7 +3184,7 @@ async function playUnderWine(
 ): Promise<number> {
   const runner = currentRunner(appSettingsFromState(await readState()));
   const prefix = await preparePrefix(runner);
-  const gameExe = `${box.folder}/${GAME_EXE}`;
+  const gameExe = executablePath(box.folder, box.launcher);
   // 1.14 takes no private hive: its values go to the prefix's HKCU, and nothing is collected after.
   if (box.singleExe) await applyRegistryFile(box.hostRegistryFile, { runner, prefix });
   const command = wineCommand(runner, prefix, gameExe, box.commandLine.split(" ").filter(Boolean));
@@ -4753,13 +4722,13 @@ async function installNativeLoader(
   othersRunning = false,
 ): Promise<{ config: string; log: string; launcher: string }> {
   // 1.14 keeps Blizzard's own Game.exe and is launched directly with registry/argument support only.
-  // Every pre-1.14 core's Game.exe is the loader, linked in by the box (stampedGameExe).
+  // Pre-1.14 keeps Blizzard's Game.exe as metadata while one shared Exordium loader runs the box.
   if (!othersRunning) {
     // From when each box's Game.exe was a stamped copy.
     await Deno.remove(`${folder.slice(0, folder.lastIndexOf("/"))}/loader-stamp.json`).catch(() => {});
   }
   await Deno.mkdir(sessions.folder, { recursive: true });
-  // Copy 1 keeps the plain names, so running Game.exe by hand in the box still finds its config.
+  // Copy 1 keeps the plain names, so the shared loader finds its config from the box's cwd.
   const config = copy === 1 ? "exordium-loader.json" : `exordium-loader.${copy}.json`;
   const log = copy === 1 ? "exordium-loader.log" : `exordium-loader.${copy}.log`;
   await Deno.writeTextFile(
@@ -4817,10 +4786,17 @@ async function installNativeLoader(
       2,
     ) + "\n",
   );
+  const launcher = loader.singleExe || loader.nativeGameExe ? GAME_EXE : sharedLoaderExe();
+  if (launcher !== GAME_EXE) {
+    const present = await Deno.stat(launcher).then((info) => info.isFile, () => false);
+    if (!present) {
+      throw new HttpError(500, `The shared game loader is missing at ${launcher}. Run \`deno task build:loader\`.`);
+    }
+  }
   return {
     config,
     log,
-    launcher: GAME_EXE,
+    launcher,
   };
 }
 

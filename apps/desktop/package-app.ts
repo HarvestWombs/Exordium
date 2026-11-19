@@ -65,20 +65,12 @@ try {
   for (const name of SEVEN_ZIP_FILES) {
     await Deno.copyFile(`../../native/7zip/${name}`, `${here}/Exordium/native/7zip/${name}`);
   }
-  // The loader as each core's Game.exe (stamp-game.ts), which boxes symlink: files on disk.
+  // The one shared pre-1.14 loader. Boxes keep the core's original Game.exe as metadata.
   await Deno.remove(`${here}/Exordium/native/game`, { recursive: true }).catch(() => {});
-  let games = 0;
-  for await (const core of Deno.readDir("../../native/loader/build/game")) {
-    if (!core.isDirectory) continue;
-    await Deno.mkdir(`${here}/Exordium/native/game/${core.name}`, { recursive: true });
-    await Deno.copyFile(
-      `../../native/loader/build/game/${core.name}/Game.exe`,
-      `${here}/Exordium/native/game/${core.name}/Game.exe`,
-    );
-    games++;
-  }
+  await Deno.mkdir(`${here}/Exordium/native/game`, { recursive: true });
+  await Deno.copyFile("../../native/loader/build/game/Game.exe", `${here}/Exordium/native/game/Game.exe`);
   console.log(
-    `Copied ${nativeSidecars.length} native sidecars, 7-Zip and ${games} loader Game.exe copies into Exordium/native.`,
+    `Copied ${nativeSidecars.length} native sidecars, 7-Zip and the shared game loader into Exordium/native.`,
   );
   // GPL-3.0 has every copy carry the licence, and NOTICE holds the attribution terms beside it.
   await Deno.copyFile("../../LICENSE", `${here}/Exordium/LICENSE.txt`);

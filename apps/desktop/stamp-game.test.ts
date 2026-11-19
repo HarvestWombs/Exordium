@@ -1,22 +1,19 @@
 import { assertEquals } from "@std/assert";
-import { versionResource } from "./stamp-game.ts";
+import { stageGame } from "./stamp-game.ts";
 
-function utf16(bytes: Uint8Array): string {
-  return new TextDecoder("utf-16le").decode(bytes);
-}
+Deno.test("the game loader stage contains one unchanged executable", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const loader = `${root}/exordium-game.exe`;
+    const out = `${root}/game`;
+    await Deno.writeTextFile(loader, "one immutable loader");
+    await Deno.mkdir(`${out}/old-core`, { recursive: true });
+    await Deno.writeTextFile(`${out}/old-core/Game.exe`, "old stamped variant");
 
-Deno.test("a stamped Game.exe's version block carries the core's version and the name", () => {
-  const block = versionResource([1, 0, 10, 39], "Diablo II");
-  const view = new DataView(block.buffer);
-  assertEquals(view.getUint16(0, true), block.length); // wLength covers the whole tree
-  assertEquals(view.getUint16(2, true), 52); // VS_FIXEDFILEINFO
-  assertEquals(utf16(block.slice(6, 36)), "VS_VERSION_INFO");
-  // Key "VS_VERSION_INFO\0" ends at 38, padded to 40: the fixed info starts there.
-  assertEquals(view.getUint32(40, true), 0xFEEF04BD);
-  assertEquals(view.getUint32(48, true), 1 << 16 | 0); // 1.0
-  assertEquals(view.getUint32(52, true), 10 << 16 | 39); // .10.39
-  const all = utf16(block);
-  for (const text of ["FileDescription", "Diablo II", "FileVersion", "1.0.10.39", "OriginalFilename", "Game.exe"]) {
-    assertEquals(all.includes(text), true, text);
+    assertEquals(await stageGame(loader, out), `${out}/Game.exe`);
+    assertEquals(await Deno.readTextFile(`${out}/Game.exe`), "one immutable loader");
+    assertEquals([...Deno.readDirSync(out)].map((entry) => entry.name), ["Game.exe"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
   }
 });

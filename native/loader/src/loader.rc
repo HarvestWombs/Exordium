@@ -1,6 +1,5 @@
-// The loader's version resource. Exordium places the loader in a box as Game.exe and stamps
-// FILEVERSION / PRODUCTVERSION with the core's own Game.exe version (1.0.10.39 for 1.10f), because
-// plugins such as D2GL identify the game by GetFileVersionInfo("game.exe"). 0.0.0.0 means unstamped.
+// The one immutable pre-1.14 loader. A box keeps Blizzard's original Game.exe for tools that inspect
+// its core-specific version resource; this executable runs from Exordium's own native/game folder.
 #include <winver.h>
 
 VS_VERSION_INFO VERSIONINFO

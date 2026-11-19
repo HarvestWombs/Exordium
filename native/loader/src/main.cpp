@@ -1974,8 +1974,8 @@ int relaunch(Log& log, const std::string& arguments, bool compatLayer) {
 }
 
 // The title's icon on the game window. The taskbar button and Alt+Tab show the window's own icon,
-// which D2Gfx takes from Game.exe: a copy shared by every box of the core (stamp-game.ts), so the
-// title's own icon is set here instead. A PNG, as the library's art is, or an .ico; anything else,
+// which D2Gfx takes from the process executable: Exordium's shared loader, so the title's own icon is
+// set here instead. A PNG, as the library's art is, or an .ico; anything else,
 // or no icon, leaves the window as it is. The icons live as long as the process.
 struct WindowIcons {
     HICON big = nullptr;

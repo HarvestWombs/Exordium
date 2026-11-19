@@ -14,8 +14,8 @@
  *
  * Only files that changed are written. The zip is read in memory, and a file whose installed copy
  * already matches the new list is never unpacked or swapped. Every exe written to disk is judged
- * afresh by Defender's real-time scan, and rewriting the 21 unchanged loader copies on each update
- * got some of them quarantined (2026-11-05), which failed the update.
+ * afresh by Defender's real-time scan. The loader is now one immutable file, and an unchanged copy
+ * is not rewritten during an update.
  *
  * Applying swaps each file in place. Windows lets a running exe or a loaded DLL be renamed, so the old
  * one is renamed aside (`*.exordium-old`), the new one moved into its place, and Exordium restarts;

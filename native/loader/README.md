@@ -1,7 +1,7 @@
 # Exordium native loader
 
-`exordium-game.exe` is the 32-bit process a box's game runs in, on every core from 1.00 to 1.13d. Exordium is 64-bit and
-Diablo II's DLLs are 32-bit, so each game needs a process of its own; this is it. It:
+`exordium-game.exe` is the one 32-bit process a box's game runs in, on every core from 1.00 to 1.13d. Exordium is 64-bit
+and Diablo II's DLLs are 32-bit, so each game needs a process of its own; this is it. It:
 
 - reads `exordium-loader.json` from the box's `game` folder;
 - installs the box's private registry (`RegOverridePredefKey` on a hive of its own);
@@ -22,15 +22,17 @@ The startup exports are versioned. D2SE's `FUN_00401a40` resolves them from tabl
 
 ## In a box
 
-The box's `Game.exe` is a symlink to `exordium-game.exe` stamped with that core's own `Game.exe` file version, because
-plugins such as D2GL identify the game by `GetFileVersionInfo("game.exe")`. `deno task build:loader` writes one stamped
-copy per core into `build/game/<core>/Game.exe` (`apps/desktop/stamp-game.ts`), packaging ships them in `native/game`,
-and the box links its core's copy like any other file. A symlinked exe still loads its DLLs from the link's folder and
-reports the link as its path, so the game and its plugins see the box.
+The box keeps Blizzard's original core `Game.exe`, but does not execute it before 1.14. Exordium starts the single
+immutable `native/game/Game.exe` by absolute path and gives it the box as its working directory. DLL and data lookup
+therefore uses the box, while `GetFileVersionInfo("game.exe")` reads the authentic core file and reports its authentic
+version. Nothing is stamped or mutated per core, and Defender sees the same Exordium executable for every title.
 
-It is linked like `Game.exe`: no DEP (D2Mod plugins run code from data pages), fixed base, and `Storm.dll` as a
-load-time import (`src/storm.def`). A `LoadLibrary`'d Storm seeds its MPQ crypt table wrongly and can read no archive.
-The game's flags must be real process arguments, because plugins read `GetCommandLineA()`.
+D2SE itself does not stamp `Game.exe`. The D2SE-specific D2GL fork identifies versions from the entry points of the
+loaded core DLLs, then falls back to the file version. Exordium's layout also supports stock D2GL's file-version path.
+
+It is built like `Game.exe`: no DEP (D2Mod plugins run code from data pages), fixed base, and `Storm.dll` as a load-time
+import (`src/storm.def`). A `LoadLibrary`'d Storm seeds its MPQ crypt table wrongly and can read no archive. The game's
+flags must be real process arguments, because plugins read `GetCommandLineA()`.
 
 It must run with Windows 7 behaviour. On Windows 8+, pre-1.14 Fog validates its critical sections, finds
 `DebugInfo == -1`, and dies of a stack overflow inside `FOG_InitErrorMgr`. The desktop server starts it with `--detach`,

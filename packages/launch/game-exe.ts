@@ -1,12 +1,4 @@
-/**
- * The loader as the box's `Game.exe`.
- *
- * Plugins identify the game by the file version of `game.exe` — D2GL calls
- * `GetFileVersionInfoSizeA("game.exe")` and refuses to start on an unknown one. Pre-1.14 cores
- * carry no `Game.exe` (D2SE never needed one), so the box gets the loader under that name: a
- * symlink to the copy stamped with this version at build time (apps/desktop/stamp-game.ts). Vault:
- * `Shared/Diablo-II/Process Startup.md`.
- */
+/** The file versions of Blizzard's original `Game.exe` for each supported core. */
 
 export type FileVersion = readonly [number, number, number, number];
 
@@ -43,9 +35,6 @@ const GAME_EXE_VERSIONS: Readonly<Record<string, FileVersion>> = {
 
 /** Every Diablo II core for which Exordium has a known launch path. */
 export const SUPPORTED_CORES: readonly string[] = Object.keys(GAME_EXE_VERSIONS);
-
-/** The cores whose box runs the loader as `Game.exe`: each gets a stamped copy at build time. */
-export const STAMPED_CORES: readonly string[] = SUPPORTED_CORES.filter((core) => core !== "1.14d");
 
 /** The file version the core's `Game.exe` had, or null when it is not known. */
 export function gameExeVersion(core: string | null | undefined): FileVersion | null {
