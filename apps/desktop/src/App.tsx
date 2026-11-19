@@ -35,6 +35,7 @@ import { SetupPage } from "./pages/Setup.tsx";
 import { ImportPage } from "./pages/title/ImportPage.tsx";
 import { TitlePage } from "./pages/title/TitlePage.tsx";
 import { applyUpdate } from "./pages/Updates.tsx";
+import { useNavHistory } from "./hooks/useNavHistory.ts";
 import type { Incoming } from "./lib/incoming.ts";
 import type { BrowseView } from "./pages/browse/types.ts";
 import type {
@@ -80,6 +81,9 @@ function preparationSummary(progress: Status["preparing"][number] | undefined): 
  * setup, and the dialogs any view can open. What the library shows is worked out in libraryView; the
  * collections, imports, title actions and window are hooks of their own.
  */
+/** A page of the app, for back and forward: its view, the page within it, and what is open there. */
+type NavLocation = { view: AppView; page: string; at: string | null };
+
 export function App() {
   const [status, setStatus] = React.useState<Status | null>(null);
   const [root, setRoot] = React.useState<string | null>(null);
@@ -104,6 +108,8 @@ export function App() {
   const [reminderClosed, setReminderClosed] = React.useState(false);
   const [updateLater, setUpdateLater] = React.useState<string | null>(null);
   const [browsePage, setBrowsePage] = React.useState<BrowseView>("catalog");
+  // The Browse entry whose details page is open (its catalog key): here, so back and forward reach it.
+  const [browseDetails, setBrowseDetails] = React.useState<string | null>(null);
   const [libraryPage, setLibraryPage] = React.useState<LibraryPage>("home");
   const [settingsSection, setSettingsSection] = React.useState<SettingsSection>("library");
   const [helpPage, setHelpPage] = React.useState<HelpPageId>("start");
@@ -416,6 +422,7 @@ export function App() {
   function openBrowse(page: BrowseView) {
     setBrowsePage(page);
     setBrowseSearch("");
+    setBrowseDetails(null);
     showView("browse");
   }
   function openSettings(section: SettingsSection) {
@@ -426,6 +433,37 @@ export function App() {
     setHelpPage(page);
     showView("help");
   }
+
+  // Where the app is, for back and forward (useNavHistory): only what makes a page, per view.
+  const libraryAt = importPage
+    ? `import:${importPage}`
+    : reviewShown
+    ? "review"
+    : gridHome || !selectedKey
+    ? "home"
+    : `title:${selectedKey}`;
+  const location: NavLocation = view === "library"
+    ? { view, page: libraryPage, at: libraryAt }
+    : view === "browse"
+    ? { view, page: browsePage, at: browsePage === "catalog" ? browseDetails : null }
+    : view === "settings"
+    ? { view, page: settingsSection, at: null }
+    : { view, page: helpPage, at: null };
+  useNavHistory(location, (to) => {
+    setView(to.view);
+    if (to.view === "library") {
+      setLibraryPage(to.page as LibraryPage);
+      const at = to.at ?? "home";
+      setReviewShown(at === "review" && converterOpen);
+      setImportPage(at.startsWith("import:") ? at.slice("import:".length) : null);
+      if (at.startsWith("title:")) setSelectedKey(at.slice("title:".length));
+      setGridHome(!at.startsWith("title:"));
+    } else if (to.view === "browse") {
+      setBrowsePage(to.page as BrowseView);
+      setBrowseDetails(to.at);
+    } else if (to.view === "settings") setSettingsSection(to.page as SettingsSection);
+    else setHelpPage(to.page as HelpPageId);
+  });
 
   const readyUpdate = status?.update.phase === "ready" && status.update.version &&
       updateLater !== status.update.version
@@ -528,6 +566,8 @@ export function App() {
       {view === "browse" && (
         <Browse
           view={browsePage}
+          detailsKey={browseDetails}
+          onDetailsKey={setBrowseDetails}
           downloads={downloading}
           onCancelDownload={askCancel}
           initialSearch={browseSearch}

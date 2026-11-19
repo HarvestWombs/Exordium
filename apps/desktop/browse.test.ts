@@ -5,6 +5,7 @@ import {
   cleanDescription,
   contentKeywords,
   executableInstallWarning,
+  itemVideos,
   jobList,
   keywordsFor,
   latestUploads,
@@ -18,6 +19,7 @@ import {
   parseArchiveListing,
   pauseJob,
   startUrlJob,
+  youtubeShots,
 } from "./browse.ts";
 
 Deno.test("keywords come from the entry's own words", () => {
@@ -365,4 +367,55 @@ Deno.test("cancelling a download stops it, leaves no .part file and forgets the 
     await server.shutdown();
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+Deno.test("a description's YouTube videos become gallery entries, once each, whatever the link's form", () => {
+  const html = `<iframe src="https://www.youtube.com/embed/-8_WiLXlDF4?si=GQoR"></iframe>
+    <a href="https://youtu.be/AfPipuvIkFw">trailer</a> <a href="https://www.youtube.com/watch?feature=x&amp;v=DNLlPZRpwJc">x</a>
+    <iframe src="https://www.youtube-nocookie.com/embed/-8_WiLXlDF4"></iframe>`;
+  const shots = youtubeShots(html);
+  assertEquals(shots.map((s) => s.video), [
+    { kind: "youtube", id: "-8_WiLXlDF4" },
+    { kind: "youtube", id: "AfPipuvIkFw" },
+    { kind: "youtube", id: "DNLlPZRpwJc" },
+  ]);
+  assertEquals(shots[0]!.full, "https://i.ytimg.com/vi/-8_WiLXlDF4/hqdefault.jpg");
+  assertEquals(youtubeShots("<p>no videos, just youtube.com mentioned</p>"), []);
+});
+
+Deno.test("an upload's video plays its original when the player can, with a frame archive.org took", () => {
+  // The files archive.org lists for d-2-se-doomshadows-mod-v-0.07-d-2-gl (2026-11-19).
+  const id = "d-2-se-doomshadows-mod-v-0.07-d-2-gl";
+  const files = [
+    {
+      name: "Doomshadows mod v0.07.mp4",
+      format: "h.264",
+      source: "derivative",
+      original: "Doomshadows mod v0.07.webm",
+    },
+    { name: "Doomshadows mod v0.07.webm", format: "WebM", source: "original" },
+    {
+      name: `${id}.thumbs/Doomshadows mod v0.07_000001.jpg`,
+      format: "Thumbnail",
+      source: "derivative",
+      original: "Doomshadows mod v0.07.webm",
+    },
+    {
+      name: `${id}.thumbs/Doomshadows mod v0.07_000030.jpg`,
+      format: "Thumbnail",
+      source: "derivative",
+      original: "Doomshadows mod v0.07.webm",
+    },
+    { name: "__ia_thumb.jpg", format: "Item Tile", source: "original" },
+  ];
+  const [shot, ...rest] = itemVideos(id, files);
+  assertEquals(rest, []);
+  assertEquals(shot!.video, { kind: "file", url: `https://archive.org/download/${id}/Doomshadows%20mod%20v0.07.webm` });
+  assert(shot!.full.includes(encodeURIComponent(`${id}.thumbs/Doomshadows mod v0.07_000030.jpg`)));
+  // An AVI the player cannot play: archive.org's MP4 made from it.
+  const avi = itemVideos("x", [
+    { name: "trailer.avi", format: "AVI", source: "original" },
+    { name: "trailer.mp4", format: "h.264", source: "derivative", original: "trailer.avi" },
+  ]);
+  assertEquals(avi[0]!.video, { kind: "file", url: "https://archive.org/download/x/trailer.mp4" });
 });

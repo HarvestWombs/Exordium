@@ -1,5 +1,6 @@
-import { LANGUAGES, tr } from "../../lib/i18n.ts";
+import { LANGUAGES, plural, tr } from "../../lib/i18n.ts";
 import * as React from "react";
+import { CloseIcon } from "../../components/icons.tsx";
 import {
   FolderRow,
   NumberRow,
@@ -38,6 +39,60 @@ export function AppSettings(
   const [app, setApp] = React.useState<AppSettingsState | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState("");
+  const [found, setFound] = React.useState(0);
+  const searching = query.trim().length > 0;
+  const results = React.useRef<HTMLDivElement>(null);
+  const searchBox = React.useRef<HTMLInputElement>(null);
+
+  // Searching shows every section at once and hides each row whose words do not match, by the text
+  // on screen (so it works in every language): every word typed must appear in the row, or in its
+  // group's or section's name, which then shows the whole group or section. Some sections fill in
+  // after they read their own data (Backups, Discord), so rows that appear later are judged too.
+  React.useLayoutEffect(() => {
+    const root = results.current;
+    if (!searching || !root) return;
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (text: string | null | undefined) => {
+      const lower = (text ?? "").toLowerCase();
+      return terms.every((term) => lower.includes(term));
+    };
+    const filter = () => {
+      let count = 0;
+      for (const section of root.querySelectorAll<HTMLElement>("[data-settings-section]")) {
+        const sectionHit = hit(section.dataset.label);
+        for (const row of section.querySelectorAll<HTMLElement>(".settings-row")) {
+          const group = row.closest(".settings-group")?.querySelector("h2")?.textContent;
+          row.hidden = !(sectionHit || hit(group) || hit(row.textContent));
+        }
+        for (const group of section.querySelectorAll<HTMLElement>(".settings-group")) {
+          group.hidden = !group.querySelector(".settings-row:not([hidden])");
+        }
+        const shown = section.querySelectorAll(".settings-row:not([hidden])").length;
+        section.hidden = shown === 0;
+        count += shown;
+      }
+      setFound(count);
+    };
+    filter();
+    // Only added or removed elements: the hidden flags set here are attributes, so no loop.
+    const observer = new MutationObserver(filter);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [searching, query]);
+
+  // Ctrl+F searches the settings, as Help's box does its topics.
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchBox.current?.focus();
+        searchBox.current?.select();
+      }
+    };
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, []);
 
   const refresh = React.useCallback(async () => {
     const response = await fetch("/api/app-settings");
@@ -73,13 +128,41 @@ export function AppSettings(
   return (
     <div className="body settings-body">
       <aside className="settings-sidebar">
+        <div className="search help-search">
+          <input
+            ref={searchBox}
+            type="text"
+            value={query}
+            placeholder={tr("Search settings")}
+            aria-label={tr("Search settings")}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="search-clear-button"
+              aria-label={tr("Clear")}
+              data-tooltip={tr("Clear")}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setQuery("")}
+            >
+              <CloseIcon />
+            </button>
+          )}
+        </div>
         <span className="eyebrow">{tr("SETTINGS")}</span>
         {SETTINGS_SECTIONS.map((item) => (
           <button
             key={item.id}
             type="button"
-            className={section === item.id ? "on" : ""}
-            onClick={() => onSection(item.id)}
+            className={!searching && section === item.id ? "on" : ""}
+            onClick={() => {
+              setQuery("");
+              onSection(item.id);
+            }}
           >
             {item.label}
           </button>
@@ -89,16 +172,54 @@ export function AppSettings(
       <div className="settings-page">
         <div className="settings-column">
           {problem && <p className="error">{problem}</p>}
-          {!app ? <p className="muted">{tr("Reading settings…")}</p> : (
-            <SettingsSectionView
-              section={section}
-              app={app}
-              status={status}
-              busy={busy}
-              onPatch={patchSettings}
-              onDiscordChanged={onChanged}
-            />
-          )}
+          {!app
+            ? <p className="muted">{tr("Reading settings…")}</p>
+            : searching
+            ? (
+              <div className="settings-search" ref={results}>
+                <SettingsHead
+                  title={tr("Search settings")}
+                  text={found
+                    ? plural(found, "{count} setting matches “{query}”.", "{count} settings match “{query}”.", {
+                      query: query.trim(),
+                    })
+                    : tr("No setting matches “{query}”.", { query: query.trim() })}
+                />
+                {SETTINGS_SECTIONS.map((item) => (
+                  <div key={item.id} className="settings-search-section" data-settings-section data-label={item.label}>
+                    <button
+                      type="button"
+                      className="settings-search-section-head"
+                      data-tooltip={tr("Open {section}", { section: item.label })}
+                      onClick={() => {
+                        setQuery("");
+                        onSection(item.id);
+                      }}
+                    >
+                      {item.label} ›
+                    </button>
+                    <SettingsSectionView
+                      section={item.id}
+                      app={app}
+                      status={status}
+                      busy={busy}
+                      onPatch={patchSettings}
+                      onDiscordChanged={onChanged}
+                    />
+                  </div>
+                ))}
+              </div>
+            )
+            : (
+              <SettingsSectionView
+                section={section}
+                app={app}
+                status={status}
+                busy={busy}
+                onPatch={patchSettings}
+                onDiscordChanged={onChanged}
+              />
+            )}
         </div>
       </div>
     </div>

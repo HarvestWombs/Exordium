@@ -5,16 +5,9 @@ import { FileType } from "./FileType.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import { useCoverHeight } from "./useCoverHeight.ts";
-import {
-  ACTIVE,
-  formatBytes,
-  INSTALLER_FILE,
-  jobLabel,
-  jobProgress,
-  openLink,
-  smallerModDbImage,
-} from "./browse-util.ts";
-import type { Job, ModDbDetails, ModDbItem, Shot } from "./types.ts";
+import { ACTIVE, formatBytes, jobLabel, jobProgress, openLink, smallerModDbImage, uniqueLinks } from "./browse-util.ts";
+import { useModDbEntry } from "./entry-data.ts";
+import type { Job, ModDbItem } from "./types.ts";
 
 /**
  * A ModDB entry, laid out as an archive.org card. The listing gives a title, a blurb and a picture;
@@ -22,7 +15,21 @@ import type { Job, ModDbDetails, ModDbItem, Shot } from "./types.ts";
  * it, its downloads, screenshots and, for a mod, its files to choose from.
  */
 export function ModDbCard(
-  { item, variants, labels, installed, expanded, onExpand, jobs, root, onInstall, onInstalled, onOpen, onKeyword }: {
+  {
+    item,
+    variants,
+    labels,
+    installed,
+    expanded,
+    onExpand,
+    jobs,
+    root,
+    onInstall,
+    onInstalled,
+    onOpen,
+    onKeyword,
+    onOpenDetails,
+  }: {
     item: ModDbItem;
     variants?: ModDbItem[];
     labels: Map<string, string>;
@@ -35,42 +42,24 @@ export function ModDbCard(
     onInstalled: (name: string) => void;
     onOpen: (what: "file" | "unpacked", job: Job) => void;
     onKeyword: (keyword: string) => void;
+    /** Opens the entry's details page. */
+    onOpenDetails: () => void;
   },
 ) {
   const ref = React.useRef<HTMLElement>(null);
-  const [details, setDetails] = React.useState<ModDbDetails | null>(null);
-  const [detailsError, setDetailsError] = React.useState<string | null>(null);
-  const [file, setFile] = React.useState("");
-  // A mod's page does not say what its files are; each file's own page does, by its page.
-  const [fileNames, setFileNames] = React.useState<Record<string, string | null>>({});
-
-  React.useEffect(() => {
-    if (item.kind !== "mod" || !file || file in fileNames) return;
-    void fetch(`/api/browse/moddb-item?page=${encodeURIComponent(file)}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .catch(() => null)
-      .then((body: ModDbDetails | null) => setFileNames((names) => ({ ...names, [file]: body?.filename ?? null })));
-  }, [item.kind, file, fileNames]);
-
-  React.useEffect(() => {
-    const node = ref.current;
-    if (!node || details) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      void (async () => {
-        const response = await fetch(`/api/browse/moddb-item?page=${encodeURIComponent(item.page)}`);
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) return setDetailsError(body.error ?? tr("Could not read this page."));
-        setDetails(body);
-        setFile(body.files?.[0]?.page ?? "");
-        for (const s of body.screenshots as Shot[]) new Image().src = s.full;
-      })();
-    }, { rootMargin: "300px" });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [item.page, details]);
-
+  const {
+    details,
+    error: detailsError,
+    isMod,
+    file,
+    setFile,
+    availableFiles,
+    chosen,
+    size,
+    filename,
+    installer,
+    target,
+  } = useModDbEntry(item, variants, { ref, margin: "300px" });
   const job = jobs[0];
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
@@ -78,35 +67,6 @@ export function ModDbCard(
   const translation = useTranslation(description);
   const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
-  const isMod = item.kind === "mod";
-  const availableFiles = React.useMemo(() => {
-    const detailsByPage = new Map((details?.files ?? []).map((entry) => [entry.page, entry]));
-    const files = new Map<string, ModDbDetails["files"][number]>();
-    const releases = (variants ?? []).filter((variant) => variant.kind === "file").sort((a, b) =>
-      (b.addedAt ?? "").localeCompare(a.addedAt ?? "")
-    );
-    for (const variant of releases) {
-      files.set(
-        variant.page,
-        detailsByPage.get(variant.page) ?? {
-          page: variant.page,
-          name: variant.title,
-          size: null,
-          category: null,
-        },
-      );
-    }
-    for (const entry of details?.files ?? []) if (!files.has(entry.page)) files.set(entry.page, entry);
-    return [...files.values()];
-  }, [details, variants]);
-  React.useEffect(() => {
-    if (isMod && !file && availableFiles[0]) setFile(availableFiles[0].page);
-  }, [isMod, file, availableFiles]);
-  const chosen = isMod ? availableFiles.find((f) => f.page === file) ?? null : null;
-  const size = isMod ? chosen?.size ?? null : details?.size ?? null;
-  const filename = isMod ? fileNames[file] ?? null : details?.filename ?? null;
-  const installer = INSTALLER_FILE.test(filename ?? "");
-  const target = isMod ? chosen?.page ?? item.installPage : item.installPage || item.page;
 
   return (
     <article ref={ref} className="mod-card">
@@ -114,15 +74,17 @@ export function ModDbCard(
         ref={heights.cover}
         type="button"
         className="mod-cover"
-        data-tooltip={tr("Open its ModDB page")}
-        onClick={() => openLink(item.page)}
+        data-tooltip={tr("Open the details")}
+        onClick={onOpenDetails}
       >
         <img src={shots[0]?.full ?? item.cover} alt="" loading="lazy" onError={smallerModDbImage} />
         {installed && <span className="ribbon">{tr("IN LIBRARY")}</span>}
       </button>
 
       <div className="mod-info">
-        <h2 className="mod-title">{item.title}</h2>
+        <h2 className="mod-title">
+          <button type="button" className="mod-title-button" onClick={onOpenDetails}>{item.title}</button>
+        </h2>
         <p ref={heights.description} className={expanded ? "mod-description open" : "mod-description"}>
           {translation.text || (details ? tr("The author gave no description.") : "…")}
         </p>
@@ -133,7 +95,7 @@ export function ModDbCard(
             </button>
           )}
           {translation.button}
-          {details?.links.map((link) => (
+          {uniqueLinks(details?.links ?? []).map((link) => (
             <button
               type="button"
               key={link.url}

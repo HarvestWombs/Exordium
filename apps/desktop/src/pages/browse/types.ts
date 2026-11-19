@@ -69,19 +69,22 @@ export interface ModDbDetails {
   size: number | null;
   downloads: number | null;
   filename: string | null;
-  screenshots: { full: string; thumb: string }[];
+  screenshots: Shot[];
   files: { page: string; name: string; size: number | null; category: string | null }[];
   links: { label: string; url: string }[];
 }
 
-export type Shot = { full: string; thumb: string };
+/** A video a gallery entry stands for: YouTube (from a ModDB description) or a file on archive.org. */
+export type ShotVideo = { kind: "youtube"; id: string } | { kind: "file"; url: string };
+/** A gallery entry: a picture, or a video with a picture standing for it. */
+export type Shot = { full: string; thumb: string; video?: ShotVideo };
 
 export interface Details {
   id: string;
   description: string;
   descriptionSource: string | null;
   archives: { name: string; size: number }[];
-  screenshots: { full: string; thumb: string }[];
+  screenshots: Shot[];
   links: { label: string; url: string }[];
   keywords: string[];
   unpackedSize: number;

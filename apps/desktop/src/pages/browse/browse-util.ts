@@ -130,6 +130,11 @@ export function post(path: string, body: unknown) {
   return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
+/** Links once each: a D2SE setup can name one address as both homepage and forum. */
+export function uniqueLinks<T extends { url: string }>(links: T[]): T[] {
+  return links.filter((link, index) => links.findIndex((other) => other.url === link.url) === index);
+}
+
 export function openLink(url: string) {
   void post("/api/open-link", { url }).catch(() => {});
 }

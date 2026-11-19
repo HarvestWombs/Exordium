@@ -8,6 +8,7 @@ import { Downloads } from "./Downloads.tsx";
 import { InstallModModal } from "./InstallModModal.tsx";
 import { ModCard } from "./ModCard.tsx";
 import { ModDbCard } from "./ModDbCard.tsx";
+import { ModDetails } from "./ModDetails.tsx";
 import {
   ACTIVE,
   ARCHIVE_SORTS,
@@ -31,6 +32,8 @@ const FLOATING_FILTERS = "(max-width: 1180px)";
 export function Browse(
   {
     view,
+    detailsKey,
+    onDetailsKey: setDetailsKey,
     initialSearch,
     installed,
     root,
@@ -42,6 +45,9 @@ export function Browse(
     onExpectDraft,
   }: {
     view: BrowseView;
+    /** The entry whose details page is open, by catalog key (kept by the app, for back and forward). */
+    detailsKey: string | null;
+    onDetailsKey: (key: string | null) => void;
     initialSearch?: string;
     installed: Set<string>;
     root: string | null;
@@ -379,8 +385,12 @@ export function Browse(
   }
 
   const refreshing = archiveLoading || modDbLoading;
+  const detailsEntry = detailsKey ? catalog.find((entry) => entry.key === detailsKey) ?? null : null;
+  // The details page takes the whole catalog width: the filters step aside while it is open.
+  const showFilters = filterOpen && !detailsEntry;
+  const closeDetails = () => setDetailsKey(null);
   return (
-    <div className={filterOpen ? "browse browse-catalog filters-open" : "browse browse-catalog"}>
+    <div className={showFilters ? "browse browse-catalog filters-open" : "browse browse-catalog"}>
       {installRequest && (
         <InstallModModal
           request={installRequest}
@@ -389,7 +399,7 @@ export function Browse(
           onInstall={(installRoot, importMetadata) => startInstall(installRequest, installRoot, importMetadata)}
         />
       )}
-      {filterOpen && (
+      {showFilters && (
         <aside id="browse-filter-menu" className="browse-filter-menu browse-filter-panel" ref={filterPanel}>
           <div className="browse-filter-menu-head">
             <strong>{tr("Filters")}</strong>
@@ -508,7 +518,10 @@ export function Browse(
             <input
               type="text"
               value={search}
-              onChange={(event) => setSearch(event.currentTarget.value)}
+              onChange={(event) => {
+                setSearch(event.currentTarget.value);
+                setDetailsKey(null);
+              }}
               placeholder={tr("Search by name…")}
               aria-label={tr("Search mods")}
             />
@@ -537,7 +550,33 @@ export function Browse(
           </button>
         </nav>
 
-        <div ref={listRef} className="browse-list browse-catalog-list">
+        {detailsEntry && (
+          <ModDetails
+            key={detailsEntry.key}
+            entry={detailsEntry}
+            cached={detailsEntry.archive ? data?.details?.[detailsEntry.archive.id] ?? null : null}
+            labels={labels}
+            keywords={entryKeywords(detailsEntry)}
+            installed={entryInstalled(detailsEntry)}
+            jobs={detailsEntry.archive
+              ? jobs.filter((job) => job.id === detailsEntry.archive!.id)
+              : jobs.filter((job) => job.source === "url" && job.id === urlJobs[detailsEntry.key])}
+            root={root}
+            onBack={closeDetails}
+            onDetails={(details) =>
+              setExtraKeywords((known) => known[details.id] ? known : { ...known, [details.id]: details.keywords })}
+            onInstallArchive={(item, file, fromDisk) => queueInstall(item, item.id, file, item.title, fromDisk)}
+            onInstallUrl={(url, title) => queueUrlInstall(url, title, detailsEntry.key)}
+            onInstalled={onInstalled}
+            onOpenArchive={(what, file) => openPlace({ what, id: detailsEntry.archive?.id, file })}
+            onOpenJob={(what, job) => openPlace({ what, id: job.id, file: job.file })}
+            onKeyword={(keyword) => {
+              closeDetails();
+              toggle(keyword);
+            }}
+          />
+        )}
+        <div ref={listRef} className="browse-list browse-catalog-list" hidden={detailsEntry !== null}>
           {(selected.size > 0 || hideInstalled) && (
             <div className="active-filters browse-active-filters">
               {[...selected].map((keyword) => (
@@ -605,6 +644,7 @@ export function Browse(
                   onInstalled={onInstalled}
                   onOpen={(what, file) => openPlace({ what, id: item.id, file })}
                   onKeyword={toggle}
+                  onOpenDetails={() => setDetailsKey(entry.key)}
                 />
               );
             }
@@ -624,6 +664,7 @@ export function Browse(
                 onInstalled={onInstalled}
                 onOpen={(what, job) => openPlace({ what, id: job.id, file: job.file })}
                 onKeyword={toggle}
+                onOpenDetails={() => setDetailsKey(entry.key)}
               />
             );
           })}

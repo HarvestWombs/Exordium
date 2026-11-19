@@ -6,7 +6,8 @@ import { InspectionFacts } from "./InspectionFacts.tsx";
 import { JobResult } from "./JobResult.tsx";
 import { ShotGallery } from "./ShotGallery.tsx";
 import { useCoverHeight } from "./useCoverHeight.ts";
-import { ACTIVE, baseName, formatBytes, jobLabel, jobProgress, openLink } from "./browse-util.ts";
+import { ACTIVE, baseName, formatBytes, jobLabel, jobProgress, openLink, uniqueLinks } from "./browse-util.ts";
+import { useArchiveEntry } from "./entry-data.ts";
 import type { Details, Item, Job, ModDbItem } from "./types.ts";
 
 export function ModCard(
@@ -26,6 +27,7 @@ export function ModCard(
     onInstalled,
     onOpen,
     onKeyword,
+    onOpenDetails,
   }: {
     item: Item;
     /** The same title on ModDB, when the unified catalog confidently matched it. */
@@ -44,38 +46,20 @@ export function ModCard(
     onInstalled: (name: string) => void;
     onOpen: (what: "page" | "file" | "unpacked", file?: string) => void;
     onKeyword: (keyword: string) => void;
+    /** Opens the entry's details page. */
+    onOpenDetails: () => void;
   },
 ) {
   const ref = React.useRef<HTMLElement>(null);
-  const [details, setDetails] = React.useState<Details | null>(cached);
-  const [detailsError, setDetailsError] = React.useState<string | null>(null);
-  const [file, setFile] = React.useState<string>(
-    () => [...(cached?.archives ?? [])].sort((a, b) => b.size - a.size)[0]?.name ?? "",
-  );
-  const [loadedCover, setLoadedCover] = React.useState<string | null>(null);
-
   // Details (screenshots, files, the archive's own readme) are asked for once the card is near the
   // screen; the full screenshots are then preloaded, so switching between them is instant.
-  React.useEffect(() => {
-    const node = ref.current;
-    if (!node || details) return;
-    const scrollRoot = node.closest(".browse-list");
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      void (async () => {
-        const response = await fetch(`/api/browse/item?id=${encodeURIComponent(item.id)}`);
-        const body = await response.json();
-        if (!response.ok) return setDetailsError(body.error ?? tr("Could not read this item."));
-        setDetails(body);
-        setFile([...body.archives].sort((a: { size: number }, b: { size: number }) => b.size - a.size)[0]?.name ?? "");
-        onDetails(body);
-        for (const s of body.screenshots as Details["screenshots"]) new Image().src = s.full;
-      })();
-    }, { root: scrollRoot, rootMargin: "900px 0px" });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [item.id, details, onDetails]);
+  const { details, error: detailsError, loading: loadingDetails, file, setFile } = useArchiveEntry(
+    item,
+    cached,
+    { ref, margin: "900px 0px", inList: true },
+    onDetails,
+  );
+  const [loadedCover, setLoadedCover] = React.useState<string | null>(null);
 
   const job = jobs.find((j) => baseName(j.file) === baseName(file)) ?? jobs[0];
   const description = details?.description ?? "";
@@ -83,7 +67,6 @@ export function ModCard(
   const heights = useCoverHeight(expanded, translation.text);
   const shots = details?.screenshots ?? [];
   const cover = shots[0]?.thumb ?? item.cover;
-  const loadingDetails = !details && !detailsError;
   const progress = job ? jobProgress(job) : null;
   const running = job ? ACTIVE.includes(job.state) : false;
 
@@ -93,8 +76,8 @@ export function ModCard(
         ref={heights.cover}
         type="button"
         className="mod-cover"
-        data-tooltip={tr("Open its archive.org page")}
-        onClick={() => onOpen("page")}
+        data-tooltip={tr("Open the details")}
+        onClick={onOpenDetails}
       >
         {
           /* The uploader's first screenshot when there is one: archive.org's own tile is a generic logo for
@@ -113,7 +96,9 @@ export function ModCard(
       </button>
 
       <div className="mod-info">
-        <h2 className="mod-title">{item.title}</h2>
+        <h2 className="mod-title">
+          <button type="button" className="mod-title-button" onClick={onOpenDetails}>{item.title}</button>
+        </h2>
         <p
           ref={heights.description}
           className={`${expanded ? "mod-description open" : "mod-description"}${loadingDetails ? " loading" : ""}`}
@@ -141,7 +126,7 @@ export function ModCard(
             </button>
           )}
           {translation.button}
-          {details?.links.map((link) => (
+          {uniqueLinks(details?.links ?? []).map((link) => (
             <button
               type="button"
               key={link.url}

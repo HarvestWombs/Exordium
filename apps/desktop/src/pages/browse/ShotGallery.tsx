@@ -4,7 +4,9 @@ import { Lightbox } from "../../components/Lightbox.tsx";
 import { smallerModDbImage } from "./browse-util.ts";
 import type { Shot } from "./types.ts";
 
-function ShotImage({ src, className, lazy = false }: { src: string; className: string; lazy?: boolean }) {
+function ShotImage(
+  { src, className, lazy = false, video = false }: { src: string; className: string; lazy?: boolean; video?: boolean },
+) {
   const [loadedSource, setLoadedSource] = React.useState<string | null>(null);
   const [failedSource, setFailedSource] = React.useState<string | null>(null);
   const ready = loadedSource === src || failedSource === src;
@@ -12,6 +14,7 @@ function ShotImage({ src, className, lazy = false }: { src: string; className: s
   return (
     <span className="shot-image-frame">
       {!ready && <span className="skeleton" aria-hidden="true" />}
+      {video && <PlayBadge />}
       <img
         className={`${className}${loadedSource === src ? " loaded" : ""}`}
         src={src}
@@ -28,7 +31,21 @@ function ShotImage({ src, className, lazy = false }: { src: string; className: s
   );
 }
 
-/** A card's screenshots: the one shown large, a strip of four, and the full gallery on click. */
+/** The play mark over a video's picture. */
+export function PlayBadge() {
+  return (
+    <span className="shot-play" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <path d="M8 5.5v13l11-6.5z" />
+      </svg>
+    </span>
+  );
+}
+
+/**
+ * A card's screenshots and videos: the one shown large, a strip of four, and the full gallery on
+ * click, where a video plays.
+ */
 export function ShotGallery(
   { shots, empty, loading = false }: { shots: Shot[]; empty: string; loading?: boolean },
 ) {
@@ -50,11 +67,15 @@ export function ShotGallery(
           <>
             <button
               type="button"
-              className="shot-main-button"
-              data-tooltip={tr("Open the gallery")}
+              className={shots[shot]?.video ? "shot-main-button video" : "shot-main-button"}
+              data-tooltip={shots[shot]?.video ? tr("Play the video") : tr("Open the gallery")}
               onClick={() => setGallery(true)}
             >
-              <ShotImage className="shot-main" src={shots[shot]?.full ?? shots[0]?.full ?? ""} />
+              <ShotImage
+                className="shot-main"
+                src={shots[shot]?.full ?? shots[0]?.full ?? ""}
+                video={!!shots[shot]?.video}
+              />
             </button>
             <div className="shot-strip">
               {shots.slice(0, 4).map((s, i) => (
@@ -64,7 +85,7 @@ export function ShotGallery(
                   className={i === shot ? "shot on" : "shot"}
                   onClick={() => setShot(i)}
                 >
-                  <ShotImage className="shot-thumb" src={s.thumb} lazy />
+                  <ShotImage className="shot-thumb" src={s.thumb} lazy video={!!s.video} />
                 </button>
               ))}
             </div>
@@ -73,7 +94,7 @@ export function ShotGallery(
         : <div className="shot-empty muted small">{empty}</div>}
       {gallery && (
         <Lightbox
-          images={shots.map((s) => ({ src: s.full, thumb: s.thumb }))}
+          images={shots.map((s) => ({ src: s.full, thumb: s.thumb, ...(s.video ? { video: s.video } : {}) }))}
           start={shot}
           onClose={() => setGallery(false)}
         />

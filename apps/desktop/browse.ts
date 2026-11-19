@@ -277,7 +277,23 @@ export interface BrowseItem {
   keywords: string[];
   page: string;
   cover: string;
+  /** archive.org lists a video among its files: its details are read again until they hold it. */
+  video?: boolean;
 }
+
+/**
+ * One gallery entry: a picture, or a video with a picture to stand for it. YouTube videos come from a
+ * ModDB entry's own description; files from an archive.org upload (MP4 or WebM, streamed from there).
+ */
+export interface Shot {
+  full: string;
+  thumb: string;
+  video?: { kind: "youtube"; id: string } | { kind: "file"; url: string };
+}
+
+/** Formats archive.org lists for an item holding a video (its search `format` field). */
+const VIDEO_FORMATS = /^(MPEG4|h\.264|h\.264 IA|WebM|Matroska|Ogg Video|AVI|Cinepack|QuickTime)$/i;
+const VIDEO_FILE = /\.(mp4|webm|m4v)$/i;
 
 export interface ModDbItem {
   source: "moddb";
@@ -302,6 +318,7 @@ interface ArchiveDoc {
   publicdate?: string;
   downloads?: number;
   item_size?: number;
+  format?: string | string[];
 }
 
 function firstString(value: unknown): string | null {
@@ -327,6 +344,7 @@ export function archiveItemFromDoc(doc: ArchiveDoc): BrowseItem | null {
     keywords: keywordsFor(`${title}\n${description}\n${subjects}`),
     page: `https://archive.org/details/${id}`,
     cover: `https://archive.org/services/img/${id}`,
+    ...([doc.format ?? []].flat().some((format) => VIDEO_FORMATS.test(format)) ? { video: true } : {}),
   };
 }
 
@@ -360,7 +378,17 @@ export async function archiveList(
 
 async function fetchArchiveList(file: string): Promise<{ items: BrowseItem[]; fetchedAt: string }> {
   const cacheDir = file.slice(0, file.lastIndexOf("/"));
-  const fields = ["identifier", "title", "description", "subject", "creator", "publicdate", "downloads", "item_size"];
+  const fields = [
+    "identifier",
+    "title",
+    "description",
+    "subject",
+    "creator",
+    "publicdate",
+    "downloads",
+    "item_size",
+    "format",
+  ];
   const query = new URLSearchParams({ q: ARCHIVE_QUERY, rows: "1000", page: "1", output: "json" });
   for (const field of fields) query.append("fl[]", field);
   const response = await archiveFetch(`https://archive.org/advancedsearch.php?${query}`);
@@ -747,12 +775,31 @@ export interface ModDbDetails {
   downloads: number | null;
   /** A single file's name: `.exe` ones are never installed for the player. */
   filename: string | null;
-  screenshots: { full: string; thumb: string }[];
+  /** Pictures, and YouTube videos embedded in the entry's own description (first). */
+  screenshots: Shot[];
   /** A mod's files, newest first, for choosing which to install. */
   files: ModDbFile[];
   links: { label: string; url: string }[];
   /** A file's or addon's mod, whose screenshots it borrows when it has few of its own. */
   parentMod: string | null;
+}
+
+/**
+ * YouTube videos embedded or linked in a description, once each, as gallery entries with YouTube's
+ * own pictures: `hqdefault` (480x360) large, `mqdefault` (320x180, no bars) in the strip.
+ */
+export function youtubeShots(html: string): Shot[] {
+  const ids = new Set<string>();
+  for (
+    const match of html.matchAll(
+      /(?:youtube(?:-nocookie)?\.com\/(?:embed\/|watch\?(?:[^"'\s<]*&(?:amp;)?)?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/gi,
+    )
+  ) ids.add(match[1]!);
+  return [...ids].map((id) => ({
+    full: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    thumb: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+    video: { kind: "youtube" as const, id },
+  }));
 }
 
 /** ModDB's own size text ("15.29mb", "1.05gb", "512kb") in bytes. */
@@ -795,6 +842,11 @@ export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
     return at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : null;
   };
 
+  // Where an entry's own words are: from its description to the comments, so the mod's articles shown
+  // on its page count (Dreamaker's videos are in one) and what commenters post does not.
+  const ownStart = html.search(/id=["'](?:downloaddescription|profiledescription)["']/i);
+  const ownEnd = html.search(/id=["'](?:commentsummary|comments)["']/i);
+  const ownHtml = ownStart < 0 ? "" : html.slice(ownStart, ownEnd > ownStart ? ownEnd : html.length);
   const description = cleanDescription(modDbBlock(html, "downloaddescription").replace(/<hr\s*\/?>/gi, "")) ||
     cleanDescription(modDbBlock(html, "profiledescription")) ||
     cleanDescription(/<p\b[^>]*id=["']downloadsummary["'][^>]*>([\s\S]*?)<\/p>/i.exec(html)?.[1] ?? "") ||
@@ -809,11 +861,13 @@ export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
     shots.push({ full, thumb: modDbImage(url, "crop_120x90") });
   };
   for (const match of modDbBlock(html, "imagebox").matchAll(/<img\b[^>]*src=["']([^"']+)["']/gi)) addShot(match[1]!);
+  const videos = youtubeShots(ownHtml);
   // A file's or addon's own picture; a mod's og:image is its logo, kept last.
   const og = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)?.[1];
   if (og && /\/images\/downloads\//i.test(og)) {
     shots.unshift({ full: modDbImage(og, "original"), thumb: modDbImage(og, "crop_120x90") });
   } else if (og && shots.length === 0) addShot(og);
+  shots.unshift(...videos);
 
   // The side profile is the entry's mod's, or the game's for a game-level addon: its files and
   // homepage count only when they are a mod's own.
@@ -864,6 +918,8 @@ export function modDbDetailsFromHtml(html: string, page: string): ModDbDetails {
 }
 
 const MODDB_DETAILS_TTL_MS = 12 * 60 * 60 * 1000;
+/** Bumped when what a ModDB entry's cached details hold changes (4: YouTube videos, a file's from its mod), so they are read again. */
+const MODDB_DETAILS_VERSION = 4;
 
 async function fetchModDbDetails(page: string): Promise<ModDbDetails> {
   const response = await fetch(page, { headers: { "user-agent": "Exordium" } });
@@ -880,8 +936,8 @@ export async function modDbDetails(cacheDir: string, page: string, refresh = fal
   const file = `${cacheDir}/moddb-items/${modDbId(page)}.json`;
   if (!refresh) {
     try {
-      const cached = JSON.parse(await Deno.readTextFile(file)) as { at: string; details: ModDbDetails };
-      if (Date.now() - Date.parse(cached.at) < MODDB_DETAILS_TTL_MS) {
+      const cached = JSON.parse(await Deno.readTextFile(file)) as { at: string; details: ModDbDetails; v?: number };
+      if (Date.now() - Date.parse(cached.at) < MODDB_DETAILS_TTL_MS && cached.v === MODDB_DETAILS_VERSION) {
         // Cached before the originals were used: the same shots, full size.
         for (const shot of cached.details.screenshots) shot.full = modDbImage(shot.full, "original");
         return cached.details;
@@ -891,14 +947,19 @@ export async function modDbDetails(cacheDir: string, page: string, refresh = fal
     }
   }
   const details = await fetchModDbDetails(page);
-  if (details.parentMod && details.parentMod !== page && details.screenshots.length < 2) {
+  if (details.parentMod && details.parentMod !== page) {
+    // A file's or addon's mod: its videos always (they are about the mod, and live on its page), its
+    // pictures when the entry has fewer than two of its own. The mod's page is cached for every file.
     const parent = await modDbDetails(cacheDir, details.parentMod).catch(() => null);
-    for (const shot of parent?.screenshots ?? []) {
-      if (!details.screenshots.some((s) => s.full === shot.full)) details.screenshots.push(shot);
+    const has = (shot: Shot) => details.screenshots.some((s) => s.full === shot.full);
+    const videos = (parent?.screenshots ?? []).filter((shot) => shot.video && !has(shot));
+    if (details.screenshots.length < 2) {
+      for (const shot of parent?.screenshots ?? []) if (!shot.video && !has(shot)) details.screenshots.push(shot);
     }
+    details.screenshots.unshift(...videos);
   }
   await Deno.mkdir(`${cacheDir}/moddb-items`, { recursive: true });
-  await Deno.writeTextFile(file, JSON.stringify({ at: new Date().toISOString(), details }));
+  await Deno.writeTextFile(file, JSON.stringify({ at: new Date().toISOString(), details, v: MODDB_DETAILS_VERSION }));
   return details;
 }
 
@@ -921,7 +982,10 @@ export interface ItemDetails {
   descriptionSource: string | null;
   /** What can be downloaded: the uploader's own archives and installers. */
   archives: ItemFile[];
-  screenshots: { full: string; thumb: string }[];
+  /** Videos first (MP4 or WebM, streamed from archive.org), then pictures. */
+  screenshots: Shot[];
+  /** Read by a version that looks for videos: a listed video it lacks is not looked for again. */
+  videosRead?: boolean;
   /** Homepage, forum… named by the mod's own D2SE_SETUP.ini inside the archive. */
   links: { label: string; url: string }[];
   /** Keywords the archive's contents add: D2SE-ready, PlugY, D2Mod, the core version. */
@@ -1326,6 +1390,36 @@ export async function archiveItem(id: string, cacheDir: string): Promise<ItemDet
   return await refreshItem(id, cacheDir);
 }
 
+/**
+ * An upload's videos, one per uploaded video: the original when the player can play it (MP4, WebM),
+ * else archive.org's MP4 made from it. Its picture is a frame archive.org took (`<id>.thumbs/`), else
+ * the item's tile.
+ */
+export function itemVideos(
+  id: string,
+  files: { name: string; source?: string; original?: string; format?: string }[],
+): Shot[] {
+  const shots: Shot[] = [];
+  const videos = files.filter((file) =>
+    file.source === "original" ? VIDEO_FORMATS.test(file.format ?? "") || VIDEO_FILE.test(file.name) : false
+  );
+  for (const video of videos) {
+    const playable = VIDEO_FILE.test(video.name)
+      ? video
+      : files.find((file) => file.original === video.name && /\.mp4$/i.test(file.name));
+    if (!playable) continue;
+    const frames = files
+      .filter((file) => file.original === video.name && file.format === "Thumbnail")
+      .map((file) => file.name)
+      .sort();
+    const frame = frames[Math.min(1, frames.length - 1)] ??
+      (files.some((file) => file.name === "__ia_thumb.jpg") ? "__ia_thumb.jpg" : null);
+    const picture = frame ? imageUrl(id, frame) : `https://archive.org/services/img/${id}`;
+    shots.push({ full: picture, thumb: picture, video: { kind: "file", url: downloadUrl(id, playable.name) } });
+  }
+  return shots;
+}
+
 /** Items being read from archive.org right now: a card and the background read share one fetch. */
 const reading = new Map<string, Promise<ItemDetails>>();
 
@@ -1386,7 +1480,7 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
   if (!response.ok) throw new Error(`archive.org metadata answered ${response.status}`);
   const body = await response.json() as {
     metadata?: { description?: unknown; title?: unknown };
-    files?: { name: string; size?: string; source?: string }[];
+    files?: { name: string; size?: string; source?: string; original?: string; format?: string }[];
     item_size?: number;
   };
   const files = body.files ?? [];
@@ -1408,12 +1502,16 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
       (uploaderDescription && !/^diablo\s*(2|ii)\s*mod\.?$/i.test(uploaderDescription) ? uploaderDescription : ""),
     descriptionSource: extra.descriptionSource ?? (uploaderDescription ? "archive.org" : null),
     archives,
-    screenshots: originals
-      .filter((file) => IMAGE_FILE.test(file.name) && !file.name.startsWith("__ia_thumb"))
-      .map((file) => {
-        const thumb = `${file.name.replace(/\.[^.]+$/, "")}_thumb.jpg`;
-        return { full: imageUrl(id, file.name), thumb: imageUrl(id, names.has(thumb) ? thumb : file.name) };
-      }),
+    screenshots: [
+      ...itemVideos(id, files),
+      ...originals
+        .filter((file) => IMAGE_FILE.test(file.name) && !file.name.startsWith("__ia_thumb"))
+        .map((file) => {
+          const thumb = `${file.name.replace(/\.[^.]+$/, "")}_thumb.jpg`;
+          return { full: imageUrl(id, file.name), thumb: imageUrl(id, names.has(thumb) ? thumb : file.name) };
+        }),
+    ],
+    videosRead: true,
     links: extra.links ?? [],
     keywords: [...new Set(extra.keywords ?? [])],
     unpackedSize: extra.unpackedSize ?? 0,
@@ -1431,7 +1529,8 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
 export const detailsProgress = { done: 0, total: 0 };
 let warming = false;
 /** A newer list handed in while a read was running: read once that one ends. */
-let warmAgain: readonly { id: string; size: number }[] | null = null;
+let warmAgain: readonly WarmItem[] | null = null;
+type WarmItem = { id: string; size: number; video?: boolean };
 
 /**
  * Reads, in the background, two at a time with a pause between, the listed items that need it: never
@@ -1440,7 +1539,7 @@ let warmAgain: readonly { id: string; size: number }[] | null = null;
  * scrolled past, and a fresh list costs only its new and changed items. One that fails is tried again
  * on the next pass.
  */
-export function warmDetails(items: readonly { id: string; size: number }[], cacheDir: string): void {
+export function warmDetails(items: readonly WarmItem[], cacheDir: string): void {
   if (warming) {
     warmAgain = items;
     return;
@@ -1457,12 +1556,14 @@ export function warmDetails(items: readonly { id: string; size: number }[], cach
   })();
 }
 
-async function warmPass(items: readonly { id: string; size: number }[], cacheDir: string): Promise<void> {
+async function warmPass(items: readonly WarmItem[], cacheDir: string): Promise<void> {
   await cachedDetails(items.map((item) => item.id), cacheDir);
   const todo: string[] = [];
-  for (const { id, size } of items) {
+  for (const { id, size, video } of items) {
     const known = details.get(id);
     if (!known || detailVersions.get(id) !== DETAILS_VERSION) todo.push(id);
+    // Listed with a video, read before videos were looked for: only these, not every item.
+    else if (video && !known.videosRead) todo.push(id);
     else if (!size || known.itemSize === size) continue;
     else if (known.itemSize === undefined) {
       // Read before sizes were kept: taken as unchanged, its size noted for next time.

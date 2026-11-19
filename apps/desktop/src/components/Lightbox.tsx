@@ -1,10 +1,41 @@
 import { tr } from "../lib/i18n.ts";
 import * as React from "react";
+import { createPortal } from "react-dom";
 
 export interface LightboxImage {
   src: string;
   thumb?: string;
   caption?: string;
+  /** Plays in place of the picture: YouTube's privacy-enhanced player, or a video file. */
+  video?: { kind: "youtube"; id: string } | { kind: "file"; url: string };
+}
+
+/**
+ * A video, playing as soon as it is shown; leaving it (another entry, or closing) unmounts it, which
+ * stops it. YouTube plays from youtube-nocookie.com, which sets no cookies until the video plays.
+ */
+export function VideoPlayer(
+  { video, onClick, className = "lightbox-video" }: {
+    video: NonNullable<LightboxImage["video"]>;
+    onClick?: (event: React.MouseEvent) => void;
+    className?: string;
+  },
+) {
+  if (video.kind === "youtube") {
+    return (
+      <iframe
+        key={video.id}
+        className={className}
+        src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(video.id)}?autoplay=1&rel=0`}
+        title={tr("Video")}
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        allowFullScreen
+        referrerPolicy="strict-origin-when-cross-origin"
+        onClick={onClick}
+      />
+    );
+  }
+  return <video key={video.url} className={className} src={video.url} controls autoPlay onClick={onClick} />;
 }
 
 /**
@@ -21,6 +52,8 @@ export function Lightbox(
 
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // A playing video keeps its own arrow keys (seeking); Escape still closes.
+      if (event.key !== "Escape" && event.target instanceof HTMLVideoElement) return;
       if (event.key === "Escape") onClose();
       else if (event.key === "ArrowLeft") move(-1);
       else if (event.key === "ArrowRight") move(1);
@@ -39,10 +72,20 @@ export function Lightbox(
   if (!image) return null;
   // The stage, bar and strip span the window, so only the picture and the buttons keep a click.
   const keep = (event: React.MouseEvent) => event.stopPropagation();
-  return (
-    <div className="lightbox" role="dialog" aria-modal="true" aria-label={tr("Screenshots")} onClick={onClose}>
+  // On the page itself, not inside whatever opened it: a card's gallery covers the whole window,
+  // the Browse filters beside the catalog included.
+  return createPortal(
+    <div
+      className="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={images.some((i) => i.video) ? tr("Screenshots and videos") : tr("Screenshots")}
+      onClick={onClose}
+    >
       <div className="lightbox-stage">
-        <img className="lightbox-image" src={image.src} alt={image.caption ?? ""} onClick={keep} />
+        {image.video
+          ? <VideoPlayer video={image.video} onClick={keep} />
+          : <img className="lightbox-image" src={image.src} alt={image.caption ?? ""} onClick={keep} />}
         {count > 1 && (
           <>
             <button
@@ -102,10 +145,18 @@ export function Lightbox(
               }}
             >
               <img src={img.thumb ?? img.src} alt="" loading="lazy" />
+              {img.video && (
+                <span className="shot-play small" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M8 5.5v13l11-6.5z" />
+                  </svg>
+                </span>
+              )}
             </button>
           ))}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
