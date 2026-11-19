@@ -652,6 +652,7 @@ export function App() {
                         setBrowseSearch(upload.title);
                         setView("browse");
                       }}
+                      onHide={() => void setLatestUploads(false).catch(reportError)}
                     />
                   )
                   : null}

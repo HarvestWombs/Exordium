@@ -62,9 +62,11 @@ import {
   activeJobCount,
   archiveItem,
   archiveList,
+  browseCacheSize,
   browseImage,
   cachedDetails,
   cancelJob,
+  clearBrowseCache,
   detailKeywords,
   detailsProgress,
   downloadedFile,
@@ -73,10 +75,13 @@ import {
   jobList,
   KEYWORD_GROUPS,
   latestUploads,
+  listsRefreshing,
+  listsSettled,
   MODDB_URL,
   modDbDetails,
   modDbList,
   pauseJob,
+  refreshBrowseLists,
   startJob,
   startUrlJob,
   throughput,
@@ -3623,19 +3628,45 @@ function openExternal(url: string): void {
 // ---- The mod browser (browse.ts) ----------------------------------------------------------------
 
 const browseCache = `${exordiumRoot}/browse`;
+
+/** At startup a list older than this is fetched again: a few days closed must not show old uploads. */
+const BROWSE_STARTUP_AGE_MS = 60 * 60_000;
+/** While Exordium runs, the lists are looked at hourly and fetched again once 12 hours old. */
+const BROWSE_RUNNING_AGE_MS = 12 * 60 * 60_000;
+
+async function refreshBrowse(maxAge: number): Promise<void> {
+  if (appSettingsFromState(await readState()).privacy.localOnly) return;
+  await refreshBrowseLists(browseCache, maxAge);
+}
+/**
+ * The startup check, begun once this module has loaded. The browse routes wait for it to have begun,
+ * so the library's first ask for Latest uploads already hears that the lists are being fetched again,
+ * and asks once more when they land, instead of keeping what the cache had.
+ */
+const browseStartup: Promise<void> = new Promise((resolve) => setTimeout(resolve, 0))
+  .then(() => refreshBrowse(BROWSE_STARTUP_AGE_MS))
+  .catch((error) => appLog("warn", `browse lists: ${error.message}`));
+setInterval(
+  () => void refreshBrowse(BROWSE_RUNNING_AGE_MS).catch((error) => appLog("warn", `browse lists: ${error.message}`)),
+  60 * 60_000,
+);
 const downloadsFolder = `${exordiumRoot}/downloads`;
 
 async function browseRoute(request: Request, url: URL): Promise<Response> {
+  await browseStartup;
   try {
     switch (url.pathname) {
       case "/api/browse": {
+        // `wait`: the page asking again once a list being fetched behind its last answer has landed.
+        if (url.searchParams.get("wait") === "1") await listsSettled();
         const archive = await archiveList(browseCache, url.searchParams.get("refresh") === "1");
         const ids = archive.items.map((item) => item.id);
         // Every card ready at once: each item's cached details ride along, their tags merged into the
-        // item's, and what is not read yet (or was read by an older version) is read in the background.
+        // item's, and what is new, changed or read by an older version is read in the background.
         const details = await cachedDetails(ids, browseCache);
-        warmDetails(ids, browseCache);
+        warmDetails(archive.items, browseCache);
         return Response.json({
+          refreshing: listsRefreshing(),
           sources: [
             { id: "archive", name: "Internet Archive", count: archive.items.length, fetchedAt: archive.fetchedAt },
             { id: "moddb", name: "ModDB", external: true, url: MODDB_URL },
@@ -3673,9 +3704,23 @@ async function browseRoute(request: Request, url: URL): Promise<Response> {
         });
       case "/api/browse/latest":
         // The library home's Latest uploads row: a few cards, from the caches at once (browse.ts).
-        return Response.json({ uploads: await latestUploads(browseCache) });
+        if (url.searchParams.get("wait") === "1") await listsSettled();
+        return Response.json({ uploads: await latestUploads(browseCache), refreshing: listsRefreshing() });
       case "/api/browse/moddb":
-        return Response.json(await modDbList(browseCache, url.searchParams.get("refresh") === "1"));
+        if (url.searchParams.get("wait") === "1") await listsSettled();
+        // Refresh fetches what is new or changed (ModDB's newest pages); only Clear cache rebuilds it all.
+        return Response.json({
+          ...await modDbList(browseCache, url.searchParams.get("refresh") === "1", true),
+          refreshing: listsRefreshing(),
+        });
+      case "/api/browse/cache": {
+        // GET: how much the cache holds. POST: Settings' Clear cache, then a full read from scratch.
+        if (request.method === "POST") {
+          await clearBrowseCache(browseCache);
+          await refreshBrowse(0);
+        }
+        return Response.json({ bytes: await browseCacheSize(browseCache), refreshing: listsRefreshing() });
+      }
       case "/api/browse/moddb-item": {
         // One entry's own page, for its card: screenshots, facts, the full description, its files.
         const page = url.searchParams.get("page") ?? "";

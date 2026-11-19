@@ -346,16 +346,16 @@ export async function archiveList(
   if (!refresh) {
     try {
       const cached = JSON.parse(await Deno.readTextFile(file)) as { items: BrowseItem[]; fetchedAt: string };
-      if (Date.now() - Date.parse(cached.fetchedAt) >= ARCHIVE_TTL_MS && !listRefresh) {
-        listRefresh = fetchArchiveList(file).finally(() => (listRefresh = null));
-        listRefresh.catch(() => {});
+      if (Date.now() - Date.parse(cached.fetchedAt) >= ARCHIVE_TTL_MS) {
+        inBackground("archive", () => archiveList(cacheDir, true));
       }
       return cached;
     } catch {
       // Missing or unreadable: fetch.
     }
   }
-  return await (listRefresh ?? fetchArchiveList(file));
+  listRefresh ??= fetchArchiveList(file).finally(() => (listRefresh = null));
+  return await listRefresh;
 }
 
 async function fetchArchiveList(file: string): Promise<{ items: BrowseItem[]; fetchedAt: string }> {
@@ -397,7 +397,44 @@ function uploadDescription(item: { description?: string }): string {
 }
 
 /** Lists being fetched again in the background, by name: one refresh at a time each. */
+/** The lists being fetched again in the background, by name ("archive", "moddb"). */
 const refreshing = new Map<string, Promise<unknown>>();
+
+/** Runs `fetchFresh` once in the background under `name`; a second ask while it runs joins it. */
+function inBackground(name: string, fetchFresh: () => Promise<unknown>): void {
+  if (refreshing.has(name)) return;
+  refreshing.set(name, fetchFresh().catch(() => {}).finally(() => refreshing.delete(name)));
+}
+
+/** Whether a list is being fetched again right now: what a page shows will change when it lands. */
+export function listsRefreshing(): boolean {
+  return refreshing.size > 0;
+}
+
+/** Waits for the lists being fetched again (none: at once). Failures are swallowed: the cache stays. */
+export async function listsSettled(): Promise<void> {
+  await Promise.all([...refreshing.values()]);
+}
+
+/**
+ * At startup (and hourly after): each list older than `maxAge` starts being fetched again; resolves
+ * once those fetches are under way (listsRefreshing), not when they end. When they end, the items new
+ * or changed in the archive list are read (warmDetails). Nothing is rebuilt: one search for the
+ * Internet Archive, ModDB's newest pages until one holds nothing new, and only the changed items.
+ */
+export async function refreshBrowseLists(cacheDir: string, maxAge: number): Promise<void> {
+  const age = (file: string) =>
+    Deno.readTextFile(file)
+      .then((text) => Date.now() - Date.parse((JSON.parse(text) as { fetchedAt: string }).fetchedAt))
+      .catch(() => Infinity);
+  const [archiveAge, modDbAge] = await Promise.all([age(`${cacheDir}/archive.json`), age(`${cacheDir}/moddb.json`)]);
+  if (archiveAge >= maxAge) inBackground("archive", () => archiveList(cacheDir, true));
+  if (modDbAge >= maxAge) inBackground("moddb", () => modDbList(cacheDir, true, true));
+  void listsSettled()
+    .then(() => Deno.readTextFile(`${cacheDir}/archive.json`))
+    .then((text) => warmDetails((JSON.parse(text) as { items: BrowseItem[] }).items, cacheDir))
+    .catch(() => {});
+}
 
 /**
  * A list's items from its cache file at once, however old: a stale one is refreshed in the background
@@ -413,10 +450,7 @@ async function staleFirst<T>(
   const cached = await Deno.readTextFile(file).then((text) => JSON.parse(text) as { items: T[]; fetchedAt: string })
     .catch(() => null);
   if (!cached) return (await fetchFresh().catch(() => ({ items: [] as T[] }))).items;
-  if (Date.now() - Date.parse(cached.fetchedAt) >= ttl && !refreshing.has(name)) {
-    const run = fetchFresh().catch(() => {}).finally(() => refreshing.delete(name));
-    refreshing.set(name, run);
-  }
+  if (Date.now() - Date.parse(cached.fetchedAt) >= ttl) inBackground(name, fetchFresh);
   return cached.items;
 }
 
@@ -428,7 +462,7 @@ async function staleFirst<T>(
 export async function latestUploads(cacheDir: string, limit = 16): Promise<LatestUpload[]> {
   const [archive, moddb] = await Promise.all([
     staleFirst<BrowseItem>("archive", `${cacheDir}/archive.json`, ARCHIVE_TTL_MS, () => archiveList(cacheDir, true)),
-    staleFirst<ModDbItem>("moddb", `${cacheDir}/moddb.json`, MODDB_TTL_MS, () => modDbList(cacheDir, true)),
+    staleFirst<ModDbItem>("moddb", `${cacheDir}/moddb.json`, MODDB_TTL_MS, () => modDbList(cacheDir, true, true)),
   ]);
   const all: LatestUpload[] = [];
   for (const item of archive) {
@@ -576,7 +610,14 @@ export function modDbNextPage(html: string, base: string): string | null {
   return pagination ? modDbAbsolute(base, pagination) : null;
 }
 
-async function modDbCatalogItems(catalog: typeof MODDB_CATALOGS[number]): Promise<ModDbItem[]> {
+/**
+ * A ModDB catalog's entries, page by page. With `known` (entries already cached, as
+ * `kind:page|addedAt`), it stops after the first page whose entries are all known.
+ */
+async function modDbCatalogItems(
+  catalog: typeof MODDB_CATALOGS[number],
+  known: Set<string> | null = null,
+): Promise<ModDbItem[]> {
   const items: ModDbItem[] = [];
   const seenPages = new Set<string>();
   let next: string | null = catalog.url;
@@ -586,7 +627,9 @@ async function modDbCatalogItems(catalog: typeof MODDB_CATALOGS[number]): Promis
     const response = await fetch(next, { headers: { "user-agent": "Exordium" } });
     if (!response.ok) throw new Error(`ModDB ${catalog.label} answered ${response.status}`);
     const html = await response.text();
-    items.push(...modDbItemsFromHtml(html, catalog.kind, catalog.label, next));
+    const found = modDbItemsFromHtml(html, catalog.kind, catalog.label, next);
+    items.push(...found);
+    if (known && found.every((item) => known.has(`${item.kind}:${item.page}|${item.addedAt ?? ""}`))) break;
     next = modDbNextPage(html, next);
   }
   return items;
@@ -620,25 +663,39 @@ export function modDbItemsFromRss(
   }).filter((item) => item.page.startsWith("https://www.moddb.com/"));
 }
 
-/** Cached ModDB catalog. Refreshes at most every 12 hours unless the user asks. */
-export async function modDbList(cacheDir: string, refresh = false): Promise<{ items: ModDbItem[]; fetchedAt: string }> {
+/**
+ * Cached ModDB catalog. Once there is one, it is what Browse gets at once; past 12 hours old it is
+ * fetched again behind it. `refresh` fetches now: in full (the page's Refresh), or `incremental`, the
+ * newest pages of each catalog only, until a page holds nothing new, merged over the cache. ModDB lists
+ * newest first (measured 2026-11-19: a few edited entries move within the first page), so ~3 requests
+ * find what changed where a full read takes ~28.
+ */
+export async function modDbList(
+  cacheDir: string,
+  refresh = false,
+  incremental = false,
+): Promise<{ items: ModDbItem[]; fetchedAt: string }> {
   const file = `${cacheDir}/moddb.json`;
-  if (!refresh) {
-    try {
-      const cached = JSON.parse(await Deno.readTextFile(file)) as { items: ModDbItem[]; fetchedAt: string };
-      if (Date.now() - Date.parse(cached.fetchedAt) < MODDB_TTL_MS) {
-        return {
-          ...cached,
-          items: cached.items.map((item) => ({ ...item, cover: modDbImage(item.cover, "thumb_620x2000") })),
-        };
-      }
-    } catch {
-      // Missing or unreadable: fetch.
+  const cached = await Deno.readTextFile(file)
+    .then((text) => JSON.parse(text) as { items: ModDbItem[]; fetchedAt: string })
+    .catch(() => null);
+  if (!refresh && cached) {
+    if (Date.now() - Date.parse(cached.fetchedAt) >= MODDB_TTL_MS) {
+      inBackground("moddb", () => modDbList(cacheDir, true, true));
     }
+    return {
+      ...cached,
+      items: cached.items.map((item) => ({ ...item, cover: modDbImage(item.cover, "thumb_620x2000") })),
+    };
   }
   const byPage = new Map<string, ModDbItem>();
+  const base = incremental && cached ? cached.items : [];
+  for (const item of base) byPage.set(`${item.kind}:${item.page}`, item);
+  const known = new Set(base.map((item) => `${item.kind}:${item.page}|${item.addedAt ?? ""}`));
   for (const catalog of MODDB_CATALOGS) {
-    for (const item of await modDbCatalogItems(catalog)) byPage.set(`${item.kind}:${item.page}`, item);
+    for (const item of await modDbCatalogItems(catalog, base.length ? known : null)) {
+      byPage.set(`${item.kind}:${item.page}`, item);
+    }
   }
   const result = {
     items: [...byPage.values()].sort((a, b) => Date.parse(b.addedAt ?? "0") - Date.parse(a.addedAt ?? "0")),
@@ -873,6 +930,11 @@ export interface ItemDetails {
   unpackedSize: number;
   /** What the archive says about the mod: its core, launch options, language, loaders… */
   inspection: ModInspection | null;
+  /**
+   * archive.org's `item_size` when this was read. The search list carries the same number, so an item
+   * whose listed size differs has had files added or replaced, and is read again (warmDetails).
+   */
+  itemSize?: number;
 }
 
 const ARCHIVE_FILE = /\.(zip|rar|7z|mpq)$/i;
@@ -1325,6 +1387,7 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
   const body = await response.json() as {
     metadata?: { description?: unknown; title?: unknown };
     files?: { name: string; size?: string; source?: string }[];
+    item_size?: number;
   };
   const files = body.files ?? [];
   const names = new Set(files.map((file) => file.name));
@@ -1355,6 +1418,7 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
     keywords: [...new Set(extra.keywords ?? [])],
     unpackedSize: extra.unpackedSize ?? 0,
     inspection: extra.inspection ?? null,
+    ...(typeof body.item_size === "number" ? { itemSize: body.item_size } : {}),
   };
   details.set(id, result);
   detailVersions.set(id, DETAILS_VERSION);
@@ -1366,37 +1430,87 @@ async function readItem(id: string, cacheDir: string): Promise<ItemDetails> {
 /** How far the background read of every item (warmDetails) has got. */
 export const detailsProgress = { done: 0, total: 0 };
 let warming = false;
+/** A newer list handed in while a read was running: read once that one ends. */
+let warmAgain: readonly { id: string; size: number }[] | null = null;
 
 /**
- * Reads every listed item's details in the background, two at a time with a pause between, so Browse's filters count
- * what each archive holds (its core, language, loaders), not only the cards scrolled past. Each item
- * is read once and kept on disk; one that fails is tried again on the next start.
+ * Reads, in the background, two at a time with a pause between, the listed items that need it: never
+ * read, read by an older version, or changed since (their listed size is not the one read). So
+ * Browse's filters count what each archive holds (its core, language, loaders), not only the cards
+ * scrolled past, and a fresh list costs only its new and changed items. One that fails is tried again
+ * on the next pass.
  */
-export function warmDetails(ids: readonly string[], cacheDir: string): void {
-  if (warming) return;
+export function warmDetails(items: readonly { id: string; size: number }[], cacheDir: string): void {
+  if (warming) {
+    warmAgain = items;
+    return;
+  }
   warming = true;
   void (async () => {
     try {
-      await cachedDetails(ids, cacheDir);
-      // Missing, or read by an older version: what is cached stays on show until its read lands.
-      const todo = ids.filter((id) => detailVersions.get(id) !== DETAILS_VERSION);
-      detailsProgress.total = ids.length;
-      detailsProgress.done = ids.length - todo.length;
-      let next = 0;
-      const worker = async () => {
-        while (next < todo.length) {
-          const id = todo[next++]!;
-          await archiveItem(id, cacheDir).catch(() => {});
-          detailsProgress.done++;
-          // A breath between items: this is a background read, nobody is waiting on it.
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        }
-      };
-      await Promise.all([worker(), worker()]);
+      for (let list: typeof items | null = items; list; list = warmAgain, warmAgain = null) {
+        await warmPass(list, cacheDir);
+      }
     } finally {
       warming = false;
     }
   })();
+}
+
+async function warmPass(items: readonly { id: string; size: number }[], cacheDir: string): Promise<void> {
+  await cachedDetails(items.map((item) => item.id), cacheDir);
+  const todo: string[] = [];
+  for (const { id, size } of items) {
+    const known = details.get(id);
+    if (!known || detailVersions.get(id) !== DETAILS_VERSION) todo.push(id);
+    else if (!size || known.itemSize === size) continue;
+    else if (known.itemSize === undefined) {
+      // Read before sizes were kept: taken as unchanged, its size noted for next time.
+      known.itemSize = size;
+      await Deno.writeTextFile(`${cacheDir}/items/${id}.json`, JSON.stringify({ ...known, version: DETAILS_VERSION }))
+        .catch(() => {});
+    } else todo.push(id);
+  }
+  detailsProgress.total = items.length;
+  detailsProgress.done = items.length - todo.length;
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const id = todo[next++]!;
+      await refreshItem(id, cacheDir).catch(() => {});
+      detailsProgress.done++;
+      // A breath between items: this is a background read, nobody is waiting on it.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+
+/** How much the browse cache holds on disk: the lists, each item's details, and screenshots. */
+export async function browseCacheSize(cacheDir: string): Promise<number> {
+  let bytes = 0;
+  const walk = async (folder: string) => {
+    for await (const entry of Deno.readDir(folder)) {
+      const path = `${folder}/${entry.name}`;
+      if (entry.isDirectory) await walk(path);
+      else if (entry.isFile) bytes += (await Deno.stat(path).catch(() => null))?.size ?? 0;
+    }
+  };
+  await walk(cacheDir).catch(() => {});
+  return bytes;
+}
+
+/**
+ * Settings' Clear cache: everything Browse has read is deleted, from disk and memory, and read again
+ * from scratch (refreshBrowseLists). The only full rebuild: Refresh and startup fetch just what changed.
+ */
+export async function clearBrowseCache(cacheDir: string): Promise<void> {
+  await listsSettled();
+  details.clear();
+  detailVersions.clear();
+  await Deno.remove(cacheDir, { recursive: true }).catch((error) => {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  });
 }
 
 /** The tags each listed item's archive adds, for every item read so far. Never fetches. */

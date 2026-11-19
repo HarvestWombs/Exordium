@@ -894,5 +894,15 @@
   "Endpoint and release channel": "Endpunkt und Veröffentlichungskanal",
   "Each mod supplies its own update feed and chooses Stable, Testing, or Local files only.": "Jeder Mod stellt seinen eigenen Update-Feed bereit und wählt Stabil, Test oder Nur lokale Dateien.",
   "Could not save update settings.": "Die Update-Einstellungen konnten nicht gespeichert werden.",
-  "Exordium updates": "Exordium-Updates"
+  "Exordium updates": "Exordium-Updates",
+  "{name} options": "Optionen für {name}",
+  "Hide {name}": "{name} ausblenden",
+  "Latest uploads": "Neueste Uploads",
+  "Turn it back on in the Filters menu beside the library search.": "Im Filtermenü neben der Bibliothekssuche wieder einschalten.",
+  "Browse": "Durchsuchen",
+  "Browse cache": "Durchsuchen-Cache",
+  "What Browse has read from the Internet Archive and ModDB: the lists, each mod's details and screenshots. Only new and changed entries are fetched normally; clearing reads everything again from scratch.": "Was Durchsuchen vom Internet Archive und von ModDB gelesen hat: die Listen, die Details und Screenshots jeder Mod. Normalerweise werden nur neue und geänderte Einträge abgerufen; Leeren liest alles von Grund auf neu.",
+  "Clear cache…": "Cache leeren…",
+  "Clearing…": "Wird geleert…",
+  "Could not clear the cache.": "Der Cache konnte nicht geleert werden."
 }

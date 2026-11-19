@@ -11,6 +11,7 @@ import {
 } from "../../components/settings-rows.tsx";
 import type { AppSettingsState, SettingsSection, Status, WineRunner } from "../../types.ts";
 import { BackupSettingsPage } from "./BackupSettings.tsx";
+import { BrowseCacheRow } from "./BrowseCacheRow.tsx";
 import { DiscordSettings } from "./DiscordSettings.tsx";
 
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -310,6 +311,9 @@ export function SettingsSectionView(
             disabled={busy}
             onChange={(value) => onPatch({ downloads: { verifyAfterDownload: value } })}
           />
+        </SettingsGroup>
+        <SettingsGroup title={tr("Browse")}>
+          <BrowseCacheRow />
         </SettingsGroup>
       </>
     );

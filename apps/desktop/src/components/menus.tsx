@@ -51,6 +51,50 @@ export function PopupMenu(
   );
 }
 
+/**
+ * A section header's ⋮ button, whose menu hides the section. It comes back from the library's
+ * Filters menu (Sorting/Appearance), where the same switch lives.
+ */
+export function HideSectionButton({ name, onHide }: { name: string; onHide: () => void }) {
+  const [at, setAt] = React.useState<{ x: number; y: number } | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        className="shelf-menu-button section-menu-button"
+        aria-label={tr("{name} options", { name })}
+        data-tooltip={tr("Options")}
+        aria-haspopup="menu"
+        aria-expanded={at !== null}
+        // While open, the button closes the menu itself: the menu's own outside-click close would
+        // otherwise run first and the click would open it again.
+        onMouseDown={(event) => at && event.nativeEvent.stopPropagation()}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setAt(at ? null : { x: rect.right - 180, y: rect.bottom + 4 });
+        }}
+      >
+        <span aria-hidden="true">⋮</span>
+      </button>
+      {at && (
+        <PopupMenu x={at.x} y={at.y} onClose={() => setAt(null)}>
+          <button
+            type="button"
+            role="menuitem"
+            data-tooltip={tr("Turn it back on in the Filters menu beside the library search.")}
+            onClick={() => {
+              setAt(null);
+              onHide();
+            }}
+          >
+            {tr("Hide {name}", { name })}
+          </button>
+        </PopupMenu>
+      )}
+    </>
+  );
+}
+
 /** The mod list's right-click menu, at the pointer; Add to and Manage open submenus on hover. */
 export function TitleMenu(
   { x, y, t, favorite, hidden, packaged, collections, from, onAction, onCollection, onNewCollection, onClose }: {

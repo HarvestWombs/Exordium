@@ -11,7 +11,7 @@ import {
   SearchIcon,
   TitleIcon,
 } from "../../components/icons.tsx";
-import { PopupMenu } from "../../components/menus.tsx";
+import { HideSectionButton, PopupMenu } from "../../components/menus.tsx";
 import { PreviewCard } from "../../components/PreviewCard.tsx";
 import type { Incoming } from "../../lib/incoming.ts";
 import { artUrl, screenshotUrl } from "../../lib/art.ts";
@@ -693,6 +693,12 @@ export function LibraryGrid(
               >
                 <span aria-hidden="true">•••</span>
               </button>
+            )}
+            {shelf.id === "recent" && !collectionsPage && (
+              <HideSectionButton
+                name={tr("Recent")}
+                onHide={() => toggleCategory(shelf.id)}
+              />
             )}
           </div>
           <div className="capsules" hidden={folded.has(shelf.id)}>

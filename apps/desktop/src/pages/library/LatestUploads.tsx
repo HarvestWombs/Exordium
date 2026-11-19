@@ -1,8 +1,9 @@
 import { formatDate, tr } from "../../lib/i18n.ts";
 import * as React from "react";
+import { HideSectionButton } from "../../components/menus.tsx";
 import { PreviewCard } from "../../components/PreviewCard.tsx";
 import { artUrl } from "../../lib/art.ts";
-import { keptUploads, loadUploads, pageDescription } from "../../lib/latest-uploads.ts";
+import { keptUploads, loadUploads, onUploads, pageDescription } from "../../lib/latest-uploads.ts";
 import { readStored } from "../../lib/util.ts";
 import type { Title, Upload } from "../../types.ts";
 
@@ -29,7 +30,9 @@ function uploadLabel(upload: Upload): string {
  * does its details (the same Hover previews and Preview delay). Nothing shows when the sources cannot
  * be read (offline, or Local only).
  */
-export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: (upload: Upload) => void }) {
+export function LatestUploads(
+  { updates, onOpen, onHide }: { updates: Upload[]; onOpen: (upload: Upload) => void; onHide: () => void },
+) {
   // What the app fetched at startup shows at once; a fresh copy replaces it quietly.
   const [items, setItems] = React.useState<Upload[] | null>(keptUploads);
   // The description is null while it is being read from the upload's own page.
@@ -62,8 +65,11 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
   React.useEffect(() => {
     let cancelled = false;
     void loadUploads().then((uploads) => !cancelled && setItems(uploads));
+    // Fresher uploads, once lists being fetched behind the first answer land.
+    const unsubscribe = onUploads(setItems);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
   // Updates for titles in the library come first: they are about what the player already has.
@@ -77,6 +83,7 @@ export function LatestUploads({ updates, onOpen }: { updates: Upload[]; onOpen: 
     <section className="uploads">
       <div className="uploads-head">
         <h2 className="eyebrow">{tr("LATEST UPLOADS")}</h2>
+        <HideSectionButton name={tr("Latest uploads")} onHide={onHide} />
         <div className="grow" />
         <button
           type="button"

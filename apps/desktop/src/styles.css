@@ -2889,7 +2889,30 @@ fieldset legend {
 }
 
 .browse-catalog-list {
+  min-width: 0;
   padding: 14px 18px 32px;
+}
+
+/* The filters, a floating card in the ground at the catalog's left, outside its frame: as tall as
+   its content, no taller than the window, scrolling on its own. The catalog narrows to make room,
+   and the two stay centered together. */
+.browse-catalog {
+  position: relative;
+}
+
+.browse-filter-menu.browse-filter-panel {
+  position: static;
+  align-self: flex-start;
+  flex: 0 0 300px;
+  width: 300px;
+  /* Level with the list's first card, below the catalog's toolbar. */
+  max-height: calc(100% - 86px);
+  margin: 72px 16px 14px 0;
+}
+
+.browse-catalog.filters-open .browse-catalog-shell {
+  flex-basis: auto;
+  width: min(1420px, calc(100% - 372px));
 }
 
 .browse-load-sentinel {
@@ -2924,6 +2947,21 @@ fieldset legend {
     flex: 1 1 220px;
   }
 
+  /* No room beside the catalog: the panel floats over the list, under the toolbar (FLOATING_FILTERS
+     in Browse.tsx). */
+  .browse-filter-menu.browse-filter-panel {
+    position: absolute;
+    z-index: 80;
+    top: 66px;
+    left: 24px;
+    margin: 0;
+    max-height: calc(100% - 80px);
+  }
+
+  .browse-catalog.filters-open .browse-catalog-shell {
+    width: calc(100% - 24px);
+  }
+
   .mod-card {
     grid-template-columns: 210px minmax(260px, 1fr) minmax(220px, 290px);
   }
@@ -2955,9 +2993,14 @@ fieldset legend {
     margin-left: 0;
   }
 
-  .browse-filter-menu {
-    right: auto;
-    left: 0;
+  .browse-filter-menu.browse-filter-panel {
+    top: 110px;
+    left: 12px;
+    width: min(300px, calc(100% - 24px));
+  }
+
+  .browse-catalog.filters-open .browse-catalog-shell {
+    width: 100%;
   }
 
   .browse-catalog-list {
@@ -5238,15 +5281,17 @@ fieldset legend {
   margin: 0 0 12px;
 }
 
+/* A shelf's menu buttons sit right after its heading, never at the far end of a wide row. */
 .shelf-title-row {
   min-height: 28px;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
 }
 
 .shelf-title-row h2 {
-  flex-grow: 1;
+  margin-bottom: 0;
 }
 
 .shelf-menu-button {
@@ -5262,6 +5307,11 @@ fieldset legend {
   color: var(--text-mute);
   font-size: 13px;
   line-height: 1;
+}
+
+.section-menu-button {
+  height: 28px;
+  font-size: 18px;
 }
 
 .shelf-menu-button:hover {
