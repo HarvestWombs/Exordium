@@ -76,6 +76,23 @@ select {
   color: inherit;
 }
 
+/* A select's open list is drawn by the browser; its options take the theme's colours, so it is not a
+   grey system list on a dark (or light) app. The chosen one is marked with the accent. */
+option,
+optgroup {
+  background: var(--chrome);
+  color: var(--text);
+}
+
+option:checked {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+option:disabled {
+  color: var(--text-disabled);
+}
+
 button {
   cursor: pointer;
 }
@@ -3445,12 +3462,20 @@ fieldset legend {
   color: var(--warn);
 }
 
-.mod-bar select {
+.mod-bar select,
+.mod-details-install-bar select {
   max-width: 280px;
   height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   background: var(--ground);
+  color: var(--text);
+}
+
+.mod-bar select:hover,
+.mod-details-install-bar select:hover {
+  border-color: var(--accent);
 }
 
 .download {
@@ -6495,31 +6520,14 @@ fieldset legend {
 .mod-details-summary {
   margin: 0;
   display: -webkit-box;
-  -webkit-line-clamp: 7;
+  /* The facts live in the info card below; the summary has the room. */
+  -webkit-line-clamp: 11;
   -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-line;
-}
-
-.mod-details-facts {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 14px;
-  margin: 0;
-  font-size: 12px;
-}
-
-.mod-details-facts dt {
-  color: var(--text-mute);
-  letter-spacing: 0.06em;
-}
-
-.mod-details-facts dd {
-  margin: 0;
-  color: var(--text-strong);
 }
 
 .mod-details-tags {
@@ -6643,6 +6651,96 @@ fieldset legend {
   color: var(--text-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mod-details-aside {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The info card: facts in small capitals, then a stack of link rows, the hovered one in the accent. */
+.mod-details-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.mod-details-info dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.mod-details-info dt {
+  color: var(--text-mute);
+  letter-spacing: 0.06em;
+}
+
+.mod-details-info dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+}
+
+.mod-details-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mod-details-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--well);
+  color: var(--accent);
+  font-size: 13px;
+  text-align: left;
+}
+
+.mod-details-link > span:not(.mod-details-link-out) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-details-link-out {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.mod-details-link:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.mod-details-link-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mod-details-link-icon .fill {
+  fill: currentColor;
+  stroke: none;
 }
 
 .mod-details-panel {

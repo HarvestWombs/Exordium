@@ -26,6 +26,16 @@ import type { ArchiveSort, BrowseView, Details, Group, Item, Job, ModDbItem, Sou
  * Archive and ModDB are providers for one catalog, not separate pages. Exact normalized-title
  * matches share one card; each provider keeps its own download path and safety rules behind it.
  */
+/**
+ * The catalog's sort and filters, kept while Exordium runs: Browse unmounts when another tab opens,
+ * and coming back finds them as they were (the search itself is kept by the app).
+ */
+let remembered: { sort: ArchiveSort; selected: string[]; hideInstalled: boolean } = {
+  sort: "all",
+  selected: [],
+  hideInstalled: false,
+};
+
 /** Below this width the filters float over the list instead of sitting beside it (see styles.css). */
 const FLOATING_FILTERS = "(max-width: 1180px)";
 
@@ -34,7 +44,8 @@ export function Browse(
     view,
     detailsKey,
     onDetailsKey: setDetailsKey,
-    initialSearch,
+    search,
+    onSearch: setSearch,
     installed,
     root,
     downloads,
@@ -48,7 +59,9 @@ export function Browse(
     /** The entry whose details page is open, by catalog key (kept by the app, for back and forward). */
     detailsKey: string | null;
     onDetailsKey: (key: string | null) => void;
-    initialSearch?: string;
+    /** The search, kept by the app so it survives leaving Browse (and set by a Latest uploads card). */
+    search: string;
+    onSearch: (search: string) => void;
     installed: Set<string>;
     root: string | null;
     downloads: Incoming[];
@@ -67,10 +80,12 @@ export function Browse(
   const [modDb, setModDb] = React.useState<{ items: ModDbItem[]; fetchedAt: string | null } | null>(null);
   const [modDbError, setModDbError] = React.useState<string | null>(null);
   const [modDbLoading, setModDbLoading] = React.useState(false);
-  const [sort, setSort] = React.useState<ArchiveSort>("all");
-  const [search, setSearch] = React.useState(initialSearch ?? "");
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [hideInstalled, setHideInstalled] = React.useState(false);
+  const [sort, setSort] = React.useState<ArchiveSort>(remembered.sort);
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set(remembered.selected));
+  const [hideInstalled, setHideInstalled] = React.useState(remembered.hideInstalled);
+  React.useEffect(() => {
+    remembered = { sort, selected: [...selected], hideInstalled };
+  }, [sort, selected, hideInstalled]);
   const [shown, setShown] = React.useState(PAGE);
   const [jobs, setJobs] = React.useState<Job[]>([]);
   const [rates, setRates] = React.useState<Throughput | null>(null);

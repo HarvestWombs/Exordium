@@ -918,5 +918,7 @@
   "Search settings": "Buscar en la configuración",
   "No setting matches “{query}”.": "Ningún ajuste coincide con «{query}».",
   "Open {section}": "Abrir {section}",
-  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} ajuste coincide con «{query}».|{count} ajustes coinciden con «{query}»."
+  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} ajuste coincide con «{query}».|{count} ajustes coinciden con «{query}».",
+  "TITLE": "TÍTULO",
+  "SOURCE": "FUENTE"
 }

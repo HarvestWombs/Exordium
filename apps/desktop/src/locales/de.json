@@ -918,5 +918,7 @@
   "Search settings": "Einstellungen durchsuchen",
   "No setting matches “{query}”.": "Keine Einstellung passt zu „{query}“.",
   "Open {section}": "{section} öffnen",
-  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} Einstellung passt zu „{query}“.|{count} Einstellungen passen zu „{query}“."
+  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} Einstellung passt zu „{query}“.|{count} Einstellungen passen zu „{query}“.",
+  "TITLE": "TITEL",
+  "SOURCE": "QUELLE"
 }

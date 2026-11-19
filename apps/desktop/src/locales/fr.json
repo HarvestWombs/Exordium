@@ -918,5 +918,7 @@
   "Search settings": "Rechercher dans les paramètres",
   "No setting matches “{query}”.": "Aucun paramètre ne correspond à « {query} ».",
   "Open {section}": "Ouvrir {section}",
-  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} paramètre correspond à « {query} ».|{count} paramètres correspondent à « {query} »."
+  "{count} setting matches “{query}”.|{count} settings match “{query}”.": "{count} paramètre correspond à « {query} ».|{count} paramètres correspondent à « {query} ».",
+  "TITLE": "TITRE",
+  "SOURCE": "SOURCE"
 }

@@ -420,8 +420,8 @@ export function App() {
     showView("library");
   }
   function openBrowse(page: BrowseView) {
+    // The search stays as it was: leaving Browse and coming back finds it where it was left.
     setBrowsePage(page);
-    setBrowseSearch("");
     setBrowseDetails(null);
     showView("browse");
   }
@@ -570,7 +570,8 @@ export function App() {
           onDetailsKey={setBrowseDetails}
           downloads={downloading}
           onCancelDownload={askCancel}
-          initialSearch={browseSearch}
+          search={browseSearch}
+          onSearch={setBrowseSearch}
           installed={new Set(titles.flatMap((t) => [titleKey(t.title), titleKey(t.folder)]))}
           root={root}
           onDownloadStarted={() => void refreshDownloads()}

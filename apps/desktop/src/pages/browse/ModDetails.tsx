@@ -292,14 +292,6 @@ function DetailsLayout(
                 )
                 : view.error ?? (translation.text || tr("The uploader gave no description."))}
             </p>
-            <dl className="mod-details-facts">
-              {view.facts.map((fact) => (
-                <React.Fragment key={fact.label}>
-                  <dt>{fact.label}</dt>
-                  <dd>{fact.value}</dd>
-                </React.Fragment>
-              ))}
-            </dl>
             {view.keywords.length > 0 && (
               <div className="mod-details-tags">
                 <span className="muted small">{tr("Tags for this mod:")}</span>
@@ -318,23 +310,6 @@ function DetailsLayout(
               </div>
             )}
           </aside>
-        </div>
-
-        <div className="mod-details-actions">
-          <button type="button" className="small-button" onClick={() => openLink(view.page.url)}>
-            {view.page.label} ↗
-          </button>
-          {uniqueLinks(view.links).filter((link) => link.url !== view.page.url).map((link) => (
-            <button
-              type="button"
-              key={link.url}
-              className="small-button"
-              data-tooltip={link.url}
-              onClick={() => openLink(link.url)}
-            >
-              {link.label} ↗
-            </button>
-          ))}
         </div>
 
         {view.installed && (
@@ -381,20 +356,108 @@ function DetailsLayout(
               </section>
             )}
           </div>
-          {view.inspection && (
-            <aside className="mod-details-panel">
-              <h3 className="eyebrow">{tr("FROM ITS ARCHIVE")}</h3>
-              <dl className="mod-facts">
-                <InspectionFacts inspection={view.inspection} />
-              </dl>
-              <p className="muted small">
-                {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
-              </p>
-            </aside>
-          )}
+          <div className="mod-details-aside">
+            <InfoCard view={view} />
+            {view.inspection && (
+              <aside className="mod-details-panel">
+                <h3 className="eyebrow">{tr("FROM ITS ARCHIVE")}</h3>
+                <dl className="mod-facts">
+                  <InspectionFacts inspection={view.inspection} />
+                </dl>
+                <p className="muted small">
+                  {tr("Tags, game versions and other details are inferred from each upload and may be wrong.")}
+                </p>
+              </aside>
+            )}
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The facts in brief, then every link as a row of its own: the mod's homepage, forum, Discord… and
+ * its page on its source last. Each opens in the system's browser.
+ */
+function InfoCard({ view }: { view: DetailsView }) {
+  const links = [
+    ...uniqueLinks(view.links).filter((link) => link.url !== view.page.url),
+    { label: view.page.label, url: view.page.url },
+  ];
+  return (
+    <aside className="mod-details-info">
+      <dl>
+        <dt>{tr("TITLE")}</dt>
+        <dd>{view.title}</dd>
+        {view.facts.map((fact) => (
+          <React.Fragment key={fact.label}>
+            <dt>{fact.label}</dt>
+            <dd>{fact.value}</dd>
+          </React.Fragment>
+        ))}
+        <dt>{tr("SOURCE")}</dt>
+        <dd>{view.source}</dd>
+      </dl>
+      <div className="mod-details-links">
+        {links.map((link) => (
+          <button
+            type="button"
+            key={link.url}
+            className="mod-details-link"
+            data-tooltip={link.url}
+            onClick={() => openLink(link.url)}
+          >
+            <LinkIcon url={link.url} label={link.label} />
+            <span>{link.label}</span>
+            <span className="mod-details-link-out" aria-hidden="true">↗</span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+/** What a link is, by its address (or its label): a chat or forum, a video, code, documents, or a site. */
+function linkKind(url: string, label: string): "chat" | "video" | "code" | "docs" | "web" {
+  const host = (() => {
+    try {
+      return new URL(url).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+  const text = `${host} ${url} ${label}`.toLowerCase();
+  if (/discord|reddit|forum|board|phpbb|d2mods|phrozenkeep|vk\.com|telegram|t\.me/.test(text)) return "chat";
+  if (/youtube|youtu\.be|twitch|vimeo/.test(text)) return "video";
+  if (/github|gitlab|bitbucket|codeberg/.test(text)) return "code";
+  if (/docs\.google|wiki|fandom|readme|manual|guide/.test(text)) return "docs";
+  return "web";
+}
+
+/** A small glyph for a link's kind; brand marks are left to the label. */
+function LinkIcon({ url, label }: { url: string; label: string }) {
+  const kind = linkKind(url, label);
+  return (
+    <svg className="mod-details-link-icon" viewBox="0 0 16 16" aria-hidden="true">
+      {kind === "chat" ? <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /> : kind === "video"
+        ? (
+          <>
+            <rect x="1.5" y="3.5" width="13" height="9" rx="2" />
+            <path d="M6.5 6v4l3.5-2z" className="fill" />
+          </>
+        )
+        : kind === "code"
+        ? <path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" />
+        : kind === "docs"
+        ? <path d="M3.5 2.5h6l3 3v8h-9zM9.5 2.5v3h3M5.5 8.5h5M5.5 11h5" />
+        : (
+          <>
+            <circle cx="8" cy="8" r="6" />
+            <path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" />
+          </>
+        )}
+    </svg>
   );
 }
 
